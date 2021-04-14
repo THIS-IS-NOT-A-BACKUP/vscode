@@ -241,7 +241,7 @@ export abstract class NotebookCellAction<T = INotebookCellActionContext> extends
 		}
 	}
 
-	abstract runWithContext(accessor: ServicesAccessor, context: INotebookCellActionContext): Promise<void>;
+	abstract override runWithContext(accessor: ServicesAccessor, context: INotebookCellActionContext): Promise<void>;
 }
 
 const executeCellCondition = ContextKeyExpr.or(
@@ -1766,6 +1766,6 @@ CommandsRegistry.registerCommand('_resolveNotebookKernels', async (accessor, arg
 		description: provider.description,
 		detail: provider.detail,
 		isPreferred: provider.isPreferred,
-		preloads: provider.preloads?.map(preload => URI.revive(preload)) || []
+		preloads: provider.preloadUris,
 	}));
 });

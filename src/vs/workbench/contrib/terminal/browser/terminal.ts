@@ -170,6 +170,8 @@ export interface ITerminalService {
 	 */
 	getAvailableProfiles(): ITerminalProfile[];
 
+	getTabForInstance(instance: ITerminalInstance): ITerminalTab | undefined;
+
 	setContainers(panelContainer: HTMLElement, terminalContainer: HTMLElement): void;
 	manageWorkspaceShellPermissions(): void;
 
@@ -561,4 +563,9 @@ export interface ITerminalInstance {
 	 * @throws when called before xterm.js is ready.
 	 */
 	registerLinkProvider(provider: ITerminalExternalLinkProvider): IDisposable;
+
+	/**
+	 * Triggers a quick pick to rename this terminal.
+	 */
+	rename(): Promise<void>;
 }
