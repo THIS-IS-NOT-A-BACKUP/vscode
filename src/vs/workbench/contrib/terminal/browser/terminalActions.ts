@@ -619,15 +619,29 @@ export function registerTerminalActions() {
 	registerAction2(class extends Action2 {
 		constructor() {
 			super({
-				id: TERMINAL_COMMAND_ID.MANAGE_WORKSPACE_SHELL_PERMISSIONS,
-				title: { value: localize('workbench.action.terminal.manageWorkspaceShellPermissions', "Manage Workspace Shell Permissions"), original: 'Manage Workspace Shell Permissions' },
+				id: TERMINAL_COMMAND_ID.CONFIGURE_ACTIVE,
+				title: { value: localize('workbench.action.terminal.configureActive', "Configure Active Terminal"), original: 'Configure Active Terminal' },
 				f1: true,
 				category,
 				precondition: KEYBINDING_CONTEXT_TERMINAL_PROCESS_SUPPORTED
 			});
 		}
-		run(accessor: ServicesAccessor) {
-			accessor.get(ITerminalService).manageWorkspaceShellPermissions();
+		async run(accessor: ServicesAccessor) {
+			return accessor.get(ITerminalService).getActiveInstance()?.configure();
+		}
+	});
+	registerAction2(class extends Action2 {
+		constructor() {
+			super({
+				id: TERMINAL_COMMAND_ID.CHANGE_ICON,
+				title: { value: localize('workbench.action.terminal.changeIcon', "Change Icon"), original: 'Change Icon' },
+				f1: true,
+				category,
+				precondition: KEYBINDING_CONTEXT_TERMINAL_PROCESS_SUPPORTED
+			});
+		}
+		async run(accessor: ServicesAccessor) {
+			return accessor.get(ITerminalService).getActiveInstance()?.changeIcon();
 		}
 	});
 	registerAction2(class extends Action2 {
@@ -1557,11 +1571,8 @@ export function registerTerminalActions() {
 			if (quickSelectProfiles) {
 				const profile = quickSelectProfiles.find(profile => profile.profileName === profileSelection);
 				if (profile) {
-					const workspaceShellAllowed = terminalService.configHelper.checkIsProcessLaunchSafe(undefined, profile);
-					if (workspaceShellAllowed) {
-						const instance = terminalService.createTerminal(profile);
-						terminalService.setActiveInstance(instance);
-					}
+					const instance = terminalService.createTerminal(profile);
+					terminalService.setActiveInstance(instance);
 				} else {
 					console.warn(`No profile with name "${profileSelection}"`);
 				}
