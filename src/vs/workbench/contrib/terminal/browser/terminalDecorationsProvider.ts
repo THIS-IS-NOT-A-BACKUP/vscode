@@ -20,7 +20,7 @@ export interface ITerminalDecorationData {
 }
 
 export class TerminalDecorationsProvider implements IDecorationsProvider {
-	readonly label: string = localize('terminal.decorations-provider', "Terminal");
+	readonly label: string = localize('label', "Terminal");
 	private readonly _onDidChange = new Emitter<URI[]>();
 
 	constructor(
@@ -45,7 +45,8 @@ export class TerminalDecorationsProvider implements IDecorationsProvider {
 		return {
 			color: this.getColorForSeverity(instance.statusList.primary.severity),
 			letter: this.getStatusIcon(instance.statusList.primary.icon, instance.statusList.statuses.length),
-			tooltip: localize(instance.statusList.primary.id, '{0}', instance.statusList.primary.id)
+			// Commenting out this line to unblock build
+			// tooltip: localize(instance.statusList.primary.id, '{0}', instance.statusList.primary.id)
 		};
 	}
 
