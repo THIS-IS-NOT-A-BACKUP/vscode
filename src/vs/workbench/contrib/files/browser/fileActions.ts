@@ -443,7 +443,6 @@ export class GlobalCompareResourcesAction extends Action {
 		label: string,
 		@IQuickInputService private readonly quickInputService: IQuickInputService,
 		@IEditorService private readonly editorService: IEditorService,
-		@INotificationService private readonly notificationService: INotificationService,
 		@ITextModelService private readonly textModelService: ITextModelService
 	) {
 		super(id, label);
@@ -474,7 +473,6 @@ export class GlobalCompareResourcesAction extends Action {
 					}
 
 					// Otherwise stay on current resource
-					this.notificationService.info(nls.localize('fileToCompareNoFile', "Please select a file to compare with."));
 					return {
 						override: this.editorService.openEditor({
 							resource: activeResource,
@@ -491,8 +489,6 @@ export class GlobalCompareResourcesAction extends Action {
 
 			// Bring up quick access
 			this.quickInputService.quickAccess.show('', { itemActivation: ItemActivation.SECOND });
-		} else {
-			this.notificationService.info(nls.localize('openFileToCompare', "Open a file first to compare it with another file."));
 		}
 	}
 }
@@ -612,7 +608,6 @@ export class ShowActiveFileInExplorer extends Action {
 		id: string,
 		label: string,
 		@IEditorService private readonly editorService: IEditorService,
-		@INotificationService private readonly notificationService: INotificationService,
 		@ICommandService private readonly commandService: ICommandService
 	) {
 		super(id, label);
@@ -622,8 +617,6 @@ export class ShowActiveFileInExplorer extends Action {
 		const resource = EditorResourceAccessor.getOriginalUri(this.editorService.activeEditor, { supportSideBySide: SideBySideEditor.PRIMARY });
 		if (resource) {
 			this.commandService.executeCommand(REVEAL_IN_EXPLORER_COMMAND_ID, resource);
-		} else {
-			this.notificationService.info(nls.localize('openFileToShow', "Open a file first to show it in the explorer"));
 		}
 	}
 }
@@ -652,8 +645,6 @@ export class ShowOpenedFileInNewWindow extends Action {
 			} else {
 				this.notificationService.info(nls.localize('openFileToShowInNewWindow.unsupportedschema', "The active editor must contain an openable resource."));
 			}
-		} else {
-			this.notificationService.info(nls.localize('openFileToShowInNewWindow.nofile', "Open a file first to open in new window"));
 		}
 	}
 }
