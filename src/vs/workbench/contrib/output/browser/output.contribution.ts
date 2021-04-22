@@ -32,8 +32,7 @@ import { ContextKeyEqualsExpr, ContextKeyExpr } from 'vs/platform/contextkey/com
 import { Codicon } from 'vs/base/common/codicons';
 import { registerIcon } from 'vs/platform/theme/common/iconRegistry';
 import { CATEGORIES } from 'vs/workbench/common/actions';
-import { Extensions as EditorExtensions } from 'vs/workbench/services/editor/common/editorOverrideService';
-
+import { EditorExtensions } from 'vs/workbench/common/editor';
 
 // Register Service
 registerSingleton(IOutputService, OutputService);

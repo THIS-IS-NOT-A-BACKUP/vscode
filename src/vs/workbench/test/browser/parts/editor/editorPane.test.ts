@@ -5,7 +5,7 @@
 
 import * as assert from 'assert';
 import { EditorPane, EditorMemento } from 'vs/workbench/browser/parts/editor/editorPane';
-import { EditorInput, EditorOptions, IEditorInputSerializer, IEditorInputFactoryRegistry, Extensions as EditorExtensions } from 'vs/workbench/common/editor';
+import { EditorInput, EditorOptions, IEditorInputSerializer, IEditorInputFactoryRegistry, Extensions as EditorExtensions, EditorExtensions as Extensions } from 'vs/workbench/common/editor';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { Registry } from 'vs/platform/registry/common/platform';
 import { SyncDescriptor } from 'vs/platform/instantiation/common/descriptors';
@@ -21,8 +21,6 @@ import { IEditorModel } from 'vs/platform/editor/common/editor';
 import { DisposableStore, dispose } from 'vs/base/common/lifecycle';
 import { TestStorageService } from 'vs/workbench/test/common/workbenchTestServices';
 import { extUri } from 'vs/base/common/resources';
-import { Extensions } from 'vs/workbench/services/editor/common/editorOverrideService';
-
 
 const NullThemeService = new TestThemeService();
 
@@ -314,7 +312,7 @@ suite('Workbench EditorPane', () => {
 				super();
 			}
 			override get typeId() { return 'testEditorInputForMementoTest'; }
-			async override resolve(): Promise<IEditorModel | null> { return null; }
+			override async resolve(): Promise<IEditorModel | null> { return null; }
 
 			override matches(other: TestEditorInput): boolean {
 				return other && this.id === other.id && other instanceof TestEditorInput;
@@ -352,7 +350,7 @@ suite('Workbench EditorPane', () => {
 				super();
 			}
 			override get typeId() { return 'testEditorInputForMementoTest'; }
-			async override resolve(): Promise<IEditorModel | null> { return null; }
+			override async resolve(): Promise<IEditorModel | null> { return null; }
 
 			override matches(other: TestEditorInput): boolean {
 				return other && this.id === other.id && other instanceof TestEditorInput;

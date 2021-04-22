@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { localize } from 'vs/nls';
-import { EditorInput, EditorResourceAccessor, IEditorInput, IEditorInputFactoryRegistry, SideBySideEditorInput, Extensions as EditorInputExtensions } from 'vs/workbench/common/editor';
+import { EditorInput, EditorResourceAccessor, IEditorInput, IEditorInputFactoryRegistry, SideBySideEditorInput, Extensions as EditorInputExtensions, EditorExtensions } from 'vs/workbench/common/editor';
 import { SyncDescriptor } from 'vs/platform/instantiation/common/descriptors';
 import { Registry } from 'vs/platform/registry/common/platform';
 import { EditorPane } from 'vs/workbench/browser/parts/editor/editorPane';
@@ -18,7 +18,6 @@ import { IWorkingCopyService } from 'vs/workbench/services/workingCopy/common/wo
 import { NO_TYPE_ID } from 'vs/workbench/services/workingCopy/common/workingCopy';
 import { URI } from 'vs/workbench/workbench.web.api';
 import { IEditorGroup } from 'vs/workbench/services/editor/common/editorGroupsService';
-import { Extensions } from 'vs/workbench/services/editor/common/editorOverrideService';
 
 //#region Editors Registry
 
@@ -193,7 +192,7 @@ class EditorRegistry implements IEditorRegistry {
 	}
 }
 
-Registry.add(Extensions.Editors, new EditorRegistry());
+Registry.add(EditorExtensions.Editors, new EditorRegistry());
 
 //#endregion
 

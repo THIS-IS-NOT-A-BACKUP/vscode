@@ -5,7 +5,7 @@
 
 import { Dimension, $, clearNode } from 'vs/base/browser/dom';
 import { Registry } from 'vs/platform/registry/common/platform';
-import { EditorInput, EditorOptions, SideBySideEditorInput, IEditorControl, IEditorPane, IEditorOpenContext } from 'vs/workbench/common/editor';
+import { EditorInput, EditorOptions, SideBySideEditorInput, IEditorControl, IEditorPane, IEditorOpenContext, EditorExtensions } from 'vs/workbench/common/editor';
 import { EditorPane } from 'vs/workbench/browser/parts/editor/editorPane';
 import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
@@ -18,7 +18,6 @@ import { SplitView, Sizing, Orientation } from 'vs/base/browser/ui/splitview/spl
 import { Event, Relay, Emitter } from 'vs/base/common/event';
 import { IStorageService } from 'vs/platform/storage/common/storage';
 import { assertIsDefined } from 'vs/base/common/types';
-import { Extensions as EditorExtensions } from 'vs/workbench/services/editor/common/editorOverrideService';
 
 export class SideBySideEditor extends EditorPane {
 
@@ -95,7 +94,7 @@ export class SideBySideEditor extends EditorPane {
 		this.updateStyles();
 	}
 
-	async override setInput(newInput: EditorInput, options: EditorOptions | undefined, context: IEditorOpenContext, token: CancellationToken): Promise<void> {
+	override async setInput(newInput: EditorInput, options: EditorOptions | undefined, context: IEditorOpenContext, token: CancellationToken): Promise<void> {
 		const oldInput = this.input as SideBySideEditorInput;
 		await super.setInput(newInput, options, context, token);
 

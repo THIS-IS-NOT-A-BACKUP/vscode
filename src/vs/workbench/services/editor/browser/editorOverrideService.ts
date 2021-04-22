@@ -10,12 +10,11 @@ import { basename, extname, isEqual } from 'vs/base/common/resources';
 import { URI } from 'vs/base/common/uri';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
 import { EditorActivation, EditorOverride, IEditorOptions, ITextEditorOptions } from 'vs/platform/editor/common/editor';
-import { registerSingleton } from 'vs/platform/instantiation/common/extensions';
 import { EditorOptions, EditorResourceAccessor, IEditorInput, IEditorInputWithOptions, IEditorInputWithOptionsAndGroup } from 'vs/workbench/common/editor';
 import { IEditorGroup, IEditorGroupsService, preferredSideBySideGroupDirection } from 'vs/workbench/services/editor/common/editorGroupsService';
 import { Schemas } from 'vs/base/common/network';
 import { DiffEditorInput } from 'vs/workbench/common/editor/diffEditorInput';
-import { ContributedEditorInfo, ContributedEditorPriority, ContributionPoint, ContributionPointOptions, ContributionPoints, DEFAULT_EDITOR_ASSOCIATION, DiffEditorInputFactoryFunction, EditorAssociation, EditorAssociations, EditorInputFactoryFunction, editorsAssociationsSettingId, globMatchesResource, IEditorOverrideService, priorityToRank } from 'vs/workbench/services/editor/common/editorOverrideService';
+import { ContributedEditorInfo, ContributedEditorPriority, ContributionPointOptions, DEFAULT_EDITOR_ASSOCIATION, DiffEditorInputFactoryFunction, EditorAssociation, EditorAssociations, EditorInputFactoryFunction, editorsAssociationsSettingId, globMatchesResource, IEditorOverrideService, priorityToRank } from 'vs/workbench/services/editor/common/editorOverrideService';
 import { IKeyMods, IQuickInputService, IQuickPickItem, IQuickPickSeparator } from 'vs/platform/quickinput/common/quickInput';
 import { localize } from 'vs/nls';
 import { Codicon } from 'vs/base/common/codicons';
@@ -24,6 +23,16 @@ import { INotificationService, Severity } from 'vs/platform/notification/common/
 interface IContributedEditorInput extends IEditorInput {
 	viewType?: string;
 }
+
+interface ContributionPoint {
+	globPattern: string | glob.IRelativePattern,
+	editorInfo: ContributedEditorInfo,
+	options?: ContributionPointOptions,
+	createEditorInput: EditorInputFactoryFunction
+	createDiffEditorInput?: DiffEditorInputFactoryFunction
+}
+
+type ContributionPoints = Array<ContributionPoint>;
 
 export class EditorOverrideService extends Disposable implements IEditorOverrideService {
 	readonly _serviceBrand: undefined;
@@ -147,8 +156,8 @@ export class EditorOverrideService extends Disposable implements IEditorOverride
 		this.configurationService.updateValue(editorsAssociationsSettingId, currentAssociations);
 	}
 
-	private findMatchingContributions(resource: URI): ContributionPoints {
-		let contributions: ContributionPoints = [];
+	private findMatchingContributions(resource: URI): ContributionPoint[] {
+		let contributions: ContributionPoint[] = [];
 		// Then all glob patterns
 		for (const key of this._contributionPoints.keys()) {
 			const contributionPoints = this._contributionPoints.get(key)!;
@@ -461,5 +470,3 @@ export class EditorOverrideService extends Disposable implements IEditorOverride
 		return undefined;
 	}
 }
-
-registerSingleton(IEditorOverrideService, EditorOverrideService);
