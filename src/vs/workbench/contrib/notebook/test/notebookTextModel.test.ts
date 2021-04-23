@@ -227,6 +227,45 @@ suite('NotebookTextModel', () => {
 		);
 	});
 
+	test('multiple append output in one position', async function () {
+		await withTestNotebook(
+			[
+				['var a = 1;', 'javascript', CellKind.Code, [], {}],
+			],
+			(editor) => {
+				const textModel = editor.viewModel.notebookDocument;
+
+				// append
+				textModel.applyEdits([
+					{
+						index: 0,
+						editType: CellEditType.Output,
+						append: true,
+						outputs: [{
+							outputId: 'append1',
+							outputs: [{ mime: 'text/markdown', value: 'append 1' }]
+						}]
+					},
+					{
+						index: 0,
+						editType: CellEditType.Output,
+						append: true,
+						outputs: [{
+							outputId: 'append2',
+							outputs: [{ mime: 'text/markdown', value: 'append 2' }]
+						}]
+					}
+				], true, undefined, () => undefined, undefined);
+
+				assert.strictEqual(textModel.cells.length, 1);
+				assert.strictEqual(textModel.cells[0].outputs.length, 2);
+				const [first, second] = textModel.cells[0].outputs;
+				assert.strictEqual(first.outputId, 'append1');
+				assert.strictEqual(second.outputId, 'append2');
+			}
+		);
+	});
+
 	test('metadata', async function () {
 		await withTestNotebook(
 			[
@@ -479,7 +518,8 @@ suite('NotebookTextModel', () => {
 			['var b = 2;', 'javascript', CellKind.Code, [], {}]
 		], async (editor) => {
 			assert.strictEqual(editor.viewModel.getVersionId(), 0);
-			assert.strictEqual(editor.viewModel.getAlternativeId(), '0_0,1;1,1');
+			const firstAltVersion = '0_0,1;1,1';
+			assert.strictEqual(editor.viewModel.getAlternativeId(), firstAltVersion);
 			editor.viewModel.notebookDocument.applyEdits([
 				{
 					index: 0,
@@ -490,17 +530,18 @@ suite('NotebookTextModel', () => {
 				}
 			], true, undefined, () => undefined, undefined, true);
 			assert.strictEqual(editor.viewModel.getVersionId(), 1);
-			assert.notStrictEqual(editor.viewModel.getAlternativeId(), '0_0,1;1,1');
-			assert.strictEqual(editor.viewModel.getAlternativeId(), '1_0,1;1,1');
+			assert.notStrictEqual(editor.viewModel.getAlternativeId(), firstAltVersion);
+			const secondAltVersion = '1_0,1;1,1';
+			assert.strictEqual(editor.viewModel.getAlternativeId(), secondAltVersion);
 
 			await editor.viewModel.undo();
 			assert.strictEqual(editor.viewModel.getVersionId(), 2);
-			assert.strictEqual(editor.viewModel.getAlternativeId(), '0_0,1;1,1');
+			assert.strictEqual(editor.viewModel.getAlternativeId(), firstAltVersion);
 
 			await editor.viewModel.redo();
 			assert.strictEqual(editor.viewModel.getVersionId(), 3);
-			assert.notStrictEqual(editor.viewModel.getAlternativeId(), '0_0,1;1,1');
-			assert.strictEqual(editor.viewModel.getAlternativeId(), '1_0,1;1,1');
+			assert.notStrictEqual(editor.viewModel.getAlternativeId(), firstAltVersion);
+			assert.strictEqual(editor.viewModel.getAlternativeId(), secondAltVersion);
 
 			editor.viewModel.notebookDocument.applyEdits([
 				{
@@ -516,7 +557,7 @@ suite('NotebookTextModel', () => {
 
 			await editor.viewModel.undo();
 			assert.strictEqual(editor.viewModel.getVersionId(), 5);
-			assert.strictEqual(editor.viewModel.getAlternativeId(), '1_0,1;1,1');
+			assert.strictEqual(editor.viewModel.getAlternativeId(), secondAltVersion);
 
 		});
 	});

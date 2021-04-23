@@ -28,7 +28,7 @@ import { NotebookEditor } from 'vs/workbench/contrib/notebook/browser/notebookEd
 import { NotebookEditorInput } from 'vs/workbench/contrib/notebook/common/notebookEditorInput';
 import { INotebookService } from 'vs/workbench/contrib/notebook/common/notebookService';
 import { NotebookService } from 'vs/workbench/contrib/notebook/browser/notebookServiceImpl';
-import { CellKind, CellToolbarLocKey, CellUri, DisplayOrderKey, ExperimentalUseMarkdownRenderer, getCellUndoRedoComparisonKey, IResolvedNotebookEditorModel, NotebookDocumentBackupData, NotebookTextDiffEditorPreview, ShowCellStatusBarKey } from 'vs/workbench/contrib/notebook/common/notebookCommon';
+import { CellKind, CellToolbarLocKey, CellUri, DisplayOrderKey, ExperimentalUseMarkdownRenderer, getCellUndoRedoComparisonKey, IResolvedNotebookEditorModel, NotebookDocumentBackupData, NotebookTextDiffEditorPreview, NOTEBOOK_WORKING_COPY_TYPE_PREFIX, ShowCellStatusBarKey } from 'vs/workbench/contrib/notebook/common/notebookCommon';
 import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
 import { IUndoRedoService } from 'vs/platform/undoRedo/common/undoRedo';
 import { INotebookEditorModelResolverService } from 'vs/workbench/contrib/notebook/common/notebookEditorModelResolverService';
@@ -47,8 +47,10 @@ import { getFormatedMetadataJSON } from 'vs/workbench/contrib/notebook/browser/d
 import { NotebookModelResolverServiceImpl } from 'vs/workbench/contrib/notebook/common/notebookEditorModelResolverServiceImpl';
 import { INotebookKernelService } from 'vs/workbench/contrib/notebook/common/notebookKernelService';
 import { NotebookKernelService } from 'vs/workbench/contrib/notebook/browser/notebookKernelServiceImpl';
-import { NO_TYPE_ID } from 'vs/workbench/services/workingCopy/common/workingCopy';
+import { IWorkingCopyIdentifier, NO_TYPE_ID } from 'vs/workbench/services/workingCopy/common/workingCopy';
 import { EditorOverride } from 'vs/platform/editor/common/editor';
+import { IExtensionService } from 'vs/workbench/services/extensions/common/extensions';
+import { IWorkingCopyEditorService } from 'vs/workbench/services/workingCopy/common/workingCopyEditorService';
 
 // Editor Contribution
 import 'vs/workbench/contrib/notebook/browser/contrib/clipboard/notebookClipboard';
@@ -56,6 +58,7 @@ import 'vs/workbench/contrib/notebook/browser/contrib/coreActions';
 import 'vs/workbench/contrib/notebook/browser/contrib/find/findController';
 import 'vs/workbench/contrib/notebook/browser/contrib/fold/folding';
 import 'vs/workbench/contrib/notebook/browser/contrib/format/formatting';
+import 'vs/workbench/contrib/notebook/browser/contrib/layout/layoutActions';
 import 'vs/workbench/contrib/notebook/browser/contrib/marker/markerProvider';
 import 'vs/workbench/contrib/notebook/browser/contrib/outline/notebookOutline';
 import 'vs/workbench/contrib/notebook/browser/contrib/statusBar/statusBarProviders';
@@ -409,12 +412,44 @@ class NotebookFileTracker implements IWorkbenchContribution {
 	}
 }
 
+class NotebookWorkingCopyEditorHandler extends Disposable implements IWorkbenchContribution {
+
+	constructor(
+		@IInstantiationService private readonly _instantiationService: IInstantiationService,
+		@IWorkingCopyEditorService private readonly _workingCopyEditorService: IWorkingCopyEditorService,
+		@IExtensionService private readonly _extensionService: IExtensionService
+	) {
+		super();
+
+		this._installHandler();
+	}
+
+	private async _installHandler(): Promise<void> {
+		await this._extensionService.whenInstalledExtensionsRegistered();
+
+		this._register(this._workingCopyEditorService.registerHandler({
+			handles: async workingCopy => typeof this.getViewType(workingCopy) === 'string',
+			isOpen: async (workingCopy, editor) => editor instanceof NotebookEditorInput && editor.viewType === this.getViewType(workingCopy),
+			createEditor: async workingCopy => NotebookEditorInput.create(this._instantiationService, workingCopy.resource, this.getViewType(workingCopy)!)
+		}));
+	}
+
+	private getViewType(workingCopy: IWorkingCopyIdentifier): string | undefined {
+		if (workingCopy.typeId.startsWith(NOTEBOOK_WORKING_COPY_TYPE_PREFIX)) {
+			return workingCopy.typeId.substr(NOTEBOOK_WORKING_COPY_TYPE_PREFIX.length);
+		}
+
+		return undefined;
+	}
+}
+
 const workbenchContributionsRegistry = Registry.as<IWorkbenchContributionsRegistry>(WorkbenchExtensions.Workbench);
 workbenchContributionsRegistry.registerWorkbenchContribution(NotebookContribution, LifecyclePhase.Starting);
 workbenchContributionsRegistry.registerWorkbenchContribution(CellContentProvider, LifecyclePhase.Starting);
 workbenchContributionsRegistry.registerWorkbenchContribution(CellMetadataContentProvider, LifecyclePhase.Starting);
 workbenchContributionsRegistry.registerWorkbenchContribution(RegisterSchemasContribution, LifecyclePhase.Starting);
 workbenchContributionsRegistry.registerWorkbenchContribution(NotebookFileTracker, LifecyclePhase.Ready);
+workbenchContributionsRegistry.registerWorkbenchContribution(NotebookWorkingCopyEditorHandler, LifecyclePhase.Ready);
 
 registerSingleton(INotebookService, NotebookService);
 registerSingleton(INotebookEditorWorkerService, NotebookEditorWorkerServiceImpl);
@@ -440,9 +475,15 @@ configurationRegistry.registerConfiguration({
 		},
 		[CellToolbarLocKey]: {
 			description: nls.localize('notebook.cellToolbarLocation.description', "Where the cell toolbar should be shown, or whether it should be hidden."),
-			type: 'string',
-			enum: ['left', 'right', 'hidden'],
-			default: 'right'
+			type: 'object',
+			additionalProperties: {
+				markdownDescription: nls.localize('notebook.cellToolbarLocation.viewType', "Configure the cell toolbar position for for specific file types"),
+				type: 'string',
+				enum: ['left', 'right', 'hidden']
+			},
+			default: {
+				'default': 'right'
+			}
 		},
 		[ShowCellStatusBarKey]: {
 			description: nls.localize('notebook.showCellStatusbar.description', "Whether the cell status bar should be shown."),

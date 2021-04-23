@@ -197,8 +197,19 @@ export interface IFileEditorInputFactory {
 	isFileEditorInput(obj: unknown): obj is IFileEditorInput;
 }
 
+/**
+ * @deprecated obsolete
+ *
+ * TODO@bpasero remove this API and users once the generic backup restorer has been removed
+ */
 export interface ICustomEditorInputFactory {
+	/**
+	 * @deprecated obsolete
+	 */
 	createCustomEditorInput(resource: URI, instantiationService: IInstantiationService): Promise<IEditorInput>;
+	/**
+	 * @deprecated obsolete
+	 */
 	canResolveBackup(editorInput: IEditorInput, backupResource: URI): boolean;
 }
 
@@ -216,11 +227,15 @@ export interface IEditorInputFactoryRegistry {
 
 	/**
 	 * Registers the custom editor input factory to use for custom inputs.
+	 *
+	 * @deprecated obsolete
 	 */
 	registerCustomEditorInputFactory(scheme: string, factory: ICustomEditorInputFactory): void;
 
 	/**
 	 * Returns the custom editor input factory to use for custom inputs.
+	 *
+	 * @deprecated obsolete
 	 */
 	getCustomEditorInputFactory(scheme: string): ICustomEditorInputFactory | undefined;
 
@@ -520,6 +535,11 @@ export interface IEditorInput extends IDisposable {
 	 * Returns if this editor is disposed.
 	 */
 	isDisposed(): boolean;
+
+	/**
+	 * Returns a copy of the current editor input. Used when we can't just reuse the input
+	 */
+	copy?(): IEditorInput;
 }
 
 /**
@@ -621,6 +641,10 @@ export abstract class EditorInput extends Disposable implements IEditorInput {
 
 	matches(otherInput: unknown): boolean {
 		return this === otherInput;
+	}
+
+	copy(): IEditorInput {
+		return this;
 	}
 
 	isDisposed(): boolean {

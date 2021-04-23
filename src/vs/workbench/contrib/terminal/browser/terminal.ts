@@ -109,7 +109,7 @@ export interface ITerminalService {
 	 * Creates a terminal.
 	 * @param shell The shell launch configuration to use.
 	 */
-	createTerminal(shell?: IShellLaunchConfig): ITerminalInstance;
+	createTerminal(shell?: IShellLaunchConfig, cwd?: string | URI): ITerminalInstance;
 
 	/**
 	 * Creates a terminal.
@@ -156,6 +156,7 @@ export interface ITerminalService {
 	getFindState(): FindReplaceState;
 	findNext(): void;
 	findPrevious(): void;
+	focusTabsView(): void;
 
 	registerProcessSupport(isSupported: boolean): void;
 	/**
@@ -166,7 +167,7 @@ export interface ITerminalService {
 	 */
 	registerLinkProvider(linkProvider: ITerminalExternalLinkProvider): IDisposable;
 
-	showProfileQuickPick(type: 'setDefault' | 'createInstance'): Promise<void>;
+	showProfileQuickPick(type: 'setDefault' | 'createInstance', cwd?: string | URI): Promise<ITerminalInstance | undefined>;
 
 	getTabForInstance(instance: ITerminalInstance): ITerminalTab | undefined;
 
