@@ -56,7 +56,7 @@ export class TerminalTabsWidget extends WorkbenchObjectTree<ITerminalInstance>  
 				getHeight: () => TAB_HEIGHT,
 				getTemplateId: () => 'terminal.tabs'
 			},
-			[instantiationService.createInstance(TerminalTabsRenderer, container, instantiationService.createInstance(ResourceLabels, DEFAULT_LABELS_CONTAINER))],
+			[instantiationService.createInstance(TerminalTabsRenderer, container, instantiationService.createInstance(ResourceLabels, DEFAULT_LABELS_CONTAINER), () => this.getSelection())],
 			{
 				horizontalScrolling: false,
 				supportDynamicHeights: false,
@@ -91,9 +91,11 @@ export class TerminalTabsWidget extends WorkbenchObjectTree<ITerminalInstance>  
 			}
 		});
 
-		this.onMouseDblClick(e => {
+		this.onMouseDblClick(async () => {
 			if (this.getFocus().length === 0) {
-				this._terminalService.createTerminal();
+				const instance = this._terminalService.createTerminal();
+				this._terminalService.setActiveInstance(instance);
+				await instance.focusWhenReady();
 			}
 		});
 
@@ -126,11 +128,7 @@ export class TerminalTabsWidget extends WorkbenchObjectTree<ITerminalInstance>  
 		});
 
 		this.onDidChangeFocus(e => {
-			// catch the case when multiple elements are selected and one is focused (with a right click)
-			// that is not in the selection. this ensures that the menu will show the instance actions for the focused element
-			// and apply only to that
-			const selectionExcludesFocusedElement = e.elements.length === 1 && !this.getSelection().includes(e.elements[0]);
-			this._terminalTabsSingleSelectedContextKey.set(selectionExcludesFocusedElement);
+			this._terminalTabsSingleSelectedContextKey.set(e.elements.length === 1);
 		});
 
 		this.onDidOpen(async e => {
@@ -168,10 +166,12 @@ class TerminalTabsRenderer implements ITreeRenderer<ITerminalInstance, never, IT
 	constructor(
 		private readonly _container: HTMLElement,
 		private readonly _labels: ResourceLabels,
+		private readonly _getSelection: () => (ITerminalInstance | null)[],
 		@IInstantiationService private readonly _instantiationService: IInstantiationService,
 		@ITerminalService private readonly _terminalService: ITerminalService,
 		@IHoverService private readonly _hoverService: IHoverService,
-		@IConfigurationService private readonly _configurationService: IConfigurationService
+		@IConfigurationService private readonly _configurationService: IConfigurationService,
+		@IKeybindingService private readonly _keybindingService: IKeybindingService
 	) {
 	}
 
@@ -189,7 +189,8 @@ class TerminalTabsRenderer implements ITreeRenderer<ITerminalInstance, never, IT
 				showHover: options => {
 					return this._hoverService.showHover({
 						...options,
-						actions: context.hoverActions
+						actions: context.hoverActions,
+						hideOnHover: true
 					});
 				}
 			}
@@ -227,9 +228,19 @@ class TerminalTabsRenderer implements ITreeRenderer<ITerminalInstance, never, IT
 		const hasText = !this.shouldHideText();
 		template.element.classList.toggle('has-text', hasText);
 
+		let ariaLabel: string = '';
 		let prefix: string = '';
 		if (tab.terminalInstances.length > 1) {
-			const terminalIndex = tab?.terminalInstances.indexOf(instance);
+			const terminalIndex = tab.terminalInstances.indexOf(instance);
+			ariaLabel = localize({
+				key: 'splitTerminalAriaLabel',
+				comment: [
+					`The terminal's ID`,
+					`The terminal's title`,
+					`The terminal's split number`,
+					`The terminal group's total split number`
+				]
+			}, "Terminal {0} {1}, split {2} of {3}", instance.instanceId, instance.title, terminalIndex + 1, tab.terminalInstances.length);
 			if (terminalIndex === 0) {
 				prefix = `┌ `;
 			} else if (terminalIndex === tab!.terminalInstances.length - 1) {
@@ -237,6 +248,14 @@ class TerminalTabsRenderer implements ITreeRenderer<ITerminalInstance, never, IT
 			} else {
 				prefix = `├ `;
 			}
+		} else {
+			ariaLabel = localize({
+				key: 'terminalAriaLabel',
+				comment: [
+					`The terminal's ID`,
+					`The terminal's title`
+				]
+			}, "Terminal {0} {1}", instance.instanceId, instance.title);
 		}
 
 		let title = instance.title;
@@ -255,6 +274,7 @@ class TerminalTabsRenderer implements ITreeRenderer<ITerminalInstance, never, IT
 			const primaryStatus = instance.statusList.primary;
 			if (primaryStatus && primaryStatus.severity >= Severity.Warning) {
 				label = `${prefix}$(${primaryStatus.icon?.id || instance.icon?.id})`;
+				ariaLabel = '';
 			} else {
 				label = `${prefix}$(${instance.icon?.id})`;
 			}
@@ -278,6 +298,10 @@ class TerminalTabsRenderer implements ITreeRenderer<ITerminalInstance, never, IT
 				instance.dispose();
 			}
 		}));
+
+		// Set aria lable to expose split information to screen reader
+		template.label.element.querySelector('.label-name')?.setAttribute('aria-label', ariaLabel);
+
 		template.label.setResource({
 			resource: instance.resource,
 			name: label,
@@ -303,12 +327,33 @@ class TerminalTabsRenderer implements ITreeRenderer<ITerminalInstance, never, IT
 	}
 
 	fillActionBar(instance: ITerminalInstance, template: ITerminalTabEntryTemplate): void {
-		const split = new Action(TERMINAL_COMMAND_ID.SPLIT, localize('terminal.split', "Split"), ThemeIcon.asClassName(Codicon.splitHorizontal), true, async () => this._terminalService.splitInstance(instance));
-		const kill = new Action(TERMINAL_COMMAND_ID.KILL, localize('terminal.kill', "Kill"), ThemeIcon.asClassName(Codicon.trashcan), true, async () => instance.dispose(true));
+		// If the instance is within the selection, split all selected
+		const actions = [
+			new Action(TERMINAL_COMMAND_ID.SPLIT_INSTANCE, localize('terminal.split', "Split"), ThemeIcon.asClassName(Codicon.splitHorizontal), true, async () => {
+				this._runForSelectionOrInstance(instance, e => this._terminalService.splitInstance(e));
+			}),
+			new Action(TERMINAL_COMMAND_ID.KILL_INSTANCE, localize('terminal.kill', "Kill"), ThemeIcon.asClassName(Codicon.trashcan), true, async () => {
+				this._runForSelectionOrInstance(instance, e => e.dispose());
+			})
+		];
 		// TODO: Cache these in a way that will use the correct instance
 		template.actionBar.clear();
-		template.actionBar.push(split, { icon: true, label: false });
-		template.actionBar.push(kill, { icon: true, label: false });
+		for (const action of actions) {
+			template.actionBar.push(action, { icon: true, label: false, keybinding: this._keybindingService.lookupKeybinding(action.id)?.getLabel() });
+		}
+	}
+
+	private _runForSelectionOrInstance(instance: ITerminalInstance, callback: (instance: ITerminalInstance) => void) {
+		const selection = this._getSelection();
+		if (selection.includes(instance)) {
+			for (const s of selection) {
+				if (s) {
+					callback(s);
+				}
+			}
+		} else {
+			callback(instance);
+		}
 	}
 }
 
