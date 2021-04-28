@@ -78,7 +78,7 @@
 }
 
 .workspace-trust-editor .workspace-trust-features .workspace-trust-limitations {
-	min-height: 295px;
+	min-height: 315px;
 }
 
 .workspace-trust-editor.trusted .workspace-trust-features .workspace-trust-limitations.trusted {
@@ -165,10 +165,6 @@
 	overflow: hidden; /* buttons row should never overflow */
 	white-space: nowrap;
 	margin-top: auto;
-}
-
-.workspace-trust-editor.trusted .workspace-trust-features .workspace-trust-limitations.trusted .workspace-trust-buttons-row {
-	display: none;
 }
 
 /** Buttons */

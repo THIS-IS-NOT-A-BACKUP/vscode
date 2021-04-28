@@ -21,6 +21,7 @@ import { isSingleFolderWorkspaceIdentifier, isUntitledWorkspace, toWorkspaceIden
 import { IUriIdentityService } from 'vs/workbench/services/uriIdentity/common/uriIdentity';
 
 export const WORKSPACE_TRUST_ENABLED = 'security.workspace.trust.enabled';
+export const WORKSPACE_TRUST_STARTUP_PROMPT = 'security.workspace.trust.startupPrompt';
 export const WORKSPACE_TRUST_EXTENSION_SUPPORT = 'extensions.supportUntrustedWorkspaces';
 export const WORKSPACE_TRUST_STORAGE_KEY = 'content.trust.model.key';
 
@@ -77,6 +78,8 @@ export class WorkspaceTrustManagementService extends Disposable implements IWork
 			if (changeEvent.key === this.storageKey) {
 				this._trustStateInfo = this.loadTrustInfo();
 				this.currentTrustState = this.calculateWorkspaceTrust();
+
+				this._onDidChangeTrustedFolders.fire();
 			}
 		}));
 	}
@@ -109,7 +112,6 @@ export class WorkspaceTrustManagementService extends Disposable implements IWork
 
 	private saveTrustInfo(): void {
 		this.storageService.store(this.storageKey, JSON.stringify(this._trustStateInfo), StorageScope.GLOBAL, StorageTarget.MACHINE);
-		this._onDidChangeTrustedFolders.fire();
 	}
 
 	private calculateWorkspaceTrust(): boolean {
