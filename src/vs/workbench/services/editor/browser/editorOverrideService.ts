@@ -128,6 +128,10 @@ export class EditorOverrideService extends Disposable implements IEditorOverride
 				this.doHandleConflictingDefaults(selectedContribution.editorInfo.label, input.editor, input.options ?? options, group);
 			}, 1200);
 		}
+		// Dispose of the passed in editor as we will return a new one
+		if (!input?.editor.matches(editor)) {
+			editor.dispose();
+		}
 		// Add the group as we might've changed it with the quickpick
 		if (input) {
 			this.sendOverrideTelemetry(input.editor);
@@ -165,7 +169,7 @@ export class EditorOverrideService extends Disposable implements IEditorOverride
 		const matchingAssociations = associations.filter(association => association.filenamePattern && globMatchesResource(association.filenamePattern, resource));
 		const allContributions: ContributionPoints = this._allContributions;
 		// Ensure that the settings are valid contribution points
-		return matchingAssociations.filter(association => allContributions.find(c => c.editorInfo.id === association.filenamePattern));
+		return matchingAssociations.filter(association => allContributions.find(c => c.editorInfo.id === association.viewType));
 	}
 
 	private getAllUserAssociations(): EditorAssociations {
