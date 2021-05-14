@@ -768,9 +768,6 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 				return;
 			}
 
-			if (!this.shellLaunchConfig.executable) {
-				return;
-			}
 			const preparedPath = await this._terminalInstanceService.preparePathForTerminalAsync(path, this.shellLaunchConfig.executable, this.title, this.shellType, this.isRemote);
 
 			this.sendText(preparedPath, false);
@@ -1306,8 +1303,8 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 		this._processManager.relaunch(this._shellLaunchConfig, this._cols, this._rows, this._accessibilityService.isScreenReaderOptimized(), reset);
 
 		// Set title again as when creating the first process
-		if (this._shellLaunchConfig.name || this._shellLaunchConfig.executable) {
-			this.setTitle(this._shellLaunchConfig.name || this._shellLaunchConfig.executable, TitleEventSource.Api);
+		if (this._shellLaunchConfig.name) {
+			this.setTitle(this._shellLaunchConfig.name, TitleEventSource.Api);
 		}
 
 		this._xtermTypeAhead?.reset();
