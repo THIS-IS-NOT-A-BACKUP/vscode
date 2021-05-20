@@ -891,9 +891,16 @@ declare module 'vscode' {
 
 	export interface TerminalOptions {
 		/**
-		 * A codicon ID to associate with this terminal.
+		 * The icon path or {@link ThemeIcon} for the terminal.
 		 */
-		readonly icon?: string;
+		readonly iconPath?: Uri | { light: Uri; dark: Uri } | { id: string, color?: { id: string } };
+	}
+
+	export interface ExtensionTerminalOptions {
+		/**
+		 * A themeIcon, Uri, or light and dark Uris to use as the terminal tab icon
+		 */
+		readonly iconPath?: Uri | { light: Uri; dark: Uri } | { id: string, color?: { id: string } };
 	}
 
 	//#endregion
@@ -1676,6 +1683,17 @@ declare module 'vscode' {
 		 * @returns A promise that resolves to a {@link NotebookDocument notebook}
 		 */
 		export function openNotebookDocument(uri: Uri): Thenable<NotebookDocument>;
+
+		/**
+		 * Open an untitled notebook. The editor will prompt the user for a file
+		 * path when the document is to be saved.
+		 *
+		 * @see {@link openNotebookDocument}
+		 * @param viewType The notebook view type that should be used.
+		 * @param content The initial contents of the notebook.
+		 * @returns A promise that resolves to a {@link NotebookDocument notebook}.
+		 */
+		export function openNotebookDocument(viewType: string, content?: NotebookData): Thenable<NotebookDocument>;
 
 		/**
 		 * An event that is emitted when a {@link NotebookDocument notebook} is opened.

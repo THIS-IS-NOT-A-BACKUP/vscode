@@ -8,7 +8,7 @@ import { IDisposable } from 'vs/base/common/lifecycle';
 import { URI } from 'vs/base/common/uri';
 import { FindReplaceState } from 'vs/editor/contrib/find/findState';
 import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
-import { IOffProcessTerminalService, IShellLaunchConfig, ITerminalChildProcess, ITerminalDimensions, ITerminalLaunchError, ITerminalProfile, ITerminalTabLayoutInfoById, TerminalShellType } from 'vs/platform/terminal/common/terminal';
+import { IOffProcessTerminalService, IShellLaunchConfig, ITerminalChildProcess, ITerminalDimensions, ITerminalLaunchError, ITerminalProfile, ITerminalTabLayoutInfoById, TerminalIcon, TerminalShellType } from 'vs/platform/terminal/common/terminal';
 import { ICommandTracker, INavigationMode, IRemoteTerminalAttachTarget, IStartExtensionTerminalRequest, ITerminalConfigHelper, ITerminalProcessExtHostProxy, TitleEventSource } from 'vs/workbench/contrib/terminal/common/terminal';
 import type { Terminal as XTermTerminal } from 'xterm';
 import type { SearchAddon as XTermSearchAddon } from 'xterm-addon-search';
@@ -17,7 +17,6 @@ import type { WebglAddon as XTermWebglAddon } from 'xterm-addon-webgl';
 import { ITerminalStatusList } from 'vs/workbench/contrib/terminal/browser/terminalStatusList';
 import { ICompleteTerminalConfiguration } from 'vs/workbench/contrib/terminal/common/remoteTerminalChannel';
 import { Orientation } from 'vs/base/browser/ui/splitview/splitview';
-import { ThemeIcon } from 'vs/platform/theme/common/themeService';
 
 export const ITerminalService = createDecorator<ITerminalService>('terminalService');
 export const ITerminalInstanceService = createDecorator<ITerminalInstanceService>('terminalInstanceService');
@@ -77,6 +76,7 @@ export interface ITerminalGroup {
 	attachToElement(element: HTMLElement): void;
 	addInstance(instance: ITerminalInstance): void;
 	removeInstance(instance: ITerminalInstance): void;
+	moveInstance(instance: ITerminalInstance, index: number): void;
 	setVisible(visible: boolean): void;
 	layout(width: number, height: number): void;
 	addDisposable(disposable: IDisposable): void;
@@ -150,6 +150,11 @@ export interface ITerminalService {
 	splitInstance(instance: ITerminalInstance, profile: ITerminalProfile): ITerminalInstance | null;
 	unsplitInstance(instance: ITerminalInstance): void;
 	joinInstances(instances: ITerminalInstance[]): void;
+	/**
+	 * Moves a terminal instance's group to the target instance group's position.
+	 */
+	moveGroup(source: ITerminalInstance, target: ITerminalInstance): void;
+	moveInstance(source: ITerminalInstance, target: ITerminalInstance, side: 'left' | 'right'): void;
 
 	/**
 	 * Perform an action with the active terminal instance, if the terminal does
@@ -261,7 +266,7 @@ export interface ITerminalInstance {
 	readonly rows: number;
 	readonly maxCols: number;
 	readonly maxRows: number;
-	readonly icon?: ThemeIcon;
+	readonly icon?: TerminalIcon;
 	readonly color?: string;
 
 	readonly statusList: ITerminalStatusList;
@@ -316,6 +321,11 @@ export interface ITerminalInstance {
 	onMaximumDimensionsChanged: Event<void>;
 
 	onFocus: Event<ITerminalInstance>;
+
+	/**
+	 * An event that fires when a terminal is dropped on this instance via drag and drop.
+	 */
+	onRequestAddInstanceToGroup: Event<IRequestAddInstanceToGroupEvent>;
 
 	/**
 	 * Attach a listener to the raw data stream coming from the pty, including ANSI escape
@@ -593,6 +603,11 @@ export interface ITerminalInstance {
 	 * Triggers a quick pick to change the color of the associated terminal tab icon.
 	 */
 	changeColor(): Promise<void>;
+}
+
+export interface IRequestAddInstanceToGroupEvent {
+	uri: URI;
+	side: 'left' | 'right'
 }
 
 export const enum LinuxDistro {

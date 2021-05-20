@@ -12,7 +12,7 @@ import { ILogService } from 'vs/platform/log/common/log';
 import { IExtHostApiDeprecationService } from 'vs/workbench/api/common/extHostApiDeprecationService';
 import { serializeWebviewMessage, deserializeWebviewMessage } from 'vs/workbench/api/common/extHostWebviewMessaging';
 import { IExtHostWorkspace } from 'vs/workbench/api/common/extHostWorkspace';
-import { asWebviewUri, WebviewInitData } from 'vs/workbench/api/common/shared/webview';
+import { asWebviewUri, webviewGenericCspSource, WebviewInitData } from 'vs/workbench/api/common/shared/webview';
 import type * as vscode from 'vscode';
 import * as extHostProtocol from './extHost.protocol';
 
@@ -69,12 +69,14 @@ export class ExtHostWebview implements vscode.Webview {
 
 	public asWebviewUri(resource: vscode.Uri): vscode.Uri {
 		this.#hasCalledAsWebviewUri = true;
-		return asWebviewUri(this.#initData, this.#handle, resource);
+		const remoteAuthority = this.#initData.remote.isRemote
+			? this.#initData.remote.authority
+			: undefined;
+		return asWebviewUri(this.#handle, resource, remoteAuthority);
 	}
 
 	public get cspSource(): string {
-		return this.#initData.webviewCspSource
-			.replace('{{uuid}}', this.#handle);
+		return webviewGenericCspSource;
 	}
 
 	public get html(): string {

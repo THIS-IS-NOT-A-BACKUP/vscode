@@ -418,7 +418,7 @@ export class TerminalService implements ITerminalService {
 		if (!this.configHelper.config.enablePersistentSessions || !instance || !instance.persistentProcessId || !instance.icon) {
 			return;
 		}
-		this._offProcessTerminalService?.updateIcon(instance.persistentProcessId, instance.icon.id, instance.color);
+		this._offProcessTerminalService?.updateIcon(instance.persistentProcessId, instance.icon, instance.color);
 	}
 
 	private _removeGroup(group: ITerminalGroup): void {
@@ -687,6 +687,38 @@ export class TerminalService implements ITerminalService {
 		}
 	}
 
+	moveGroup(source: ITerminalInstance, target: ITerminalInstance): void {
+		const sourceGroup = this.getGroupForInstance(source);
+		const targetGroup = this.getGroupForInstance(target);
+		if (!sourceGroup || !targetGroup) {
+			return;
+		}
+		const sourceGroupIndex = this._terminalGroups.indexOf(sourceGroup);
+		const targetGroupIndex = this._terminalGroups.indexOf(targetGroup);
+		this._terminalGroups.splice(sourceGroupIndex, 1);
+		this._terminalGroups.splice(targetGroupIndex, 0, sourceGroup);
+		this._onInstancesChanged.fire();
+	}
+
+	moveInstance(source: ITerminalInstance, target: ITerminalInstance, side: 'left' | 'right'): void {
+		const sourceGroup = this.getGroupForInstance(source);
+		const targetGroup = this.getGroupForInstance(target);
+		if (!sourceGroup || !targetGroup) {
+			return;
+		}
+
+		// Move from the source group to the target group
+		if (sourceGroup !== targetGroup) {
+			// Move groups
+			sourceGroup.removeInstance(source);
+			targetGroup.addInstance(source);
+		}
+
+		// Rearrange within the target group
+		const index = targetGroup.terminalInstances.indexOf(target) + (side === 'right' ? 1 : 0);
+		targetGroup.moveInstance(source, index);
+	}
+
 	protected _initInstanceListeners(instance: ITerminalInstance): void {
 		instance.addDisposable(instance.onDisposed(this._onInstanceDisposed.fire, this._onInstanceDisposed));
 		instance.addDisposable(instance.onTitleChanged(this._onInstanceTitleChanged.fire, this._onInstanceTitleChanged));
@@ -703,6 +735,12 @@ export class TerminalService implements ITerminalService {
 		}));
 		instance.addDisposable(instance.onMaximumDimensionsChanged(() => this._onInstanceMaximumDimensionsChanged.fire(instance)));
 		instance.addDisposable(instance.onFocus(this._onActiveInstanceChanged.fire, this._onActiveInstanceChanged));
+		instance.addDisposable(instance.onRequestAddInstanceToGroup(e => {
+			const sourceInstance = this.getInstanceFromId(parseInt(e.uri.path));
+			if (sourceInstance) {
+				this.moveInstance(sourceInstance, instance, e.side);
+			}
+		}));
 	}
 
 	registerProcessSupport(isSupported: boolean): void {
@@ -926,7 +964,7 @@ export class TerminalService implements ITerminalService {
 			iconClass: ThemeIcon.asClassName(configureTerminalProfileIcon),
 			tooltip: nls.localize('createQuickLaunchProfile', "Configure Terminal Profile")
 		}];
-		const icon = profile.icon ? (iconRegistry.get(profile.icon) || Codicon.terminal) : Codicon.terminal;
+		const icon = (profile.icon && ThemeIcon.isThemeIcon(profile.icon)) ? profile.icon : Codicon.terminal;
 		const label = `$(${icon.id}) ${profile.profileName}`;
 		if (profile.args) {
 			if (typeof profile.args === 'string') {
