@@ -30,6 +30,7 @@ import { preloadsScriptStr, RendererMetadata } from 'vs/workbench/contrib/notebo
 import { transformWebviewThemeVars } from 'vs/workbench/contrib/notebook/browser/view/renderers/webviewThemeMapping';
 import { MarkdownCellViewModel } from 'vs/workbench/contrib/notebook/browser/viewModel/markdownCellViewModel';
 import { INotebookKernel, INotebookRendererInfo } from 'vs/workbench/contrib/notebook/common/notebookCommon';
+import { IScopedRendererMessaging } from 'vs/workbench/contrib/notebook/common/notebookRendererMessagingService';
 import { INotebookService } from 'vs/workbench/contrib/notebook/common/notebookService';
 import { IWebviewService, WebviewContentPurpose, WebviewElement } from 'vs/workbench/contrib/webview/browser/webview';
 import { IWorkbenchEnvironmentService } from 'vs/workbench/services/environment/common/environmentService';
@@ -280,6 +281,12 @@ export interface ICustomKernelMessage extends BaseToWebviewMessage {
 	message: unknown;
 }
 
+export interface ICustomRendererMessage extends BaseToWebviewMessage {
+	type: 'customRendererMessage';
+	rendererId: string;
+	message: unknown;
+}
+
 export interface ICreateMarkdownMessage {
 	type: 'createMarkdownPreview',
 	cell: IMarkdownCellInitialization;
@@ -343,6 +350,7 @@ export type FromWebviewMessage =
 	| IScrollAckMessage
 	| IBlurOutputMessage
 	| ICustomKernelMessage
+	| ICustomRendererMessage
 	| IClickedDataUrlMessage
 	| IClickMarkdownPreviewMessage
 	| IContextMenuMarkdownPreviewMessage
@@ -371,6 +379,7 @@ export type ToWebviewMessage =
 	| IUpdateControllerPreloadsMessage
 	| IUpdateDecorationsMessage
 	| ICustomKernelMessage
+	| ICustomRendererMessage
 	| ICreateMarkdownMessage
 	| IDeleteMarkdownMessage
 	| IShowMarkdownMessage
@@ -422,9 +431,9 @@ export class BackLayerWebView<T extends ICommonCellInfo> extends Disposable {
 	private _currentKernel?: INotebookKernel;
 
 	constructor(
-		public notebookEditor: ICommonNotebookEditor,
-		public id: string,
-		public documentUri: URI,
+		public readonly notebookEditor: ICommonNotebookEditor,
+		public readonly id: string,
+		public readonly documentUri: URI,
 		public options: {
 			outputNodePadding: number,
 			outputNodeLeftPadding: number,
@@ -434,6 +443,7 @@ export class BackLayerWebView<T extends ICommonCellInfo> extends Disposable {
 			rightMargin: number,
 			runGutter: number,
 		},
+		private readonly rendererMessaging: IScopedRendererMessaging | undefined,
 		@IWebviewService readonly webviewService: IWebviewService,
 		@IOpenerService readonly openerService: IOpenerService,
 		@INotebookService private readonly notebookService: INotebookService,
@@ -452,6 +462,17 @@ export class BackLayerWebView<T extends ICommonCellInfo> extends Disposable {
 
 		this.element.style.height = '1400px';
 		this.element.style.position = 'absolute';
+
+		if (rendererMessaging) {
+			this._register(rendererMessaging.onDidReceiveMessage(evt => {
+				this._sendMessageToWebview({
+					__vscode_notebook_message: true,
+					type: 'customRendererMessage',
+					rendererId: evt.rendererId,
+					message: evt.message
+				});
+			}));
+		}
 	}
 
 	updateOptions(options: {
@@ -760,13 +781,13 @@ export class BackLayerWebView<T extends ICommonCellInfo> extends Disposable {
 				entrypoint,
 				mimeTypes: renderer.mimeTypes,
 				extends: renderer.extends,
+				messaging: !!renderer.messaging,
 			};
 		});
 	}
 
 	private asWebviewUri(uri: URI, fromExtension: URI | undefined) {
-		const remoteAuthority = fromExtension?.scheme === Schemas.vscodeRemote ? fromExtension.authority : undefined;
-		return asWebviewUri(this.id, uri, remoteAuthority);
+		return asWebviewUri(uri, fromExtension?.scheme === Schemas.vscodeRemote ? { isRemote: true, authority: fromExtension.authority } : undefined);
 	}
 
 	postKernelMessage(message: any) {
@@ -864,6 +885,10 @@ var requirejs = (function() {
 
 			if (!link) {
 				return;
+			}
+
+			if (matchesScheme(link, Schemas.command)) {
+				console.warn('Command links are deprecated and will be removed, use messag passing instead: https://github.com/microsoft/vscode/issues/123601');
 			}
 
 			if (matchesScheme(link, Schemas.http) || matchesScheme(link, Schemas.https) || matchesScheme(link, Schemas.mailto)
@@ -988,6 +1013,11 @@ var requirejs = (function() {
 				case 'customKernelMessage':
 					{
 						this._onMessage.fire({ message: data.message });
+						break;
+					}
+				case 'customRendererMessage':
+					{
+						this.rendererMessaging?.postMessage(data.rendererId, data.message);
 						break;
 					}
 				case 'clickMarkdownPreview':
@@ -1158,7 +1188,6 @@ var requirejs = (function() {
 			purpose: WebviewContentPurpose.NotebookRenderer,
 			enableFindWidget: false,
 			transformCssVariables: transformWebviewThemeVars,
-			serviceWorkerFetchIgnoreSubdomain: true
 		}, {
 			allowMultipleAPIAcquire: true,
 			allowScripts: true,

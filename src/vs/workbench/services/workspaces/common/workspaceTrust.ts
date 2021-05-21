@@ -28,6 +28,7 @@ import { IUriIdentityService } from 'vs/workbench/services/uriIdentity/common/ur
 
 export const WORKSPACE_TRUST_ENABLED = 'security.workspace.trust.enabled';
 export const WORKSPACE_TRUST_STARTUP_PROMPT = 'security.workspace.trust.startupPrompt';
+export const WORKSPACE_TRUST_UNTRUSTED_FILES = 'security.workspace.trust.untrustedFiles';
 export const WORKSPACE_TRUST_EMPTY_WINDOW = 'security.workspace.trust.emptyWindow';
 export const WORKSPACE_TRUST_EXTENSION_SUPPORT = 'extensions.supportUntrustedWorkspaces';
 export const WORKSPACE_TRUST_STORAGE_KEY = 'content.trust.model.key';
@@ -171,8 +172,11 @@ export class WorkspaceTrustManagementService extends Disposable implements IWork
 		return workspaceUris;
 	}
 
-	private async updateWorkspaceTrust(): Promise<void> {
-		const trusted = this.calculateWorkspaceTrust();
+	private async updateWorkspaceTrust(trusted?: boolean): Promise<void> {
+		if (trusted === undefined) {
+			trusted = this.calculateWorkspaceTrust();
+		}
+
 		if (this.isWorkpaceTrusted() === trusted) { return; }
 
 		// Update workspace trust
@@ -286,21 +290,19 @@ export class WorkspaceTrustManagementService extends Disposable implements IWork
 		return this._trustState.isTrusted ?? false;
 	}
 
-	setParentFolderTrust(trusted: boolean): void {
+	async setParentFolderTrust(trusted: boolean): Promise<void> {
 		const workspaceIdentifier = toWorkspaceIdentifier(this.workspaceService.getWorkspace());
 		if (isSingleFolderWorkspaceIdentifier(workspaceIdentifier) && workspaceIdentifier.uri.scheme === Schemas.file) {
 			const { parentPath } = splitName(workspaceIdentifier.uri.fsPath);
 
-			this.setUrisTrust([URI.file(parentPath)], trusted);
+			await this.setUrisTrust([URI.file(parentPath)], trusted);
 		}
 	}
 
 	async setWorkspaceTrust(trusted: boolean): Promise<void> {
 		// Empty workspace
 		if (this.workspaceService.getWorkbenchState() === WorkbenchState.EMPTY) {
-			this._trustState.isTrusted = trusted;
-			await this.updateWorkspaceTrust();
-
+			await this.updateWorkspaceTrust(trusted);
 			return;
 		}
 
@@ -353,6 +355,7 @@ export class WorkspaceTrustRequestService extends Disposable implements IWorkspa
 	constructor(
 		@IContextKeyService contextKeyService: IContextKeyService,
 		@IDialogService private readonly dialogService: IDialogService,
+		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@IWorkspaceContextService private readonly workspaceService: IWorkspaceContextService,
 		@IWorkspaceTrustManagementService private readonly workspaceTrustManagementService: IWorkspaceTrustManagementService
 	) {
@@ -372,6 +375,14 @@ export class WorkspaceTrustRequestService extends Disposable implements IWorkspa
 	private set trusted(trusted: boolean) {
 		this._trusted = trusted;
 		this._ctxWorkspaceTrustState.set(trusted);
+	}
+
+	private get untrustedFilesSetting(): 'prompt' | 'open' | 'newWindow' {
+		return this.configurationService.getValue(WORKSPACE_TRUST_UNTRUSTED_FILES);
+	}
+
+	private set untrustedFilesSetting(value: 'prompt' | 'open' | 'newWindow') {
+		this.configurationService.updateValue(WORKSPACE_TRUST_UNTRUSTED_FILES, value);
 	}
 
 	private resolveRequest(trusted?: boolean): void {
@@ -418,6 +429,17 @@ export class WorkspaceTrustRequestService extends Disposable implements IWorkspa
 			return WorkspaceTrustUriResponse.Open;
 		}
 
+		// If user has setting, don't need to ask
+		if (this.untrustedFilesSetting !== 'prompt') {
+			if (this.untrustedFilesSetting === 'newWindow') {
+				return WorkspaceTrustUriResponse.OpenInNewWindow;
+			}
+
+			if (this.untrustedFilesSetting === 'open') {
+				return WorkspaceTrustUriResponse.Open;
+			}
+		}
+
 		// If we already asked the user, don't need to ask again
 		if (this.workspaceTrustManagementService.acceptsOutOfWorkspaceFiles) {
 			return WorkspaceTrustUriResponse.Open;
@@ -427,23 +449,41 @@ export class WorkspaceTrustRequestService extends Disposable implements IWorkspa
 			this.workspaceService.getWorkbenchState() !== WorkbenchState.EMPTY ?
 				localize('openLooseFileWorkspaceDetails', "You are trying to open untrusted files in a workspace which is trusted.") :
 				localize('openLooseFileWindowDetails', "You are trying to open untrusted files in a window which is trusted."),
-			localize('openLooseFileLearnMore', "If you don't trust the authors of these files, we recommend to open them in a new Restricted Mode window as the files may be malicious. See [our docs](https://aka.ms/vscode-workspace-trust) to learn more.")
+			localize('openLooseFileLearnMore', "If you don't trust the authors of these files, we recommend to open them in Restricted Mode in a new window as the files may be malicious. See [our docs](https://aka.ms/vscode-workspace-trust) to learn more.")
 		];
 
-		const result = await this.dialogService.show(Severity.Info, localize('openLooseFileMesssage', "Do you trust the authors of these files?"), [localize('open', "Open"), localize('newWindow', "Open in New Restricted Mode Window"), localize('cancel', "Cancel")], {
+		const result = await this.dialogService.show(Severity.Info, localize('openLooseFileMesssage', "Do you trust the authors of these files?"), [localize('open', "Open"), localize('newWindow', "Open in Restricted Mode"), localize('cancel', "Cancel")], {
 			cancelId: 2,
+			checkbox: {
+				label: localize('openLooseFileWorkspaceCheckbox', "Remember my decision for all workspaces"),
+				checked: false
+			},
 			custom: {
 				icon: Codicon.shield,
 				markdownDetails: markdownDetails.map(md => { return { markdown: new MarkdownString(md) }; })
 			}
 		});
 
+		const saveResponseIfChecked = (response: WorkspaceTrustUriResponse, checked: boolean) => {
+			if (checked) {
+				if (response === WorkspaceTrustUriResponse.Open) {
+					this.untrustedFilesSetting = 'open';
+				}
+
+				if (response === WorkspaceTrustUriResponse.OpenInNewWindow) {
+					this.untrustedFilesSetting = 'newWindow';
+				}
+			}
+
+			return response;
+		};
+
 		switch (result.choice) {
 			case 0:
 				this.workspaceTrustManagementService.acceptsOutOfWorkspaceFiles = true;
-				return WorkspaceTrustUriResponse.Open;
+				return saveResponseIfChecked(WorkspaceTrustUriResponse.Open, !!result.checkboxChecked);
 			case 1:
-				return WorkspaceTrustUriResponse.OpenInNewWindow;
+				return saveResponseIfChecked(WorkspaceTrustUriResponse.OpenInNewWindow, !!result.checkboxChecked);
 			default:
 				return WorkspaceTrustUriResponse.Cancel;
 		}

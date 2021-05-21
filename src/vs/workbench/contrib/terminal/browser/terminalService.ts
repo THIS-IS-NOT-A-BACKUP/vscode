@@ -294,12 +294,8 @@ export class TerminalService implements ITerminalService {
 		// The state must be updated when the terminal is relaunched, otherwise the persistent
 		// terminal ID will be stale and the process will be leaked.
 		this.onInstanceProcessIdReady(() => this._saveState());
-		this.onInstanceTitleChanged(instance => {
-			this._updateTitle(instance);
-		});
-		this.onInstanceIconChanged(instance => {
-			this._updateIcon(instance);
-		});
+		this.onInstanceTitleChanged(instance => this._updateTitle(instance));
+		this.onInstanceIconChanged(instance => this._updateIcon(instance));
 	}
 
 	private _handleInstanceContextKeys(): void {
@@ -410,7 +406,7 @@ export class TerminalService implements ITerminalService {
 		if (!this.configHelper.config.enablePersistentSessions || !instance || !instance.persistentProcessId || !instance.title) {
 			return;
 		}
-		this._offProcessTerminalService?.updateTitle(instance.persistentProcessId, instance.title);
+		this._offProcessTerminalService?.updateTitle(instance.persistentProcessId, instance.title, instance.titleSource);
 	}
 
 	@debounce(500)
@@ -1040,7 +1036,7 @@ export class TerminalService implements ITerminalService {
 
 		// Add welcome message and title annotation for local terminals launched within remote or
 		// virtual workspaces
-		if (typeof shellLaunchConfig.cwd === 'string' || shellLaunchConfig.cwd?.scheme === Schemas.file) {
+		if (typeof shellLaunchConfig.cwd !== 'string' && shellLaunchConfig.cwd?.scheme === Schemas.file) {
 			if (VirtualWorkspaceContext.getValue(this._contextKeyService)) {
 				shellLaunchConfig.initialText = formatMessageForTerminal(nls.localize('localTerminalVirtualWorkspace', "⚠ : This shell is open to a \x1b[3mlocal\x1b[23m folder, NOT to the virtual folder"), true);
 				shellLaunchConfig.description = nls.localize('localTerminalDescription', "Local");

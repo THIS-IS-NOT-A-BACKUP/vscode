@@ -914,6 +914,10 @@ export interface MainThreadNotebookKernelsShape extends IDisposable {
 	$updateNotebookPriority(handle: number, uri: UriComponents, value: number | undefined): void;
 }
 
+export interface MainThreadNotebookRenderersShape extends IDisposable {
+	$postMessage(editorId: string, rendererId: string, message: unknown): void;
+}
+
 export interface MainThreadUrlsShape extends IDisposable {
 	$registerUriHandler(handle: number, extensionId: ExtensionIdentifier): Promise<void>;
 	$unregisterUriHandler(handle: number): Promise<void>;
@@ -1293,6 +1297,7 @@ export type IResolveAuthorityResult = IResolveAuthorityErrorResult | IResolveAut
 
 export interface ExtHostExtensionServiceShape {
 	$resolveAuthority(remoteAuthority: string, resolveAttempt: number): Promise<IResolveAuthorityResult>;
+	$getCanonicalURI(remoteAuthority: string, uri: UriComponents): Promise<UriComponents>;
 	$startExtensionHost(enabledExtensionIds: ExtensionIdentifier[]): Promise<void>;
 	$extensionTestsExecute(): Promise<number>;
 	$extensionTestsExit(code: number): Promise<void>;
@@ -1915,6 +1920,10 @@ export interface ExtHostNotebookShape extends ExtHostNotebookDocumentsAndEditors
 	$notebookToData(handle: number, data: NotebookDataDto, token: CancellationToken): Promise<VSBuffer>;
 }
 
+export interface ExtHostNotebookRenderersShape {
+	$postRendererMessage(editorId: string, rendererId: string, message: unknown): void;
+}
+
 export interface ExtHostNotebookDocumentsAndEditorsShape {
 	$acceptDocumentAndEditorsDelta(delta: INotebookDocumentsAndEditorsDelta): void;
 }
@@ -2068,6 +2077,7 @@ export const MainContext = {
 	MainThreadNotebookDocuments: createMainId<MainThreadNotebookDocumentsShape>('MainThreadNotebookDocumentsShape'),
 	MainThreadNotebookEditors: createMainId<MainThreadNotebookEditorsShape>('MainThreadNotebookEditorsShape'),
 	MainThreadNotebookKernels: createMainId<MainThreadNotebookKernelsShape>('MainThreadNotebookKernels'),
+	MainThreadNotebookRenderers: createMainId<MainThreadNotebookRenderersShape>('MainThreadNotebookRenderers'),
 	MainThreadTheming: createMainId<MainThreadThemingShape>('MainThreadTheming'),
 	MainThreadTunnelService: createMainId<MainThreadTunnelServiceShape>('MainThreadTunnelService'),
 	MainThreadTimeline: createMainId<MainThreadTimelineShape>('MainThreadTimeline'),
@@ -2115,6 +2125,7 @@ export const ExtHostContext = {
 	ExtHosLabelService: createMainId<ExtHostLabelServiceShape>('ExtHostLabelService'),
 	ExtHostNotebook: createMainId<ExtHostNotebookShape>('ExtHostNotebook'),
 	ExtHostNotebookKernels: createMainId<ExtHostNotebookKernelsShape>('ExtHostNotebookKernels'),
+	ExtHostNotebookRenderers: createMainId<ExtHostNotebookRenderersShape>('ExtHostNotebookRenderers'),
 	ExtHostTheming: createMainId<ExtHostThemingShape>('ExtHostTheming'),
 	ExtHostTunnelService: createMainId<ExtHostTunnelServiceShape>('ExtHostTunnelService'),
 	ExtHostAuthentication: createMainId<ExtHostAuthenticationShape>('ExtHostAuthentication'),

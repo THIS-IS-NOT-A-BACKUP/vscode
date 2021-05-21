@@ -25,7 +25,7 @@ import { IStatusbarEntry, IStatusbarEntryAccessor, IStatusbarService, StatusbarA
 import { IEditorRegistry, EditorDescriptor } from 'vs/workbench/browser/editor';
 import { shieldIcon, WorkspaceTrustEditor } from 'vs/workbench/contrib/workspace/browser/workspaceTrustEditor';
 import { WorkspaceTrustEditorInput } from 'vs/workbench/services/workspaces/browser/workspaceTrustEditorInput';
-import { isWorkspaceTrustEnabled, WORKSPACE_TRUST_EMPTY_WINDOW, WORKSPACE_TRUST_ENABLED, WORKSPACE_TRUST_STARTUP_PROMPT } from 'vs/workbench/services/workspaces/common/workspaceTrust';
+import { isWorkspaceTrustEnabled, WORKSPACE_TRUST_EMPTY_WINDOW, WORKSPACE_TRUST_ENABLED, WORKSPACE_TRUST_STARTUP_PROMPT, WORKSPACE_TRUST_UNTRUSTED_FILES } from 'vs/workbench/services/workspaces/common/workspaceTrust';
 import { EditorInput, IEditorInputSerializer, IEditorInputFactoryRegistry, EditorExtensions, EditorResourceAccessor } from 'vs/workbench/common/editor';
 import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
 import { IWorkspaceContextService, WorkbenchState } from 'vs/platform/workspace/common/workspace';
@@ -144,7 +144,7 @@ export class WorkspaceTrustRequestHandler extends Disposable implements IWorkben
 		switch (result.choice) {
 			case 0:
 				if (result.checkboxChecked) {
-					this.workspaceTrustManagementService.setParentFolderTrust(true);
+					await this.workspaceTrustManagementService.setParentFolderTrust(true);
 				} else {
 					await this.workspaceTrustRequestService.completeRequest(true);
 				}
@@ -441,7 +441,7 @@ export class WorkspaceTrustRequestHandler extends Disposable implements IWorkben
 						);
 
 						// Mark added/changed folders as trusted
-						this.workspaceTrustManagementService.setUrisTrust(addedFoldersTrustInfo.map(i => i.uri), result.choice === 0);
+						await this.workspaceTrustManagementService.setUrisTrust(addedFoldersTrustInfo.map(i => i.uri), result.choice === 0);
 
 						resolve();
 					}
@@ -469,10 +469,10 @@ class WorkspaceTrustEditorInputSerializer implements IEditorInputSerializer {
 	}
 
 	serialize(input: WorkspaceTrustEditorInput): string {
-		return '{}';
+		return '';
 	}
 
-	deserialize(instantiationService: IInstantiationService, serializedEditorInput: string): WorkspaceTrustEditorInput {
+	deserialize(instantiationService: IInstantiationService): WorkspaceTrustEditorInput {
 		return instantiationService.createInstance(WorkspaceTrustEditorInput);
 	}
 }
@@ -554,6 +554,19 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration)
 					localize('workspace.trust.startupPrompt.always', "Ask for trust every time an untrusted workspace is opened."),
 					localize('workspace.trust.startupPrompt.once', "Ask for trust the first time an untrusted workspace is opened."),
 					localize('workspace.trust.startupPrompt.never', "Do not ask for trust when an untrusted workspace is opened."),
+				]
+			},
+			[WORKSPACE_TRUST_UNTRUSTED_FILES]: {
+				type: 'string',
+				default: 'prompt',
+				included: !isWeb,
+				description: localize('workspace.trust.untrustedFiles.description', "Controls how to handle opening untrusted files in a trusted workspace."),
+				scope: ConfigurationScope.APPLICATION,
+				enum: ['prompt', 'open', 'newWindow'],
+				enumDescriptions: [
+					localize('workspace.trust.untrustedFiles.prompt', "Ask how to handle untrusted files for each workspace. Once untrusted files are introduced to a trusted workspace, you will not be prompted again."),
+					localize('workspace.trust.untrustedFiles.open', "Always allow untrusted files to be introduced to a trusted workspace without prompting."),
+					localize('workspace.trust.untrustedFiles.newWindow', "Always open untrusted files in a separate window in restricted mode without prompting."),
 				]
 			},
 			[WORKSPACE_TRUST_EMPTY_WINDOW]: {
