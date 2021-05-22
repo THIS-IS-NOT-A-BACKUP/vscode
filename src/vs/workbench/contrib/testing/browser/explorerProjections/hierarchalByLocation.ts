@@ -65,7 +65,7 @@ export class HierarchicalByLocationProjection extends Disposable implements ITes
 
 	constructor(protected readonly listener: TestSubscriptionListener, @ITestResultService private readonly results: ITestResultService) {
 		super();
-		this._register(listener.onDiff(([folder, diff]) => this.applyDiff(folder, diff)));
+		this._register(listener.onDiff(({ folder, diff }) => this.applyDiff(folder.folder, diff)));
 		this._register(listener.onFolderChange(this.applyFolderChange, this));
 
 		// when test results are cleared, recalculate all state
@@ -110,14 +110,18 @@ export class HierarchicalByLocationProjection extends Disposable implements ITes
 
 		// when test states change, reflect in the tree
 		// todo: optimize this to avoid needing to iterate
-		this._register(results.onTestChanged(({ item: result, reason }) => {
+		this._register(results.onTestChanged(({ item: result }) => {
 			for (const { items } of this.folders.values()) {
 				const item = items.get(result.item.extId);
 				if (item) {
 					item.retired = result.retired;
 					item.ownState = result.ownComputedState;
 					item.ownDuration = result.ownDuration;
-					refreshComputedState(computedStateAccessor, item).forEach(this.addUpdated);
+					// For items without children, always use the computed state. They are
+					// either leaves (for which it's fine) or nodes where we haven't expanded
+					// children and should trust whatever the result service gives us.
+					const explicitComputed = item.children.size ? undefined : result.computedState;
+					refreshComputedState(computedStateAccessor, item, explicitComputed).forEach(this.addUpdated);
 					this.addUpdated(item);
 					this.updateEmitter.fire();
 				}
