@@ -25,8 +25,8 @@ import { URI } from 'vs/base/common/uri';
 import { EditorPane } from 'vs/workbench/browser/parts/editor/editorPane';
 import { IStorageService, StorageScope, StorageTarget } from 'vs/platform/storage/common/storage';
 import { CancellationToken } from 'vs/base/common/cancellation';
-import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
-import { IContextKeyService, RawContextKey } from 'vs/platform/contextkey/common/contextkey';
+import { ConfigurationTarget, IConfigurationService } from 'vs/platform/configuration/common/configuration';
+import { ContextKeyExpr, IContextKeyService, RawContextKey } from 'vs/platform/contextkey/common/contextkey';
 import { ITASExperimentService } from 'vs/workbench/services/experiment/common/experimentService';
 import { IRecentFolder, IRecentlyOpened, IRecentWorkspace, isRecentFolder, isRecentWorkspace, IWorkspacesService } from 'vs/platform/workspaces/common/workspaces';
 import { IWorkspaceContextService } from 'vs/platform/workspace/common/workspace';
@@ -41,7 +41,7 @@ import { GettingStartedInput } from 'vs/workbench/contrib/welcome/gettingStarted
 import { GroupDirection, GroupsOrder, IEditorGroupsService } from 'vs/workbench/services/editor/common/editorGroupsService';
 import { IQuickInputService } from 'vs/platform/quickinput/common/quickInput';
 import { Emitter, Event } from 'vs/base/common/event';
-import { LinkedText } from 'vs/base/common/linkedText';
+import { ILink, LinkedText } from 'vs/base/common/linkedText';
 import { Button } from 'vs/base/browser/ui/button/button';
 import { attachButtonStyler } from 'vs/platform/theme/common/styler';
 import { Link } from 'vs/platform/opener/browser/link';
@@ -60,6 +60,8 @@ import { INotificationService } from 'vs/platform/notification/common/notificati
 import { asWebviewUri } from 'vs/workbench/api/common/shared/webview';
 import { Schemas } from 'vs/base/common/network';
 import { IEditorOptions } from 'vs/platform/editor/common/editor';
+import { coalesce, flatten } from 'vs/base/common/arrays';
+import { ThemeSettings } from 'vs/workbench/services/themes/common/workbenchThemeService';
 
 const SLIDE_TRANSITION_TIME_MS = 250;
 const configurationKey = 'workbench.startupEditor';
@@ -394,6 +396,17 @@ export class GettingStartedPage extends EditorPane {
 		if (!this.mdCache.has(path)) {
 			this.mdCache.set(path, (async () => {
 				try {
+					const moduleId = JSON.parse(path.query).moduleId;
+					if (moduleId) {
+						return new Promise<string>(resolve => {
+							require([moduleId], content => {
+								const markdown = content.default();
+								resolve(renderMarkdownDocument(markdown, this.extensionService, this.modeService));
+							});
+						});
+					}
+				} catch { }
+				try {
 					const localizedPath = path.with({ path: path.path.replace(/\.md$/, `.nls.${locale}.md`) });
 
 					const generalizedLocale = locale?.replace(/-.*$/, '');
@@ -456,6 +469,17 @@ export class GettingStartedPage extends EditorPane {
 			mediaElement.setAttribute('alt', media.altText);
 			this.updateMediaSourceForColorMode(mediaElement, media.path);
 
+			this.stepDisposables.add(addDisposableListener(mediaElement, 'click', () => {
+				const hrefs = flatten(stepToExpand.description.map(lt => lt.nodes.filter((node): node is ILink => typeof node !== 'string').map(node => node.href)));
+				if (hrefs.length === 1) {
+					const href = hrefs[0];
+					if (href.startsWith('http')) {
+						this.telemetryService.publicLog2<GettingStartedActionEvent, GettingStartedActionClassification>('gettingStarted.ActionExecuted', { command: 'runStepAction', argument: href });
+						this.openerService.open(href);
+					}
+				}
+			}));
+
 			this.stepDisposables.add(this.themeService.onDidColorThemeChange(() => this.updateMediaSourceForColorMode(mediaElement, media.path)));
 
 		} else if (stepToExpand.media.type === 'markdown') {
@@ -465,9 +489,18 @@ export class GettingStartedPage extends EditorPane {
 
 			const media = stepToExpand.media;
 
-			const webview = this.stepDisposables.add(this.webviewService.createWebviewElement(this.webviewID, {}, { localResourceRoots: [media.root] }, undefined));
+			const webview = this.stepDisposables.add(this.webviewService.createWebviewElement(this.webviewID, {}, { localResourceRoots: [media.root], allowScripts: true }, undefined));
 			webview.mountTo(this.stepMediaComponent);
-			webview.html = await this.renderMarkdown(media.path, media.base);
+
+			const rawHTML = await this.renderMarkdown(media.path, media.base);
+			webview.html = rawHTML;
+
+			const serializedContextKeyExprs = rawHTML.match(/checked-on=\"([^'][^"]*)\"/g)?.map(attr => attr.slice('checked-on="'.length, -1).replace(/&#39;/g, '\''));
+
+			const postTrueKeysMessage = () => {
+				const enabledContextKeys = serializedContextKeyExprs?.filter(expr => this.contextService.contextMatchesRules(ContextKeyExpr.deserialize(expr)));
+				if (enabledContextKeys) { webview.postMessage({ enabledContextKeys }); }
+			};
 
 			let isDisposed = false;
 			this.stepDisposables.add(toDisposable(() => { isDisposed = true; }));
@@ -483,8 +516,32 @@ export class GettingStartedPage extends EditorPane {
 				const body = await this.renderMarkdown(media.path, media.base);
 				if (!isDisposed) { // Make sure we weren't disposed of in the meantime
 					webview.html = body;
+					postTrueKeysMessage();
 				}
 			}));
+
+			if (serializedContextKeyExprs) {
+				const contextKeyExprs = coalesce(serializedContextKeyExprs.map(expr => ContextKeyExpr.deserialize(expr)));
+				const watchingKeys = new Set(flatten(contextKeyExprs.map(expr => expr.keys())));
+
+				this.stepDisposables.add(this.contextService.onDidChangeContext(e => {
+					if (e.affectsSome(watchingKeys)) { postTrueKeysMessage(); }
+				}));
+
+				postTrueKeysMessage();
+
+				webview.onMessage(e => {
+					const message: string = e.message as string;
+					if (message.startsWith('command:')) {
+						this.openerService.open(message, { allowCommands: true });
+					} else if (message.startsWith('setTheme:')) {
+						this.configurationService.updateValue(ThemeSettings.COLOR_THEME, message.slice('setTheme:'.length), ConfigurationTarget.USER);
+					} else {
+						console.error('Unexpected message', message);
+					}
+				});
+			}
+
 		}
 	}
 
@@ -550,22 +607,60 @@ export class GettingStartedPage extends EditorPane {
 		<html>
 			<head>
 				<meta http-equiv="Content-type" content="text/html;charset=UTF-8">
-				<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https: data:; media-src https:; script-src 'none'; style-src 'nonce-${nonce}';">
+				<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https: data:; media-src https:; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}';">
 				<style nonce="${nonce}">
+					${DEFAULT_MARKDOWN_STYLES}
+					${css}
 					img[centered] {
 						margin: 0 auto;
 					}
 					body {
 						display: flex;
 						flex-direction: column;
+						padding: 0;
+						height: inherit;
 					}
-					${DEFAULT_MARKDOWN_STYLES}
-					${css}
+					checklist {
+						display: flex;
+						flex-wrap: wrap;
+						justify-content: space-around;
+					}
+					checkbox {
+						display: flex;
+						flex-direction: column;
+						align-items: center;
+						cursor: pointer;
+					}
+					checkbox.checked > img {
+						box-sizing: border-box;
+					}
+					checkbox.checked > img {
+						outline: 2px solid var(--vscode-focusBorder);
+						outline-offset: 2px;
+					}
+					html {
+						height: 100%;
+					}
 				</style>
 			</head>
 			<body>
 				${uriTranformedContent}
 			</body>
+			<script nonce="${nonce}">
+				const vscode = acquireVsCodeApi();
+				document.querySelectorAll('[on-checked]').forEach(el => {
+					el.addEventListener('click', () => {
+						vscode.postMessage(el.getAttribute('on-checked'));
+					});
+				});
+
+				window.addEventListener('message', event => {
+					document.querySelectorAll('.checked').forEach(element => element.classList.remove('checked'))
+					for (const key of event.data.enabledContextKeys) {
+						document.querySelectorAll('[checked-on="' + key + '"]').forEach(element => element.classList.add('checked'))
+					}
+				});
+		</script>
 		</html>`;
 	}
 

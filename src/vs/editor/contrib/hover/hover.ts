@@ -206,7 +206,7 @@ export class ModesHoverController implements IEditorContribution {
 
 	private _getOrCreateContentWidget(): ModesContentHoverWidget {
 		if (!this._contentWidget) {
-			this._contentWidget = new ModesContentHoverWidget(this._editor, this._hoverVisibleKey, this._instantiationService);
+			this._contentWidget = this._instantiationService.createInstance(ModesContentHoverWidget, this._editor, this._hoverVisibleKey);
 		}
 		return this._contentWidget;
 	}
@@ -216,7 +216,7 @@ export class ModesHoverController implements IEditorContribution {
 	}
 
 	public showContentHover(range: Range, mode: HoverStartMode, focus: boolean): void {
-		this._getOrCreateContentWidget().startShowingAt(range, mode, focus);
+		this._getOrCreateContentWidget().startShowingAtRange(range, mode, focus);
 	}
 
 	public dispose(): void {

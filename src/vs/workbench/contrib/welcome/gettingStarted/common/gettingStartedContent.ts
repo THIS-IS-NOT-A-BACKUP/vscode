@@ -182,7 +182,7 @@ export const walkthroughs: GettingStartedWalkthroughContent = [
 					id: 'pickColorTheme',
 					title: localize('gettingStarted.pickColor.title', "Choose the look you want"),
 					description: localize('gettingStarted.pickColor.description', "The right color palette helps you focus on your code, is easy on your eyes, and is simply more fun to use.\n[Browse Color Themes](command:workbench.action.selectTheme)"),
-					media: { type: 'image', altText: 'Color theme preview for dark and light theme.', path: 'colorTheme.png', }
+					media: { type: 'markdown', path: 'example_markdown_media', }
 				},
 				{
 					id: 'findLanguageExtensions',
@@ -250,7 +250,7 @@ export const walkthroughs: GettingStartedWalkthroughContent = [
 				},
 				{
 					id: 'quickOpen',
-					title: localize('gettingStarted.quickOpen.title', "Quickly navigate between your file"),
+					title: localize('gettingStarted.quickOpen.title', "Quickly navigate between your files"),
 					description: localize('gettingStarted.quickOpen.description', "Navigate between files in an instant with one keystroke. Tip: Open multiple files by pressing the right arrow key.\n[Quick Open a File](command:toSide:workbench.action.quickOpen)"),
 					when: 'workspaceFolderCount != 0',
 					media: {
