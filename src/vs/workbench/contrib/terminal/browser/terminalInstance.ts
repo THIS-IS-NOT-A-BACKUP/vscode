@@ -143,6 +143,8 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 
 	private _hasHadInput: boolean;
 
+	messageShown: boolean = false;
+
 	readonly statusList: ITerminalStatusList = new TerminalStatusList();
 	disableLayout: boolean = false;
 	get instanceId(): number { return this._instanceId; }
@@ -282,7 +284,6 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 		this._initDimensions();
 		this._createProcessManager();
 
-
 		this._register(toDisposable(() => this._dndObserver?.dispose()));
 
 		this._containerReadyBarrier = new AutoOpenBarrier(Constants.WaitForContainerThreshold);
@@ -361,7 +362,7 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 		const shouldMigrateToProfile = (!!this._configurationService.getValue(TerminalSettingPrefix.Shell + platform) ||
 			!!this._configurationService.inspect(TerminalSettingPrefix.ShellArgs + platform).userValue) &&
 			!!this._configurationService.getValue(TerminalSettingPrefix.DefaultProfile + platform);
-		if (shouldMigrateToProfile && this._storageService.getBoolean(SHOULD_PROMPT_FOR_PROFILE_MIGRATION_KEY, StorageScope.WORKSPACE, true)) {
+		if (shouldMigrateToProfile && this._storageService.getBoolean(SHOULD_PROMPT_FOR_PROFILE_MIGRATION_KEY, StorageScope.WORKSPACE, true) && !this.messageShown) {
 			this._notificationService.prompt(
 				Severity.Info,
 				nls.localize('terminalProfileMigration', "The terminal is using deprecated shell/shellArgs settings, do you want to migrate it to a profile?"),
@@ -387,6 +388,7 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 					neverShowAgain: { id: SHOULD_PROMPT_FOR_PROFILE_MIGRATION_KEY, scope: NeverShowAgainScope.WORKSPACE }
 				}
 			);
+			this.messageShown = true;
 		}
 	}
 
