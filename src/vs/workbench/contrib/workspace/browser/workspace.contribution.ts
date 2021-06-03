@@ -25,7 +25,7 @@ import { IStatusbarEntry, IStatusbarEntryAccessor, IStatusbarService, StatusbarA
 import { IEditorRegistry, EditorDescriptor } from 'vs/workbench/browser/editor';
 import { shieldIcon, WorkspaceTrustEditor } from 'vs/workbench/contrib/workspace/browser/workspaceTrustEditor';
 import { WorkspaceTrustEditorInput } from 'vs/workbench/services/workspaces/browser/workspaceTrustEditorInput';
-import { isWorkspaceTrustEnabled, WORKSPACE_TRUST_EMPTY_WINDOW, WORKSPACE_TRUST_ENABLED, WORKSPACE_TRUST_STARTUP_PROMPT, WORKSPACE_TRUST_UNTRUSTED_FILES } from 'vs/workbench/services/workspaces/common/workspaceTrust';
+import { WorkspaceTrustContext, WORKSPACE_TRUST_EMPTY_WINDOW, WORKSPACE_TRUST_ENABLED, WORKSPACE_TRUST_STARTUP_PROMPT, WORKSPACE_TRUST_UNTRUSTED_FILES } from 'vs/workbench/services/workspaces/common/workspaceTrust';
 import { IEditorInputSerializer, IEditorInputFactoryRegistry, EditorExtensions, EditorResourceAccessor } from 'vs/workbench/common/editor';
 import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
 import { IWorkspaceContextService, WorkbenchState } from 'vs/platform/workspace/common/workspace';
@@ -56,9 +56,90 @@ const BANNER_VIRTUAL_WORKSPACE_DISMISSED_KEY = 'workbench.banner.virtualWorkspac
 const infoIcon = registerCodicon('workspace-banner-warning-icon', Codicon.info);
 
 /*
- * Trust Request UX Handler
+ * Trust Request via Service UX handler
  */
+
 export class WorkspaceTrustRequestHandler extends Disposable implements IWorkbenchContribution {
+	constructor(
+		@IDialogService private readonly dialogService: IDialogService,
+		@ICommandService private readonly commandService: ICommandService,
+		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
+		@IWorkspaceTrustManagementService private readonly workspaceTrustManagementService: IWorkspaceTrustManagementService,
+		@IWorkspaceTrustRequestService private readonly workspaceTrustRequestService: IWorkspaceTrustRequestService) {
+		super();
+
+		this.registerListeners();
+	}
+
+	private get useWorkspaceLanguage(): boolean {
+		return !isSingleFolderWorkspaceIdentifier(toWorkspaceIdentifier(this.workspaceContextService.getWorkspace()));
+	}
+
+	private get modalTitle(): string {
+		return this.useWorkspaceLanguage ?
+			localize('workspaceTrust', "Do you trust the authors of the files in this workspace?") :
+			localize('folderTrust', "Do you trust the authors of the files in this folder?");
+	}
+
+	private async registerListeners(): Promise<void> {
+		await this.workspaceTrustManagementService.workspaceResolved;
+		this._register(this.workspaceTrustRequestService.onDidInitiateWorkspaceTrustRequest(async requestOptions => {
+			// Message
+			const defaultMessage = localize('immediateTrustRequestMessage', "A feature you are trying to use may be a security risk if you do not trust the source of the files or folders you currently have open.");
+			const message = requestOptions?.message ?? defaultMessage;
+
+			// Buttons
+			const buttons = requestOptions?.buttons ?? [
+				{ label: this.useWorkspaceLanguage ? localize('grantWorkspaceTrustButton', "Trust Workspace & Continue") : localize('grantFolderTrustButton', "Trust Folder & Continue"), type: 'ContinueWithTrust' },
+				{ label: localize('manageWorkspaceTrustButton', "Manage"), type: 'Manage' }
+			];
+			// Add Cancel button if not provided
+			if (!buttons.some(b => b.type === 'Cancel')) {
+				buttons.push({ label: localize('cancelWorkspaceTrustButton', "Cancel"), type: 'Cancel' });
+			}
+
+			// Dialog
+			const result = await this.dialogService.show(
+				Severity.Info,
+				this.modalTitle,
+				buttons.map(b => b.label),
+				{
+					cancelId: buttons.findIndex(b => b.type === 'Cancel'),
+					custom: {
+						icon: Codicon.shield,
+						markdownDetails: [
+							{ markdown: new MarkdownString(message) },
+							{ markdown: new MarkdownString(localize('immediateTrustRequestLearnMore', "If you don't trust the authors of these files, we do not recommend continuing as the files may be malicious. See [our docs](https://aka.ms/vscode-workspace-trust) to learn more.")) }
+						]
+					}
+				}
+			);
+
+			// Dialog result
+			switch (buttons[result.choice].type) {
+				case 'ContinueWithTrust':
+					await this.workspaceTrustRequestService.completeRequest(true);
+					break;
+				case 'ContinueWithoutTrust':
+					await this.workspaceTrustRequestService.completeRequest(undefined);
+					break;
+				case 'Manage':
+					this.workspaceTrustRequestService.cancelRequest();
+					await this.commandService.executeCommand('workbench.trust.manage');
+					break;
+				case 'Cancel':
+					this.workspaceTrustRequestService.cancelRequest();
+					break;
+			}
+		}));
+	}
+}
+
+
+/*
+ * Trust UX and Startup Handler
+ */
+export class WorkspaceTrustUXHandler extends Disposable implements IWorkbenchContribution {
 
 	private readonly entryId = `status.workspaceTrust.${this.workspaceContextService.getWorkspace().id}`;
 
@@ -69,7 +150,6 @@ export class WorkspaceTrustRequestHandler extends Disposable implements IWorkben
 
 	constructor(
 		@IDialogService private readonly dialogService: IDialogService,
-		@ICommandService private readonly commandService: ICommandService,
 		@IEditorService private readonly editorService: IEditorService,
 		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
 		@IWorkspaceTrustManagementService private readonly workspaceTrustManagementService: IWorkspaceTrustManagementService,
@@ -88,12 +168,12 @@ export class WorkspaceTrustRequestHandler extends Disposable implements IWorkben
 
 			await this.workspaceTrustManagementService.workspaceTrustInitialized;
 
-			if (isWorkspaceTrustEnabled(configurationService)) {
+			if (this.workspaceTrustManagementService.workspaceTrustEnabled) {
 				this.registerListeners();
 				this.createStatusbarEntry();
 
 				// Set empty workspace trust state
-				this.setEmptyWorkspaceTrustState();
+				await this.setEmptyWorkspaceTrustState();
 
 				// Show modal dialog
 				if (this.hostService.hasFocus) {
@@ -453,61 +533,11 @@ export class WorkspaceTrustRequestHandler extends Disposable implements IWorkben
 
 	private registerListeners(): void {
 
-		this._register(this.workspaceTrustRequestService.onDidInitiateWorkspaceTrustRequest(async requestOptions => {
-			// Message
-			const defaultMessage = localize('immediateTrustRequestMessage', "A feature you are trying to use may be a security risk if you do not trust the source of the files or folders you currently have open.");
-			const message = requestOptions?.message ?? defaultMessage;
-
-			// Buttons
-			const buttons = requestOptions?.buttons ?? [
-				{ label: this.useWorkspaceLanguage ? localize('grantWorkspaceTrustButton', "Trust Workspace & Continue") : localize('grantFolderTrustButton', "Trust Folder & Continue"), type: 'ContinueWithTrust' },
-				{ label: localize('manageWorkspaceTrustButton', "Manage"), type: 'Manage' }
-			];
-			// Add Cancel button if not provided
-			if (!buttons.some(b => b.type === 'Cancel')) {
-				buttons.push({ label: localize('cancelWorkspaceTrustButton', "Cancel"), type: 'Cancel' });
-			}
-
-			// Dialog
-			const result = await this.dialogService.show(
-				Severity.Info,
-				this.modalTitle,
-				buttons.map(b => b.label),
-				{
-					cancelId: buttons.findIndex(b => b.type === 'Cancel'),
-					custom: {
-						icon: Codicon.shield,
-						markdownDetails: [
-							{ markdown: new MarkdownString(message) },
-							{ markdown: new MarkdownString(localize('immediateTrustRequestLearnMore', "If you don't trust the authors of these files, we do not recommend continuing as the files may be malicious. See [our docs](https://aka.ms/vscode-workspace-trust) to learn more.")) }
-						]
-					}
-				}
-			);
-
-			// Dialog result
-			switch (buttons[result.choice].type) {
-				case 'ContinueWithTrust':
-					await this.workspaceTrustRequestService.completeRequest(true);
-					break;
-				case 'ContinueWithoutTrust':
-					await this.workspaceTrustRequestService.completeRequest(undefined);
-					break;
-				case 'Manage':
-					this.workspaceTrustRequestService.cancelRequest();
-					await this.commandService.executeCommand('workbench.trust.manage');
-					break;
-				case 'Cancel':
-					this.workspaceTrustRequestService.cancelRequest();
-					break;
-			}
-		}));
-
 		this._register(this.workspaceContextService.onWillChangeWorkspaceFolders(e => {
 			if (e.fromCache) {
 				return;
 			}
-			if (!isWorkspaceTrustEnabled(this.configurationService)) {
+			if (!this.workspaceTrustManagementService.workspaceTrustEnabled) {
 				return;
 			}
 			const trusted = this.workspaceTrustManagementService.isWorkpaceTrusted();
@@ -546,7 +576,8 @@ export class WorkspaceTrustRequestHandler extends Disposable implements IWorkben
 	}
 }
 
-Registry.as<IWorkbenchContributionsRegistry>(WorkbenchExtensions.Workbench).registerWorkbenchContribution(WorkspaceTrustRequestHandler, LifecyclePhase.Restored);
+Registry.as<IWorkbenchContributionsRegistry>(WorkbenchExtensions.Workbench).registerWorkbenchContribution(WorkspaceTrustRequestHandler, LifecyclePhase.Ready);
+Registry.as<IWorkbenchContributionsRegistry>(WorkbenchExtensions.Workbench).registerWorkbenchContribution(WorkspaceTrustUXHandler, LifecyclePhase.Restored);
 
 /**
  * Trusted Workspace GUI Editor
@@ -598,7 +629,7 @@ registerAction2(class extends Action2 {
 				id: MenuId.GlobalActivity,
 				group: '6_workspace_trust',
 				order: 40,
-				when: ContextKeyExpr.and(IsWebContext.negate(), ContextKeyExpr.equals(`config.${WORKSPACE_TRUST_ENABLED}`, true))
+				when: ContextKeyExpr.and(WorkspaceTrustContext.IsEnabled, IsWebContext.negate(), ContextKeyExpr.equals(`config.${WORKSPACE_TRUST_ENABLED}`, true))
 			},
 		});
 	}
@@ -673,7 +704,6 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration)
  */
 class WorkspaceTrustTelemetryContribution extends Disposable implements IWorkbenchContribution {
 	constructor(
-		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@IExtensionService private readonly extensionService: IExtensionService,
 		@ITelemetryService private readonly telemetryService: ITelemetryService,
 		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
@@ -689,7 +719,7 @@ class WorkspaceTrustTelemetryContribution extends Disposable implements IWorkben
 	}
 
 	private logInitialWorkspaceTrustInfo(): void {
-		if (!isWorkspaceTrustEnabled(this.configurationService)) {
+		if (!this.workspaceTrustManagementService.workspaceTrustEnabled) {
 			return;
 		}
 
@@ -707,7 +737,7 @@ class WorkspaceTrustTelemetryContribution extends Disposable implements IWorkben
 	}
 
 	private async logWorkspaceTrustChangeEvent(isTrusted: boolean): Promise<void> {
-		if (!isWorkspaceTrustEnabled(this.configurationService)) {
+		if (!this.workspaceTrustManagementService.workspaceTrustEnabled) {
 			return;
 		}
 
@@ -767,7 +797,7 @@ class WorkspaceTrustTelemetryContribution extends Disposable implements IWorkben
 	}
 
 	private async logWorkspaceTrustRequest(): Promise<void> {
-		if (!isWorkspaceTrustEnabled(this.configurationService)) {
+		if (!this.workspaceTrustManagementService.workspaceTrustEnabled) {
 			return;
 		}
 

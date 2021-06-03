@@ -219,6 +219,11 @@ export class GettingStartedPage extends EditorPane {
 			if (!ourStep) {
 				throw Error('Could not find step with ID: ' + step.id);
 			}
+
+			if (!ourStep.done && category.content.stepsComplete === category.content.stepsTotal - 1) {
+				this.hideCategory(category.id);
+			}
+
 			ourStep.done = step.done;
 			if (category.id === this.currentCategory?.id) {
 				const badgeelements = assertIsDefined(document.querySelectorAll(`[data-done-step-id="${step.id}"]`));
@@ -1198,6 +1203,7 @@ export class GettingStartedPage extends EditorPane {
 			this.editorInput.selectedStep = undefined;
 			this.selectStep(undefined);
 			this.setSlide('categories');
+			this.container.focus();
 		});
 	}
 
@@ -1247,7 +1253,6 @@ export class GettingStartedPage extends EditorPane {
 			this.container.querySelector('.gettingStartedSlideDetails')!.querySelectorAll('button').forEach(button => button.disabled = true);
 			this.container.querySelector('.gettingStartedSlideCategories')!.querySelectorAll('button').forEach(button => button.disabled = false);
 			this.container.querySelector('.gettingStartedSlideCategories')!.querySelectorAll('input').forEach(button => button.disabled = false);
-			this.container.focus();
 		} else {
 			slideManager.classList.add('showDetails');
 			slideManager.classList.remove('showCategories');
@@ -1255,6 +1260,10 @@ export class GettingStartedPage extends EditorPane {
 			this.container.querySelector('.gettingStartedSlideCategories')!.querySelectorAll('button').forEach(button => button.disabled = true);
 			this.container.querySelector('.gettingStartedSlideCategories')!.querySelectorAll('input').forEach(button => button.disabled = true);
 		}
+	}
+
+	override focus() {
+		this.container.focus();
 	}
 }
 
@@ -1288,6 +1297,8 @@ class GettingStartedIndexList<T> extends Disposable {
 
 	public itemCount: number;
 
+	private isDisposed = false;
+
 	constructor(
 		title: string,
 		klass: string,
@@ -1319,7 +1330,12 @@ class GettingStartedIndexList<T> extends Disposable {
 		this._register(this.onDidChangeEntries(listener));
 	}
 
-	register(d: IDisposable) { this._register(d); }
+	register(d: IDisposable) { if (this.isDisposed) { d.dispose(); } else { this._register(d); } }
+
+	override dispose() {
+		this.isDisposed = true;
+		super.dispose();
+	}
 
 	setLimit(limit: number) {
 		this.limit = limit;
