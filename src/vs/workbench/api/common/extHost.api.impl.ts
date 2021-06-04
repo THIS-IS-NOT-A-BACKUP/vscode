@@ -321,14 +321,20 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 					return extHostUrls.createAppUri(uri);
 				}
 
-				if (!matchesScheme(uri, Schemas.http) && !matchesScheme(uri, Schemas.https)) {
+				const isHttp = matchesScheme(uri, Schemas.http) || matchesScheme(uri, Schemas.https);
+
+				if (!isHttp) {
 					checkProposedApiEnabled(extension); // https://github.com/microsoft/vscode/issues/124263
 				}
 
 				try {
 					return await extHostWindow.asExternalUri(uri, { allowTunneling: !!initData.remote.authority });
-				} catch {
-					return uri;
+				} catch (err) {
+					if (isHttp) {
+						return uri;
+					}
+
+					throw err;
 				}
 			},
 			get remoteName() {
@@ -1083,7 +1089,7 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 
 		// namespace: notebook
 		const notebooks: typeof vscode.notebooks = {
-			createNotebookController(id: string, notebookType: string, label: string, handler?: vscode.NotebookExecuteHandler, rendererScripts?: vscode.NotebookRendererScript[]) {
+			createNotebookController(id: string, notebookType: string, label: string, handler?, rendererScripts?: vscode.NotebookRendererScript[]) {
 				return extHostNotebookKernels.createNotebookController(extension, id, notebookType, label, handler, extension.enableProposedApi ? rendererScripts : undefined);
 			},
 			registerNotebookCellStatusBarItemProvider: (notebookType: string, provider: vscode.NotebookCellStatusBarItemProvider) => {

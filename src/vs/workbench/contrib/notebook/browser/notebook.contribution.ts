@@ -625,7 +625,7 @@ configurationRegistry.registerConfiguration({
 				nls.localize('notebook.showCellStatusbar.hidden.description', "The cell status bar is always hidden."),
 				nls.localize('notebook.showCellStatusbar.visible.description', "The cell status bar is always visible."),
 				nls.localize('notebook.showCellStatusbar.visibleAfterExecute.description', "The cell status bar is hidden until the cell has executed. Then it becomes visible to show the execution status.")],
-			default: true,
+			default: 'visible',
 			tags: ['notebookLayout']
 		},
 		[NotebookTextDiffEditorPreview]: {
@@ -660,7 +660,7 @@ configurationRegistry.registerConfiguration({
 			description: nls.localize('notebook.focusIndicator.description', "Control whether to render the focus indicator as cell borders or a highlight bar on the left gutter"),
 			type: 'string',
 			enum: ['border', 'gutter'],
-			default: 'border',
+			default: 'gutter',
 			tags: ['notebookLayout']
 		},
 		[InsertToolbarLocation]: {
@@ -673,7 +673,7 @@ configurationRegistry.registerConfiguration({
 		[GlobalToolbar]: {
 			description: nls.localize('notebook.globalToolbar.description', "Control whether to render a global toolbar inside the notebook editor."),
 			type: 'boolean',
-			default: false,
+			default: true,
 			tags: ['notebookLayout']
 		},
 		[ConsolidatedOutputButton]: {
@@ -686,7 +686,7 @@ configurationRegistry.registerConfiguration({
 			description: nls.localize('notebook.showFoldingControls.description', "Controls when the folding controls are shown."),
 			type: 'string',
 			enum: ['always', 'mouseover'],
-			default: 'always',
+			default: 'mouseover',
 			tags: ['notebookLayout']
 		},
 		[DragAndDropEnabled]: {
