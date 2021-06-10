@@ -261,12 +261,9 @@ export class BackLayerWebView<T extends ICommonCellInfo> extends Disposable {
 						border-collapse: collapse;
 					}
 
-					table {
-						width: 100%;
-					}
-
 					table, th, tr {
-						text-align: left !important;
+						vertical-align: top;
+						text-align: right;
 					}
 
 					thead {
@@ -525,17 +522,12 @@ var requirejs = (function() {
 					}
 				case 'focus-editor':
 					{
-						const resolvedResult = this.resolveOutputId(data.id);
-						if (resolvedResult) {
-							const latestCell = this.notebookEditor.getCellByInfo(resolvedResult.cellInfo);
-							if (!latestCell) {
-								return;
-							}
-
+						const cell = this.notebookEditor.getCellById(data.cellId);
+						if (cell) {
 							if (data.focusNext) {
-								this.notebookEditor.focusNextNotebookCell(latestCell, 'editor');
+								this.notebookEditor.focusNextNotebookCell(cell, 'editor');
 							} else {
-								this.notebookEditor.focusNotebookCell(latestCell, 'editor');
+								this.notebookEditor.focusNotebookCell(cell, 'editor');
 							}
 						}
 						break;
@@ -812,6 +804,7 @@ var requirejs = (function() {
 			this.hiddenInsetMapping.delete(request.output);
 
 			return {
+				cellId: request.cell.id,
 				outputId: id,
 				cellTop: request.cellTop,
 				outputOffset: request.outputOffset,
