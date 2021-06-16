@@ -19,7 +19,7 @@ import { IKeyMods, IPickOptions, IQuickInputButton, IQuickInputService, IQuickPi
 import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
 import { ILocalTerminalService, IOffProcessTerminalService, IShellLaunchConfig, ITerminalLaunchError, ITerminalProfile, ITerminalProfileObject, ITerminalsLayoutInfo, ITerminalsLayoutInfoById, TerminalSettingId, TerminalSettingPrefix } from 'vs/platform/terminal/common/terminal';
 import { ThemeIcon } from 'vs/platform/theme/common/themeService';
-import { IRemoteTerminalService, ITerminalExternalLinkProvider, ITerminalInstance, ITerminalService, ITerminalGroup, TerminalConnectionState, ITerminalProfileProvider } from 'vs/workbench/contrib/terminal/browser/terminal';
+import { IRemoteTerminalService, ITerminalExternalLinkProvider, ITerminalInstance, ITerminalService, ITerminalGroup, TerminalConnectionState, ITerminalProfileProvider, ICreateTerminalOptions, TerminalTarget, ITerminalEditorService } from 'vs/workbench/contrib/terminal/browser/terminal';
 import { IEditableData, IViewDescriptorService, IViewsService, ViewContainerLocation } from 'vs/workbench/common/views';
 import { TerminalConfigHelper } from 'vs/workbench/contrib/terminal/browser/terminalConfigHelper';
 import { TerminalInstance } from 'vs/workbench/contrib/terminal/browser/terminalInstance';
@@ -147,6 +147,7 @@ export class TerminalService implements ITerminalService {
 		@IRemoteTerminalService private readonly _remoteTerminalService: IRemoteTerminalService,
 		@ITelemetryService private readonly _telemetryService: ITelemetryService,
 		@ITerminalContributionService private readonly _terminalContributionService: ITerminalContributionService,
+		@ITerminalEditorService private readonly _terminalEditorService: ITerminalEditorService,
 		@IExtensionService private readonly _extensionService: IExtensionService,
 		@INotificationService private readonly _notificationService: INotificationService,
 		@optional(ILocalTerminalService) localTerminalService: ILocalTerminalService
@@ -277,7 +278,10 @@ export class TerminalService implements ITerminalService {
 					terminalLayouts.forEach((terminalLayout) => {
 						if (!terminalInstance) {
 							// create group and terminal
-							terminalInstance = this.createTerminal({ attachPersistentProcess: terminalLayout.terminal! });
+							const config = { attachPersistentProcess: terminalLayout.terminal! } as IShellLaunchConfig;
+							terminalInstance = this.createTerminal(
+								config
+							);
 							group = this.getGroupForInstance(terminalInstance);
 							if (groupLayout.isActive) {
 								activeGroup = group;
@@ -324,7 +328,7 @@ export class TerminalService implements ITerminalService {
 
 	getActiveOrCreateInstance(): ITerminalInstance {
 		const activeInstance = this.getActiveInstance();
-		return activeInstance ? activeInstance : this.createTerminal(undefined);
+		return activeInstance ? activeInstance : this.createTerminal();
 	}
 
 	async setEditable(instance: ITerminalInstance, data?: IEditableData | null): Promise<void> {
@@ -759,6 +763,52 @@ export class TerminalService implements ITerminalService {
 		targetGroup.moveInstance(source, index);
 	}
 
+	moveToEditor(source: ITerminalInstance): void {
+		if (source.target === TerminalTarget.Editor) {
+			return;
+		}
+		const sourceGroup = this.getGroupForInstance(source);
+		if (!sourceGroup) {
+			return;
+		}
+		sourceGroup.removeInstance(source);
+		this._terminalEditorService.createEditor(source);
+	}
+
+	async moveToTerminalView(source?: ITerminalInstance): Promise<void> {
+		if (source) {
+			this._terminalEditorService.detachInstance(source);
+		} else {
+			source = this._terminalEditorService.detachActiveEditorInstance();
+			if (!source) {
+				return;
+			}
+		}
+
+		if (source.target !== TerminalTarget.Editor) {
+			return;
+		}
+		source.target = TerminalTarget.TerminalView;
+
+		// TODO: Share code with joinInstances - move into terminal group service
+		const group = this._instantiationService.createInstance(TerminalGroup, this._terminalContainer, undefined);
+		group.onPanelOrientationChanged((orientation) => this._onPanelOrientationChanged.fire(orientation));
+		this._terminalGroups.push(group);
+		group.addDisposable(group.onDisposed(this._onGroupDisposed.fire, this._onGroupDisposed));
+		group.addDisposable(group.onInstancesChanged(this._onInstancesChanged.fire, this._onInstancesChanged));
+
+		group.addInstance(source);
+		this.setActiveInstance(source);
+		await this.showPanel(true);
+		// TODO: Shouldn't this happen automatically?
+		source.setVisible(true);
+
+		// Fire events
+		this._onInstancesChanged.fire();
+		this._onGroupsChanged.fire();
+		this._onActiveGroupChanged.fire();
+	}
+
 	protected _initInstanceListeners(instance: ITerminalInstance): void {
 		instance.addDisposable(instance.onDisposed(this._onInstanceDisposed.fire, this._onInstanceDisposed));
 		instance.addDisposable(instance.onTitleChanged(this._onInstanceTitleChanged.fire, this._onInstanceTitleChanged));
@@ -776,9 +826,16 @@ export class TerminalService implements ITerminalService {
 		instance.addDisposable(instance.onMaximumDimensionsChanged(() => this._onInstanceMaximumDimensionsChanged.fire(instance)));
 		instance.addDisposable(instance.onFocus(this._onActiveInstanceChanged.fire, this._onActiveInstanceChanged));
 		instance.addDisposable(instance.onRequestAddInstanceToGroup(e => {
-			const sourceInstance = this.getInstanceFromId(parseInt(e.uri.path));
+			// View terminals
+			let sourceInstance = this.getInstanceFromId(parseInt(e.uri.path));
 			if (sourceInstance) {
 				this.moveInstance(sourceInstance, instance, e.side);
+			}
+
+			// Terminal editors
+			sourceInstance = this._terminalEditorService.terminalEditorInstances.find(instance => instance.resource.toString() === e.uri.toString());
+			if (sourceInstance) {
+				this.moveToTerminalView(sourceInstance);
 			}
 		}));
 	}
@@ -842,10 +899,10 @@ export class TerminalService implements ITerminalService {
 	}
 
 	async showPanel(focus?: boolean): Promise<void> {
-		const pane = this._viewsService.getActiveViewWithId(TERMINAL_VIEW_ID) as TerminalViewPane;
-		if (!pane) {
-			await this._viewsService.openView(TERMINAL_VIEW_ID, focus);
-		}
+		const pane = this._viewsService.getActiveViewWithId(TERMINAL_VIEW_ID)
+			?? await this._viewsService.openView(TERMINAL_VIEW_ID, focus);
+		pane?.setExpanded(true);
+
 		if (focus) {
 			// Do the focus call asynchronously as going through the
 			// command palette will force editor focus
@@ -896,8 +953,6 @@ export class TerminalService implements ITerminalService {
 		});
 		return !res.confirmed;
 	}
-
-
 
 	private async _getPlatformKey(): Promise<string> {
 		const env = await this._remoteAgentService.getEnvironment();
@@ -988,7 +1043,7 @@ export class TerminalService implements ITerminalService {
 					// create split, only valid if there's an active instance
 					instance = this.splitInstance(activeInstance, value.profile, cwd);
 				} else {
-					instance = this.createTerminal(value.profile, cwd);
+					instance = this.createTerminal({ config: value.profile, cwd });
 				}
 			}
 
@@ -1100,13 +1155,11 @@ export class TerminalService implements ITerminalService {
 		return {};
 	}
 
-	createTerminal(shellLaunchConfig?: IShellLaunchConfig): ITerminalInstance;
-	createTerminal(profile: ITerminalProfile, cwd?: string | URI): ITerminalInstance;
-	createTerminal(shellLaunchConfigOrProfile: IShellLaunchConfig | ITerminalProfile, cwd?: string | URI): ITerminalInstance {
-		const shellLaunchConfig = this._convertProfileToShellLaunchConfig(shellLaunchConfigOrProfile);
+	createTerminal(options?: ICreateTerminalOptions): ITerminalInstance {
+		const shellLaunchConfig = this._convertProfileToShellLaunchConfig(options?.config);
 
-		if (cwd) {
-			shellLaunchConfig.cwd = cwd;
+		if (options?.cwd) {
+			shellLaunchConfig.cwd = options.cwd;
 		}
 
 		if (!shellLaunchConfig.customPtyImplementation && !this.isProcessSupportRegistered) {
@@ -1131,17 +1184,26 @@ export class TerminalService implements ITerminalService {
 			}
 		}
 
-		const terminalGroup = this._instantiationService.createInstance(TerminalGroup, this._terminalContainer, shellLaunchConfig);
-		this._terminalGroups.push(terminalGroup);
-		terminalGroup.onPanelOrientationChanged((orientation) => this._onPanelOrientationChanged.fire(orientation));
+		let instance: ITerminalInstance;
+		if (options?.target === TerminalTarget.Editor) {
+			instance = this.createInstance(shellLaunchConfig);
+			this._terminalEditorService.createEditor(instance);
+			this._initInstanceListeners(instance);
+			this._onInstancesChanged.fire();
+		} else {
+			const terminalGroup = this._instantiationService.createInstance(TerminalGroup, this._terminalContainer, shellLaunchConfig);
+			this._terminalGroups.push(terminalGroup);
+			terminalGroup.onPanelOrientationChanged((orientation) => this._onPanelOrientationChanged.fire(orientation));
 
-		const instance = terminalGroup.terminalInstances[0];
+			instance = terminalGroup.terminalInstances[0];
 
-		terminalGroup.addDisposable(terminalGroup.onDisposed(this._onGroupDisposed.fire, this._onGroupDisposed));
-		terminalGroup.addDisposable(terminalGroup.onInstancesChanged(this._onInstancesChanged.fire, this._onInstancesChanged));
-		this._initInstanceListeners(instance);
-		this._onInstancesChanged.fire();
-		this._onGroupsChanged.fire();
+			terminalGroup.addDisposable(terminalGroup.onDisposed(this._onGroupDisposed.fire, this._onGroupDisposed));
+			terminalGroup.addDisposable(terminalGroup.onInstancesChanged(this._onInstancesChanged.fire, this._onInstancesChanged));
+			this._initInstanceListeners(instance);
+			this._onInstancesChanged.fire();
+			this._onGroupsChanged.fire();
+		}
+
 		if (this.terminalInstances.length === 1) {
 			// It's the first instance so it should be made active automatically, this must fire
 			// after onInstancesChanged so consumers can react to the instance being added first
