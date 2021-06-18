@@ -155,8 +155,8 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 	get resource(): URI {
 		return URI.from({
 			scheme: Schemas.vscodeTerminal,
-			path: this.title,
-			fragment: this.instanceId.toString(),
+			path: `/${this.instanceId}`,
+			fragment: this.title,
 		});
 	}
 	get cols(): number {
@@ -683,12 +683,6 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 		this._wrapperElement.xterm = this._xterm;
 
 		xterm.open(this._xtermElement);
-
-		const suggestedRendererType = this._storageService.get(SUGGESTED_RENDERER_TYPE, StorageScope.GLOBAL);
-		if (this._configHelper.config.gpuAcceleration === 'auto' && (suggestedRendererType === 'auto' || suggestedRendererType === undefined)
-			|| this._configHelper.config.gpuAcceleration === 'on') {
-			this._enableWebglRenderer();
-		}
 
 		if (!xterm.element || !xterm.textarea) {
 			throw new Error('xterm elements not set after open');
@@ -1462,7 +1456,7 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 	}
 
 	private async _enableWebglRenderer(): Promise<void> {
-		if (!this._xterm || this._webglAddon) {
+		if (!this._xterm?.element || this._webglAddon) {
 			return;
 		}
 		const Addon = await this._terminalInstanceService.getXtermWebglConstructor();
@@ -1474,7 +1468,6 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 				this._disposeOfWebglRenderer();
 				this._safeSetOption('rendererType', 'dom');
 			});
-			this._storageService.store(SUGGESTED_RENDERER_TYPE, 'auto', StorageScope.GLOBAL, StorageTarget.MACHINE);
 		} catch (e) {
 			this._logService.warn(`Webgl could not be loaded. Falling back to the canvas renderer type.`, e);
 			const neverMeasureRenderTime = this._storageService.getBoolean(NEVER_MEASURE_RENDER_TIME_STORAGE_KEY, StorageScope.GLOBAL, false);
@@ -1941,6 +1934,17 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 		quickPick.hide();
 		document.body.removeChild(styleElement);
 	}
+
+	static getInstanceIdFromUri(resource: URI): number | undefined {
+		if (resource.scheme !== Schemas.vscodeTerminal) {
+			return undefined;
+		}
+		const basename = path.basename(resource.path);
+		if (basename === '') {
+			return undefined;
+		}
+		return parseInt(basename);
+	}
 }
 
 class TerminalInstanceDragAndDropController extends Disposable implements IDragAndDropObserverCallbacks {
@@ -1968,7 +1972,7 @@ class TerminalInstanceDragAndDropController extends Disposable implements IDragA
 	}
 
 	onDragEnter(e: DragEvent) {
-		if (!containsDragType(e, DataTransfers.FILES, DataTransfers.RESOURCES, 'terminals')) {
+		if (!containsDragType(e, DataTransfers.FILES, DataTransfers.RESOURCES, DataTransfers.TERMINALS)) {
 			return;
 		}
 
@@ -1977,10 +1981,8 @@ class TerminalInstanceDragAndDropController extends Disposable implements IDragA
 			this._dropOverlay.classList.add('terminal-drop-overlay');
 		}
 
-		const types = e.dataTransfer?.types || [];
-
 		// Dragging terminals
-		if (types.includes('terminals')) {
+		if (containsDragType(e, DataTransfers.TERMINALS)) {
 			const side = this._getDropSide(e);
 			this._dropOverlay.classList.toggle('drop-before', side === 'before');
 			this._dropOverlay.classList.toggle('drop-after', side === 'after');
@@ -2003,10 +2005,8 @@ class TerminalInstanceDragAndDropController extends Disposable implements IDragA
 			return;
 		}
 
-		const types = e.dataTransfer?.types || [];
-
 		// Dragging terminals
-		if (types.includes('terminals')) {
+		if (containsDragType(e, DataTransfers.TERMINALS)) {
 			const side = this._getDropSide(e);
 			this._dropOverlay.classList.toggle('drop-before', side === 'before');
 			this._dropOverlay.classList.toggle('drop-after', side === 'after');
@@ -2022,21 +2022,29 @@ class TerminalInstanceDragAndDropController extends Disposable implements IDragA
 			return;
 		}
 
+		const terminalResources = e.dataTransfer.getData(DataTransfers.TERMINALS);
+		if (terminalResources) {
+			const uri = URI.parse(JSON.parse(terminalResources)[0]);
+			if (uri.scheme === Schemas.vscodeTerminal) {
+				const side = this._getDropSide(e);
+				this._onDropTerminal.fire({ uri, side });
+				return;
+			}
+		}
+
 		// Check if files were dragged from the tree explorer
 		let path: string | undefined;
 		const resources = e.dataTransfer.getData(DataTransfers.RESOURCES);
 		if (resources) {
 			const uri = URI.parse(JSON.parse(resources)[0]);
 			if (uri.scheme === Schemas.vscodeTerminal) {
-				this._onDropTerminal.fire({
-					uri,
-					side: this._getDropSide(e)
-				});
+				const side = this._getDropSide(e);
+				this._onDropTerminal.fire({ uri, side });
 				return;
 			} else {
 				path = uri.fsPath;
 			}
-		} else if (e.dataTransfer.files?.[0].path /* Electron only */) {
+		} else if (e.dataTransfer.files.length > 0 && e.dataTransfer.files[0].path /* Electron only */) {
 			// Check if the file was dragged from the filesystem
 			path = URI.file(e.dataTransfer.files[0].path).fsPath;
 		}
