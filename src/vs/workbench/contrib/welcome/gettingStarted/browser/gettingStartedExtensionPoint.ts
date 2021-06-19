@@ -204,8 +204,9 @@ export const startEntriesExtensionPoint = ExtensionsRegistry.registerExtensionPo
 		type: 'array',
 		items: {
 			type: 'object',
-			required: ['title', 'description', 'command'],
-			defaultSnippets: [{ body: { 'title': '$1', 'description': '$2', 'command': '$3' } }],
+			required: ['title', 'command'],
+			additionalProperties: false,
+			defaultSnippets: [{ body: { 'title': '$1', 'command': '$3' } }],
 			properties: {
 				title: {
 					type: 'string',
@@ -214,6 +215,11 @@ export const startEntriesExtensionPoint = ExtensionsRegistry.registerExtensionPo
 				command: {
 					type: 'string',
 					description: localize('startEntries.command', "Command to run.")
+				},
+				catagory: {
+					type: 'string',
+					description: localize('startEntries.category', "Category of the new entry."),
+					enum: ['window', 'file', 'folder', 'notebook', 'terminal', 'configuration'],
 				},
 				description: {
 					type: 'string',
