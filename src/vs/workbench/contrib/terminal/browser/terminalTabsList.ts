@@ -162,9 +162,6 @@ export class TerminalTabList extends WorkbenchList<ITerminalInstance> {
 			if (!instance) {
 				return;
 			}
-			if (e.editorOptions.pinned) {
-				return;
-			}
 			this._terminalGroupService.setActiveInstance(instance);
 			if (!e.editorOptions.preserveFocus) {
 				await instance.focusWhenReady();
@@ -471,7 +468,7 @@ class TerminalTabsRenderer implements IListRenderer<ITerminalInstance, ITerminal
 		} else {
 			callback(instance);
 		}
-		this._terminalService.focusTabs();
+		this._terminalGroupService.focusTabs();
 		this._listService.lastFocusedList?.focusNext();
 	}
 }
@@ -555,6 +552,7 @@ class TerminalTabsDragAndDrop implements IListDragAndDrop<ITerminalInstance> {
 		// Attach terminals type to event
 		const terminals: ITerminalInstance[] = dndData.filter(e => 'instanceId' in (e as any));
 		if (terminals.length > 0) {
+			originalEvent.dataTransfer.setData(DataTransfers.RESOURCES, JSON.stringify(terminals.map(e => e.resource.toString())));
 			originalEvent.dataTransfer.setData(DataTransfers.TERMINALS, JSON.stringify(terminals.map(e => e.instanceId)));
 		}
 	}
@@ -627,9 +625,7 @@ class TerminalTabsDragAndDrop implements IListDragAndDrop<ITerminalInstance> {
 		}
 
 		if (!targetInstance) {
-			for (const instance of sourceInstances) {
-				this._terminalGroupService.unsplitInstance(instance);
-			}
+			this._terminalGroupService.moveGroupToEnd(sourceInstances[0]);
 			return;
 		}
 

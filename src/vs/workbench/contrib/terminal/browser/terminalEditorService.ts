@@ -5,8 +5,13 @@
 
 import { Emitter, Event } from 'vs/base/common/event';
 import { Disposable, dispose, IDisposable, toDisposable } from 'vs/base/common/lifecycle';
-import { IThemeService } from 'vs/platform/theme/common/themeService';
+import { FindReplaceState } from 'vs/editor/contrib/find/findState';
+import { ICommandService } from 'vs/platform/commands/common/commands';
+import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
+import { IShellLaunchConfig } from 'vs/platform/terminal/common/terminal';
+import { IEditorInput } from 'vs/workbench/common/editor';
 import { ITerminalEditorService, ITerminalInstance, ITerminalInstanceService } from 'vs/workbench/contrib/terminal/browser/terminal';
+import { TerminalEditor } from 'vs/workbench/contrib/terminal/browser/terminalEditor';
 import { TerminalEditorInput } from 'vs/workbench/contrib/terminal/browser/terminalEditorInput';
 import { SerializedTerminalEditorInput } from 'vs/workbench/contrib/terminal/browser/terminalEditorSerializer';
 import { TerminalLocation } from 'vs/workbench/contrib/terminal/common/terminal';
@@ -29,9 +34,10 @@ export class TerminalEditorService extends Disposable implements ITerminalEditor
 	get onDidChangeInstances(): Event<void> { return this._onDidChangeInstances.event; }
 
 	constructor(
+		@ICommandService private readonly _commandService: ICommandService,
 		@IEditorService private readonly _editorService: IEditorService,
 		@ITerminalInstanceService private readonly _terminalInstanceService: ITerminalInstanceService,
-		@IThemeService private readonly _themeService: IThemeService
+		@IInstantiationService private readonly _instantiationService: IInstantiationService
 	) {
 		super();
 		this._register(toDisposable(() => {
@@ -46,13 +52,51 @@ export class TerminalEditorService extends Disposable implements ITerminalEditor
 		this._register(this._editorService.onDidVisibleEditorsChange(() => {
 			// add any terminal editors created via the editor service split command
 			const knownIds = this.instances.map(i => i.instanceId);
-			const terminalEditors = this._editorService.visibleEditors.filter(e => e instanceof TerminalEditorInput && e.terminalInstance?.instanceId);
+			const terminalEditors = this._getActiveTerminalEditors();
 			const unknownEditor = terminalEditors.find(input => !knownIds.includes((input as any).terminalInstance.instanceId));
 			if (unknownEditor instanceof TerminalEditorInput && unknownEditor.terminalInstance) {
 				this._editorInputs.set(unknownEditor.terminalInstance.instanceId, unknownEditor);
 				this.instances.push(unknownEditor.terminalInstance);
 			}
 		}));
+	}
+
+	private _getActiveTerminalEditors(): IEditorInput[] {
+		return this._editorService.visibleEditors.filter(e => e instanceof TerminalEditorInput && e.terminalInstance?.instanceId);
+	}
+
+	private _getActiveTerminalEditor(): TerminalEditor | undefined {
+		return this._editorService.activeEditorPane instanceof TerminalEditor ? this._editorService.activeEditorPane : undefined;
+	}
+
+	findPrevious(): void {
+		const editor = this._getActiveTerminalEditor();
+		editor?.showFindWidget();
+		editor?.getFindWidget().find(true);
+	}
+
+	findNext(): void {
+		const editor = this._getActiveTerminalEditor();
+		editor?.showFindWidget();
+		editor?.getFindWidget().find(false);
+	}
+
+	getFindState(): FindReplaceState {
+		const editor = this._getActiveTerminalEditor();
+		return editor!.findState!;
+	}
+
+	async focusFindWidget(): Promise<void> {
+		const instance = this.activeInstance;
+		if (instance) {
+			await instance.focusWhenReady(true);
+		}
+
+		this._getActiveTerminalEditor()?.focusFindWidget();
+	}
+
+	hideFindWidget(): void {
+		this._getActiveTerminalEditor()?.hideFindWidget();
 	}
 
 	get activeInstance(): ITerminalInstance | undefined {
@@ -84,7 +128,7 @@ export class TerminalEditorService extends Disposable implements ITerminalEditor
 		});
 	}
 
-	getOrCreateEditorInput(instance: ITerminalInstance | SerializedTerminalEditorInput): TerminalEditorInput {
+	getOrCreateEditorInput(instance: ITerminalInstance | SerializedTerminalEditorInput, isFutureSplit: boolean = false): TerminalEditorInput {
 		let cachedEditor;
 		if ('id' in instance) {
 			cachedEditor = this._editorInputs.get(instance.id);
@@ -99,7 +143,7 @@ export class TerminalEditorService extends Disposable implements ITerminalEditor
 			instance = this._terminalInstanceService.createInstance({ attachPersistentProcess: instance }, TerminalLocation.Editor);
 		}
 
-		const input = new TerminalEditorInput(instance, this._themeService, this._terminalInstanceService);
+		const input = this._instantiationService.createInstance(TerminalEditorInput, instance);
 		instance.target = TerminalLocation.Editor;
 		this._editorInputs.set(instance.instanceId, input);
 		this._instanceDisposables.set(instance.instanceId, [
@@ -108,6 +152,14 @@ export class TerminalEditorService extends Disposable implements ITerminalEditor
 		this.instances.push(instance);
 		this._onDidChangeInstances.fire();
 		return input;
+	}
+
+	splitInstance(instanceToSplit: ITerminalInstance, shellLaunchConfig: IShellLaunchConfig = {}): ITerminalInstance {
+		const input = this.getOrCreateEditorInput(instanceToSplit);
+		const instance = this._terminalInstanceService.createInstance(shellLaunchConfig, TerminalLocation.Editor);
+		input.setCopyInstance(instance);
+		this._commandService.executeCommand('workbench.action.splitEditor');
+		return instance;
 	}
 
 	detachActiveEditorInstance(): ITerminalInstance {
