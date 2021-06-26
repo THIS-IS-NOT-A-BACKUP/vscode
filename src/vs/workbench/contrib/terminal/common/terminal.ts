@@ -9,7 +9,7 @@ import { IDisposable } from 'vs/base/common/lifecycle';
 import { RawContextKey } from 'vs/platform/contextkey/common/contextkey';
 import { IProcessEnvironment, OperatingSystem } from 'vs/base/common/platform';
 import { IExtensionPointDescriptor } from 'vs/workbench/services/extensions/common/extensionsRegistry';
-import { IProcessDataEvent, IProcessReadyEvent, IShellLaunchConfig, ITerminalDimensions, ITerminalDimensionsOverride, ITerminalLaunchError, ITerminalProfile, ITerminalProfileObject, TerminalShellType, TitleEventSource } from 'vs/platform/terminal/common/terminal';
+import { IProcessDataEvent, IProcessReadyEvent, IShellLaunchConfig, ITerminalDimensions, ITerminalDimensionsOverride, ITerminalLaunchError, ITerminalProfile, ITerminalProfileObject, TerminalLocation, TerminalShellType, TitleEventSource } from 'vs/platform/terminal/common/terminal';
 import { IEnvironmentVariableInfo } from 'vs/workbench/contrib/terminal/common/environmentVariable';
 import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
 import { URI } from 'vs/base/common/uri';
@@ -210,11 +210,6 @@ export interface ITerminalConfiguration {
 	defaultLocation: TerminalLocation;
 }
 
-export const enum TerminalLocation {
-	TerminalView = 'view',
-	Editor = 'editor'
-}
-
 export const DEFAULT_LOCAL_ECHO_EXCLUDE: ReadonlyArray<string> = ['vim', 'vi', 'nano', 'tmux'];
 
 export interface ITerminalConfigHelper {
@@ -379,6 +374,7 @@ export const enum TerminalCommandId {
 	FindPrevious = 'workbench.action.terminal.findPrevious',
 	Toggle = 'workbench.action.terminal.toggleTerminal',
 	Kill = 'workbench.action.terminal.kill',
+	KillEditor = 'workbench.action.terminal.killEditor',
 	KillInstance = 'workbench.action.terminal.killInstance',
 	QuickKill = 'workbench.action.terminal.quickKill',
 	ConfigureTerminalSettings = 'workbench.action.terminal.openSettings',
@@ -454,8 +450,8 @@ export const enum TerminalCommandId {
 	NavigationModeFocusPrevious = 'workbench.action.terminal.navigationModeFocusPrevious',
 	ShowEnvironmentInformation = 'workbench.action.terminal.showEnvironmentInformation',
 	SearchWorkspace = 'workbench.action.terminal.searchWorkspace',
-	AttachToRemoteTerminal = 'workbench.action.terminal.attachToSession',
-	DetachProcess = 'workbench.action.terminal.detachProcess',
+	AttachToSession = 'workbench.action.terminal.attachToSession',
+	DetachSession = 'workbench.action.terminal.detachSession',
 	MoveToEditor = 'workbench.action.terminal.moveToEditor',
 	MoveToEditorInstance = 'workbench.action.terminal.moveToEditorInstance',
 	MoveToTerminalPanel = 'workbench.action.terminal.moveToTerminalPanel',
@@ -481,8 +477,11 @@ export const DEFAULT_COMMANDS_TO_SKIP_SHELL: string[] = [
 	TerminalCommandId.FocusPrevious,
 	TerminalCommandId.Focus,
 	TerminalCommandId.Kill,
+	TerminalCommandId.KillEditor,
+	TerminalCommandId.MoveToEditor,
 	TerminalCommandId.MoveToLineEnd,
 	TerminalCommandId.MoveToLineStart,
+	TerminalCommandId.MoveToTerminalPanel,
 	TerminalCommandId.NewInActiveWorkspace,
 	TerminalCommandId.New,
 	TerminalCommandId.Paste,
