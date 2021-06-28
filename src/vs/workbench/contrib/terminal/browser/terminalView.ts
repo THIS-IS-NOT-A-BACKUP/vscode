@@ -44,6 +44,7 @@ import { ColorScheme } from 'vs/platform/theme/common/theme';
 import { getColorClass, getUriClasses } from 'vs/workbench/contrib/terminal/browser/terminalIcon';
 import { terminalStrings } from 'vs/workbench/contrib/terminal/common/terminalStrings';
 import { withNullAsUndefined } from 'vs/base/common/types';
+import { DataTransfers } from 'vs/base/browser/dnd';
 
 export class TerminalViewPane extends ViewPane {
 	private _actions: IAction[] | undefined;
@@ -415,8 +416,8 @@ class SingleTerminalTabActionViewItem extends MenuEntryActionViewItem {
 		super(new MenuItemAction(
 			{
 				id: action.id,
-				title: getSingleTabLabel(_terminalService.activeInstance),
-				tooltip: getSingleTabTooltip(_terminalService.activeInstance)
+				title: getSingleTabLabel(_terminalGroupService.activeInstance),
+				tooltip: getSingleTabTooltip(_terminalGroupService.activeInstance)
 			},
 			{
 				id: TerminalCommandId.Split,
@@ -426,14 +427,16 @@ class SingleTerminalTabActionViewItem extends MenuEntryActionViewItem {
 			undefined,
 			contextKeyService,
 			_commandService
-		), keybindingService, notificationService);
+		), {
+			draggable: true
+		}, keybindingService, notificationService);
 
 		// Register listeners to update the tab
 		this._register(this._terminalService.onInstancePrimaryStatusChanged(e => this.updateLabel(e)));
 		this._register(_terminalGroupService.onDidChangeActiveInstance(() => this.updateLabel()));
 		this._register(this._terminalService.onInstanceIconChanged(e => this.updateLabel(e)));
 		this._register(this._terminalService.onInstanceTitleChanged(e => {
-			if (e === this._terminalService.activeInstance) {
+			if (e === this._terminalGroupService.activeInstance) {
 				this._action.tooltip = getSingleTabTooltip(e);
 				this.updateLabel();
 			}
@@ -453,23 +456,31 @@ class SingleTerminalTabActionViewItem extends MenuEntryActionViewItem {
 
 	override updateLabel(e?: ITerminalInstance): void {
 		// Only update if it's the active instance
-		if (e && e === this._terminalGroupService.activeInstance) {
+		if (e && e !== this._terminalGroupService.activeInstance) {
 			return;
 		}
 
-		if (this._elementDisposables.length === 0) {
+		if (this._elementDisposables.length === 0 && this.element && this.label) {
 			// Right click opens context menu
-			this._elementDisposables.push(dom.addDisposableListener(this.element!, dom.EventType.CONTEXT_MENU, e => {
+			this._elementDisposables.push(dom.addDisposableListener(this.element, dom.EventType.CONTEXT_MENU, e => {
 				if (e.button === 2) {
 					this._openContextMenu();
 					e.preventDefault();
 				}
 			}));
 			// Middle click kills
-			this._elementDisposables.push(dom.addDisposableListener(this.element!, dom.EventType.AUXCLICK, e => {
+			this._elementDisposables.push(dom.addDisposableListener(this.element, dom.EventType.AUXCLICK, e => {
 				if (e.button === 1) {
-					this._terminalService.activeInstance?.dispose();
+					this._terminalGroupService.activeInstance?.dispose();
 					e.preventDefault();
+				}
+			}));
+			// Drag and drop
+			this._elementDisposables.push(dom.addDisposableListener(this.element, dom.EventType.DRAG_START, e => {
+				const instance = this._terminalGroupService.activeInstance;
+				if (e.dataTransfer && instance) {
+					e.dataTransfer.setData(DataTransfers.RESOURCES, JSON.stringify([instance.resource.toString()]));
+					e.dataTransfer.setData(DataTransfers.TERMINALS, JSON.stringify([instance.instanceId]));
 				}
 			}));
 		}

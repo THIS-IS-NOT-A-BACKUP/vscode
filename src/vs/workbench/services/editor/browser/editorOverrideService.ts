@@ -130,8 +130,7 @@ export class EditorOverrideService extends Disposable implements IEditorOverride
 			return OverrideStatus.NONE;
 		}
 
-		const handlesDiff = typeof selectedEditor.options?.canHandleDiff === 'function' ? selectedEditor.options.canHandleDiff() : selectedEditor.options?.canHandleDiff;
-		if (handlesDiff === false && isResourceDiffEditorInput(editor)) {
+		if (selectedEditor.createDiffEditorInput === undefined && isResourceDiffEditorInput(editor)) {
 			return OverrideStatus.NONE;
 		}
 
@@ -139,7 +138,7 @@ export class EditorOverrideService extends Disposable implements IEditorOverride
 		const activeEditor = group.activeEditor;
 		const isActive = activeEditor ? activeEditor.editorId === selectedEditor.editorInfo.id && isEqual(activeEditor.resource, resource) : false;
 		if (isActive) {
-			return OverrideStatus.NONE;
+			return OverrideStatus.ABORT;
 		}
 		const input = await this.doOverrideEditorInput(editor, group, selectedEditor);
 		if (conflictingDefault && input) {
@@ -507,7 +506,7 @@ export class EditorOverrideService extends Disposable implements IEditorOverride
 			};
 			quickPickEntries.push(quickPickEntry);
 		});
-		if (!showDefaultPicker) {
+		if (!showDefaultPicker && extname(resource) !== '') {
 			const separator: IQuickPickSeparator = { type: 'separator' };
 			quickPickEntries.push(separator);
 			const configureDefaultEntry = {
@@ -527,10 +526,10 @@ export class EditorOverrideService extends Disposable implements IEditorOverride
 			readonly openInBackground: boolean;
 		};
 
-		const resource = EditorResourceAccessor.getOriginalUri(editor, { supportSideBySide: SideBySideEditor.PRIMARY });
+		let resource = EditorResourceAccessor.getOriginalUri(editor, { supportSideBySide: SideBySideEditor.PRIMARY });
 
-		if (!resource) {
-			return;
+		if (resource === undefined) {
+			resource = URI.from({ scheme: Schemas.untitled });
 		}
 
 		// Text editor has the lowest priority because we
@@ -563,7 +562,7 @@ export class EditorOverrideService extends Disposable implements IEditorOverride
 				}
 
 				// If asked to always update the setting then update it even if the gear isn't clicked
-				if (showDefaultPicker && result?.item.id) {
+				if (resource && showDefaultPicker && result?.item.id) {
 					this.updateUserAssociations(`*${extname(resource)}`, result.item.id,);
 				}
 
