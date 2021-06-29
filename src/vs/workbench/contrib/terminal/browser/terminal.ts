@@ -82,7 +82,7 @@ export interface ITerminalGroup {
 	focusNextPane(): void;
 	resizePane(direction: Direction): void;
 	resizePanes(relativeSizes: number[]): void;
-	setActiveInstanceByIndex(index: number): void;
+	setActiveInstanceByIndex(index: number, force?: boolean): void;
 	attachToElement(element: HTMLElement): void;
 	addInstance(instance: ITerminalInstance): void;
 	removeInstance(instance: ITerminalInstance): void;
@@ -217,7 +217,6 @@ export interface ITerminalGroupService extends ITerminalInstanceHost, ITerminalF
 	readonly groups: readonly ITerminalGroup[];
 	activeGroup: ITerminalGroup | undefined;
 	readonly activeGroupIndex: number;
-	readonly activeInstanceIndex: number;
 
 	readonly onDidChangeActiveGroup: Event<ITerminalGroup | undefined>;
 	readonly onDidDisposeGroup: Event<ITerminalGroup>;
@@ -252,7 +251,7 @@ export interface ITerminalGroupService extends ITerminalInstanceHost, ITerminalF
 
 	setContainer(container: HTMLElement): void;
 
-	showPanel(focus?: boolean): Promise<void>;
+	showPanel(focus?: boolean, force?: boolean): Promise<void>;
 	hidePanel(): void;
 	focusTabs(): void;
 	showTabs(): void;

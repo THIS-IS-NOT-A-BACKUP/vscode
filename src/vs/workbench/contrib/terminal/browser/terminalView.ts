@@ -433,8 +433,9 @@ class SingleTerminalTabActionViewItem extends MenuEntryActionViewItem {
 
 		// Register listeners to update the tab
 		this._register(this._terminalService.onInstancePrimaryStatusChanged(e => this.updateLabel(e)));
-		this._register(_terminalGroupService.onDidChangeActiveInstance(() => this.updateLabel()));
+		this._register(this._terminalGroupService.onDidChangeActiveInstance(() => this.updateLabel()));
 		this._register(this._terminalService.onInstanceIconChanged(e => this.updateLabel(e)));
+		this._register(this._terminalService.onInstanceColorChanged(e => this.updateLabel(e)));
 		this._register(this._terminalService.onInstanceTitleChanged(e => {
 			if (e === this._terminalGroupService.activeInstance) {
 				this._action.tooltip = getSingleTabTooltip(e);
@@ -632,7 +633,7 @@ class TerminalThemeIconStyle extends Themable {
 			if (color) {
 				// exclude status icons (file-icon) and inline action icons (trashcan and horizontalSplit)
 				css += (
-					`.monaco-workbench .${colorClass} .codicon:first-child:not(.codicon-split-horizontal):not(.codicon-trashcan):not(.file-icon),` +
+					`.monaco-workbench .${colorClass} .codicon:first-child:not(.codicon-split-horizontal):not(.codicon-trashcan):not(.file-icon)` +
 					`{ color: ${color} !important; }`
 				);
 			}

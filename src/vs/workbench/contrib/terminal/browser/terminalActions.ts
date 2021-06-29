@@ -109,7 +109,8 @@ export function registerTerminalActions() {
 				id: TerminalCommandId.NewInActiveWorkspace,
 				title: { value: localize('workbench.action.terminal.newInActiveWorkspace', "Create New Integrated Terminal (In Active Workspace)"), original: 'Create New Integrated Terminal (In Active Workspace)' },
 				f1: true,
-				category
+				category,
+				precondition: KEYBINDING_CONTEXT_TERMINAL_PROCESS_SUPPORTED
 			});
 		}
 		async run(accessor: ServicesAccessor) {
@@ -131,6 +132,7 @@ export function registerTerminalActions() {
 				title: { value: localize('workbench.action.terminal.newWithProfile', "Create New Integrated Terminal (With Profile)"), original: 'Create New Integrated Terminal (With Profile)' },
 				f1: true,
 				category,
+				precondition: KEYBINDING_CONTEXT_TERMINAL_PROCESS_SUPPORTED,
 				description: {
 					description: 'workbench.action.terminal.newWithProfile',
 					args: [{
@@ -201,7 +203,7 @@ export function registerTerminalActions() {
 		constructor() {
 			super({
 				id: TerminalCommandId.CreateTerminalEditor,
-				title: { value: localize('workbench.action.terminal.createTerminalEditor', "Create Terminal Editor"), original: 'Create Terminal Editor' },
+				title: { value: localize('workbench.action.terminal.createTerminalEditor', "Create Terminal in Editor Area"), original: 'Create Terminal in Editor Area' },
 				f1: true,
 				category,
 				precondition: KEYBINDING_CONTEXT_TERMINAL_PROCESS_SUPPORTED
@@ -222,7 +224,8 @@ export function registerTerminalActions() {
 				id: TerminalCommandId.MoveToEditor,
 				title: terminalStrings.moveToEditor,
 				f1: true,
-				category
+				category,
+				precondition: KEYBINDING_CONTEXT_TERMINAL_PROCESS_SUPPORTED
 			});
 		}
 		async run(accessor: ServicesAccessor) {
@@ -238,7 +241,7 @@ export function registerTerminalActions() {
 				title: terminalStrings.moveToEditor,
 				f1: false,
 				category,
-				precondition: ContextKeyExpr.or(KEYBINDING_CONTEXT_TERMINAL_PROCESS_SUPPORTED, KEYBINDING_CONTEXT_TERMINAL_IS_OPEN)
+				precondition: ContextKeyExpr.and(KEYBINDING_CONTEXT_TERMINAL_PROCESS_SUPPORTED, KEYBINDING_CONTEXT_TERMINAL_IS_OPEN)
 			});
 		}
 		async run(accessor: ServicesAccessor) {
@@ -777,7 +780,7 @@ export function registerTerminalActions() {
 		constructor() {
 			super({
 				id: TerminalCommandId.ChangeIcon,
-				title: { value: localize('workbench.action.terminal.changeIcon', "Change Icon..."), original: 'Change Icon...' },
+				title: terminalStrings.changeIcon,
 				f1: true,
 				category,
 				precondition: KEYBINDING_CONTEXT_TERMINAL_PROCESS_SUPPORTED
@@ -791,7 +794,7 @@ export function registerTerminalActions() {
 		constructor() {
 			super({
 				id: TerminalCommandId.ChangeIconInstance,
-				title: { value: localize('workbench.action.terminal.changeIcon', "Change Icon..."), original: 'Change Icon...' },
+				title: terminalStrings.changeIcon,
 				f1: false,
 				category,
 				precondition: ContextKeyExpr.and(KEYBINDING_CONTEXT_TERMINAL_PROCESS_SUPPORTED, KEYBINDING_CONTEXT_TERMINAL_TABS_SINGULAR_SELECTION)
@@ -805,7 +808,7 @@ export function registerTerminalActions() {
 		constructor() {
 			super({
 				id: TerminalCommandId.ChangeColor,
-				title: { value: localize('workbench.action.terminal.changeColor', "Change Color..."), original: 'Change Color...' },
+				title: terminalStrings.changeColor,
 				f1: true,
 				category,
 				precondition: KEYBINDING_CONTEXT_TERMINAL_PROCESS_SUPPORTED
@@ -819,7 +822,7 @@ export function registerTerminalActions() {
 		constructor() {
 			super({
 				id: TerminalCommandId.ChangeColorInstance,
-				title: { value: localize('workbench.action.terminal.changeColor', "Change Color..."), original: 'Change Color...' },
+				title: terminalStrings.changeColor,
 				f1: false,
 				category,
 				precondition: ContextKeyExpr.and(KEYBINDING_CONTEXT_TERMINAL_PROCESS_SUPPORTED, KEYBINDING_CONTEXT_TERMINAL_TABS_SINGULAR_SELECTION)
@@ -833,7 +836,7 @@ export function registerTerminalActions() {
 		constructor() {
 			super({
 				id: TerminalCommandId.Rename,
-				title: { value: localize('workbench.action.terminal.rename', "Rename..."), original: 'Rename...' },
+				title: terminalStrings.rename,
 				f1: true,
 				category,
 				precondition: KEYBINDING_CONTEXT_TERMINAL_PROCESS_SUPPORTED
@@ -847,7 +850,7 @@ export function registerTerminalActions() {
 		constructor() {
 			super({
 				id: TerminalCommandId.RenameInstance,
-				title: { value: localize('workbench.action.terminal.renameInstance', "Rename..."), original: 'Rename...' },
+				title: terminalStrings.rename,
 				f1: false,
 				category,
 				keybinding: {
@@ -1691,7 +1694,7 @@ export function registerTerminalActions() {
 		constructor() {
 			super({
 				id: TerminalCommandId.KillEditor,
-				title: { value: localize('workbench.action.terminal.killEditor', "Kill the Active Terminal Editor"), original: 'Kill the Active Terminal Editor' },
+				title: { value: localize('workbench.action.terminal.killEditor', "Kill the Active Terminal in Editor Area"), original: 'Kill the Active Terminal in Editor Area' },
 				f1: true,
 				category,
 				precondition: KEYBINDING_CONTEXT_TERMINAL_PROCESS_SUPPORTED,

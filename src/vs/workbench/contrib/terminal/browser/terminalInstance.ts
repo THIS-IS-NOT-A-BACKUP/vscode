@@ -1921,7 +1921,7 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 			const color = colorTheme.getColor(colorKey);
 			if (color) {
 				css += (
-					`.monaco-workbench .${colorClass} .codicon:first-child:not(.codicon-split-horizontal):not(.codicon-trashcan):not(.file-icon),` +
+					`.monaco-workbench .${colorClass} .codicon:first-child:not(.codicon-split-horizontal):not(.codicon-trashcan):not(.file-icon)` +
 					`{ color: ${color} !important; }`
 				);
 			}
@@ -2030,12 +2030,15 @@ class TerminalInstanceDragAndDropController extends Disposable implements IDragA
 
 		const terminalResources = e.dataTransfer.getData(DataTransfers.TERMINALS);
 		if (terminalResources) {
-			const uri = URI.from({
-				scheme: Schemas.vscodeTerminal,
-				path: URI.parse(JSON.parse(terminalResources)[0]).path
-			});
-			const side = this._getDropSide(e);
-			this._onDropTerminal.fire({ uri, side });
+			const json = JSON.parse(terminalResources);
+			for (const entry of json) {
+				const uri = URI.from({
+					scheme: Schemas.vscodeTerminal,
+					path: URI.parse(entry).path
+				});
+				const side = this._getDropSide(e);
+				this._onDropTerminal.fire({ uri, side });
+			}
 			return;
 		}
 
