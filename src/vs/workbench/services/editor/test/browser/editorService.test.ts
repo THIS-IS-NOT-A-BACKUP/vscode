@@ -204,7 +204,7 @@ suite('EditorService', () => {
 		disposables.add(accessor.editorOverrideService.registerEditor(
 			'*.editor-service-override-tests',
 			{ id: TEST_EDITOR_INPUT_ID, label: 'Label', priority: RegisteredEditorPriority.exclusive },
-			{},
+			{ canHandleDiff: true },
 			editor => {
 				editorFactoryCalled++;
 				lastEditorFactoryEditor = editor;
@@ -786,7 +786,7 @@ suite('EditorService', () => {
 				assert.strictEqual(pane?.group, rootGroup);
 				assert.ok(pane.input instanceof TestFileEditorInput);
 				assert.strictEqual(pane.input.resource.scheme, 'untitled');
-				// assert.strictEqual(pane.group.isSticky(pane.input), true); TODO@bpasero https://github.com/microsoft/vscode/issues/127314
+				assert.strictEqual(pane.group.isSticky(pane.input), true);
 
 				assert.strictEqual(editorFactoryCalled, 0);
 				assert.strictEqual(untitledEditorFactoryCalled, 1);
@@ -865,8 +865,7 @@ suite('EditorService', () => {
 
 				assert.strictEqual(pane?.group, rootGroup);
 				assert.ok(pane.input instanceof TestFileEditorInput);
-				// assert.strictEqual(pane.group.isSticky(pane.input), true); TODO@bpasero https://github.com/microsoft/vscode/issues/127314
-
+				assert.strictEqual(pane.group.isSticky(pane.input), true);
 				assert.strictEqual(editorFactoryCalled, 0);
 				assert.strictEqual(untitledEditorFactoryCalled, 0);
 				assert.strictEqual(diffEditorFactoryCalled, 1);
@@ -1330,6 +1329,12 @@ suite('EditorService', () => {
 		input = service.createEditorInput(untypedInput);
 		assert(input instanceof UntitledTextEditorInput);
 		assert.ok(!(input as UntitledTextEditorInput).model.hasAssociatedFilePath);
+
+		// Untyped input (untitled with custom resource, but forceUntitled)
+		untypedInput = { resource: URI.file('/fake'), forceUntitled: true };
+		assert.ok(isUntitledResourceEditorInput(untypedInput));
+		input = service.createEditorInput(untypedInput);
+		assert(input instanceof UntitledTextEditorInput);
 
 		// Untyped Input (untitled with custom resource)
 		const provider = instantiationService.createInstance(FileServiceProvider, 'untitled-custom');

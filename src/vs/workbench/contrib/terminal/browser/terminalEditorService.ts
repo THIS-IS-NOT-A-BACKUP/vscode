@@ -65,8 +65,12 @@ export class TerminalEditorService extends Disposable implements ITerminalEditor
 		}));
 		this._register(this.onDidDisposeInstance(instance => this.detachInstance(instance)));
 		this._register(this._editorService.onDidCloseEditor(e => {
-			if (e.editor instanceof TerminalEditorInput && e.editor.terminalInstance) {
-				this.detachInstance(e.editor.terminalInstance);
+			const instance = (e.editor as any)?.terminalInstance;
+			if (instance) {
+				const instanceIndex = this.instances.findIndex(e => e === instance);
+				if (instanceIndex !== -1) {
+					this.instances.splice(instanceIndex, 1);
+				}
 			}
 		}));
 	}
@@ -126,8 +130,7 @@ export class TerminalEditorService extends Disposable implements ITerminalEditor
 		} else {
 			this._activeInstanceIndex = this.instances.findIndex(e => e === instance);
 		}
-		const newActiveInstance = this.activeInstance;
-		this._onDidChangeActiveInstance.fire(newActiveInstance);
+		this._onDidChangeActiveInstance.fire(this.activeInstance);
 	}
 
 	async openEditor(instance: ITerminalInstance): Promise<void> {
