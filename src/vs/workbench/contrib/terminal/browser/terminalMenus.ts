@@ -394,8 +394,7 @@ export function setupTerminalMenus(): void {
 						id: TerminalCommandId.ChangeIcon,
 						title: localize('workbench.action.terminal.changeIcon', "Change Icon...")
 					},
-					group: ContextMenuGroup.Edit,
-					order: 3
+					group: ContextMenuGroup.Edit
 				}
 			},
 			{
@@ -405,8 +404,7 @@ export function setupTerminalMenus(): void {
 						id: TerminalCommandId.ChangeColor,
 						title: localize('workbench.action.terminal.changeColor', "Change Color...")
 					},
-					group: ContextMenuGroup.Edit,
-					order: 4
+					group: ContextMenuGroup.Edit
 				}
 			},
 			{
@@ -449,7 +447,7 @@ export function setupTerminalMenus(): void {
 				id: MenuId.TerminalTabContext,
 				item: {
 					command: {
-						id: TerminalCommandId.MoveToEditor,
+						id: TerminalCommandId.MoveToEditorInstance,
 						title: terminalStrings.moveToEditor.short
 					},
 					group: ContextMenuGroup.Create,
