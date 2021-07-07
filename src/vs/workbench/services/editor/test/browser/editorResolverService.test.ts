@@ -8,9 +8,9 @@ import { DisposableStore } from 'vs/base/common/lifecycle';
 import { Schemas } from 'vs/base/common/network';
 import { URI } from 'vs/base/common/uri';
 import { EditorPart } from 'vs/workbench/browser/parts/editor/editorPart';
-import { EditorOverrideService } from 'vs/workbench/services/editor/browser/editorOverrideService';
+import { EditorResolverService } from 'vs/workbench/services/editor/browser/editorResolverService';
 import { IEditorGroupsService } from 'vs/workbench/services/editor/common/editorGroupsService';
-import { IEditorOverrideService, OverrideStatus, RegisteredEditorPriority } from 'vs/workbench/services/editor/common/editorOverrideService';
+import { IEditorResolverService, ResolvedStatus, RegisteredEditorPriority } from 'vs/workbench/services/editor/common/editorResolverService';
 import { createEditorPart, ITestInstantiationService, TestFileEditorInput, TestServiceAccessor, workbenchInstantiationService } from 'vs/workbench/test/browser/workbenchTestServices';
 
 suite('EditorOverrideService', () => {
@@ -20,18 +20,18 @@ suite('EditorOverrideService', () => {
 
 	teardown(() => disposables.clear());
 
-	async function createEditorOverrideService(instantiationService: ITestInstantiationService = workbenchInstantiationService()): Promise<[EditorPart, EditorOverrideService, TestServiceAccessor]> {
+	async function createEditorResolverService(instantiationService: ITestInstantiationService = workbenchInstantiationService()): Promise<[EditorPart, EditorResolverService, TestServiceAccessor]> {
 		const part = await createEditorPart(instantiationService, disposables);
 
 		instantiationService.stub(IEditorGroupsService, part);
-		const editorOverrideService = instantiationService.createInstance(EditorOverrideService);
-		instantiationService.stub(IEditorOverrideService, editorOverrideService);
+		const editorResolverService = instantiationService.createInstance(EditorResolverService);
+		instantiationService.stub(IEditorResolverService, editorResolverService);
 
-		return [part, editorOverrideService, instantiationService.createInstance(TestServiceAccessor)];
+		return [part, editorResolverService, instantiationService.createInstance(TestServiceAccessor)];
 	}
 
-	test('Simple Override', async () => {
-		const [part, service] = await createEditorOverrideService();
+	test('Simple Resolve', async () => {
+		const [part, service] = await createEditorResolverService();
 		const registeredEditor = service.registerEditor('*.test',
 			{
 				id: 'TEST_EDITOR',
@@ -43,19 +43,19 @@ suite('EditorOverrideService', () => {
 			({ resource, options }, group) => ({ editor: new TestFileEditorInput(URI.parse(resource.toString()), TEST_EDITOR_INPUT_ID) }),
 		);
 
-		const resultingOverride = await service.resolveEditorInput({ resource: URI.file('my://resource-basics.test') }, part.activeGroup);
-		assert.ok(resultingOverride);
-		assert.notStrictEqual(typeof resultingOverride, 'number');
-		if (resultingOverride !== OverrideStatus.ABORT && resultingOverride !== OverrideStatus.NONE) {
-			assert.strictEqual(resultingOverride.editor.typeId, TEST_EDITOR_INPUT_ID);
-			resultingOverride.editor.dispose();
+		const resultingResolution = await service.resolveEditor({ resource: URI.file('my://resource-basics.test') }, part.activeGroup);
+		assert.ok(resultingResolution);
+		assert.notStrictEqual(typeof resultingResolution, 'number');
+		if (resultingResolution !== ResolvedStatus.ABORT && resultingResolution !== ResolvedStatus.NONE) {
+			assert.strictEqual(resultingResolution.editor.typeId, TEST_EDITOR_INPUT_ID);
+			resultingResolution.editor.dispose();
 		}
 		registeredEditor.dispose();
 	});
 
-	test('Untitled Override', async () => {
+	test('Untitled Resolve', async () => {
 		const UNTITLED_TEST_EDITOR_INPUT_ID = 'UNTITLED_TEST_INPUT';
-		const [part, service] = await createEditorOverrideService();
+		const [part, service] = await createEditorResolverService();
 		const registeredEditor = service.registerEditor('*.test',
 			{
 				id: 'TEST_EDITOR',
@@ -69,27 +69,27 @@ suite('EditorOverrideService', () => {
 		);
 
 		// Untyped untitled - no resource
-		let resultingOverride = await service.resolveEditorInput({ resource: undefined }, part.activeGroup);
-		assert.ok(resultingOverride);
+		let resultingResolution = await service.resolveEditor({ resource: undefined }, part.activeGroup);
+		assert.ok(resultingResolution);
 		// We don't expect untitled to match the *.test glob
-		assert.strictEqual(typeof resultingOverride, 'number');
+		assert.strictEqual(typeof resultingResolution, 'number');
 
 		// Untyped untitled - with untitled resource
-		resultingOverride = await service.resolveEditorInput({ resource: URI.from({ scheme: Schemas.untitled, path: 'foo.test' }) }, part.activeGroup);
-		assert.ok(resultingOverride);
-		assert.notStrictEqual(typeof resultingOverride, 'number');
-		if (resultingOverride !== OverrideStatus.ABORT && resultingOverride !== OverrideStatus.NONE) {
-			assert.strictEqual(resultingOverride.editor.typeId, UNTITLED_TEST_EDITOR_INPUT_ID);
-			resultingOverride.editor.dispose();
+		resultingResolution = await service.resolveEditor({ resource: URI.from({ scheme: Schemas.untitled, path: 'foo.test' }) }, part.activeGroup);
+		assert.ok(resultingResolution);
+		assert.notStrictEqual(typeof resultingResolution, 'number');
+		if (resultingResolution !== ResolvedStatus.ABORT && resultingResolution !== ResolvedStatus.NONE) {
+			assert.strictEqual(resultingResolution.editor.typeId, UNTITLED_TEST_EDITOR_INPUT_ID);
+			resultingResolution.editor.dispose();
 		}
 
 		// Untyped untitled - file resource with forceUntitled
-		resultingOverride = await service.resolveEditorInput({ resource: URI.file('/fake.test'), forceUntitled: true }, part.activeGroup);
-		assert.ok(resultingOverride);
-		assert.notStrictEqual(typeof resultingOverride, 'number');
-		if (resultingOverride !== OverrideStatus.ABORT && resultingOverride !== OverrideStatus.NONE) {
-			assert.strictEqual(resultingOverride.editor.typeId, UNTITLED_TEST_EDITOR_INPUT_ID);
-			resultingOverride.editor.dispose();
+		resultingResolution = await service.resolveEditor({ resource: URI.file('/fake.test'), forceUntitled: true }, part.activeGroup);
+		assert.ok(resultingResolution);
+		assert.notStrictEqual(typeof resultingResolution, 'number');
+		if (resultingResolution !== ResolvedStatus.ABORT && resultingResolution !== ResolvedStatus.NONE) {
+			assert.strictEqual(resultingResolution.editor.typeId, UNTITLED_TEST_EDITOR_INPUT_ID);
+			resultingResolution.editor.dispose();
 		}
 
 

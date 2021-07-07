@@ -112,12 +112,12 @@ export class DiffEditorInput extends SideBySideEditorInput {
 		return this.cachedModel;
 	}
 
-	override prefersEditor<T extends IEditorDescriptor<IEditorPane>>(editors: T[]): T | undefined {
+	override prefersEditorPane<T extends IEditorDescriptor<IEditorPane>>(editorPanes: T[]): T | undefined {
 		if (this.forceOpenAsBinary) {
-			return editors.find(editor => editor.typeId === BINARY_DIFF_EDITOR_ID);
+			return editorPanes.find(editorPane => editorPane.typeId === BINARY_DIFF_EDITOR_ID);
 		}
 
-		return editors.find(editor => editor.typeId === TEXT_DIFF_EDITOR_ID);
+		return editorPanes.find(editorPane => editorPane.typeId === TEXT_DIFF_EDITOR_ID);
 	}
 
 	private async createModel(): Promise<DiffEditorModel> {
@@ -141,7 +141,7 @@ export class DiffEditorInput extends SideBySideEditorInput {
 		const originalResourceEditorInput = this.secondary.toUntyped(group, context);
 		const modifiedResourceEditorInput = this.primary.toUntyped(group, context);
 
-		if (originalResourceEditorInput && modifiedResourceEditorInput) {
+		if (originalResourceEditorInput && modifiedResourceEditorInput && !isResourceDiffEditorInput(originalResourceEditorInput) && !isResourceDiffEditorInput(modifiedResourceEditorInput)) {
 			return {
 				label: this.name,
 				description: this.description,
