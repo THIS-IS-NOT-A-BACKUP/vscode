@@ -3039,10 +3039,10 @@ electron-to-chromium@^1.3.723:
   resolved "https://registry.yarnpkg.com/electron-to-chromium/-/electron-to-chromium-1.3.737.tgz#196f2e9656f4f3c31930750e1899c091b72d36b5"
   integrity sha512-P/B84AgUSQXaum7a8m11HUsYL8tj9h/Pt5f7Hg7Ty6bm5DxlFq+e5+ouHUoNQMsKDJ7u4yGfI8mOErCmSH9wyg==
 
-electron@12.0.13:
-  version "12.0.13"
-  resolved "https://registry.yarnpkg.com/electron/-/electron-12.0.13.tgz#f1c7f3d8b25078d7622ed900cc8f2aa4731a5e0a"
-  integrity sha512-2yx102mhqgyaTVH+GCet4hURKOIuI27DcVdlval5T3eOEZMOHNrCbi8/8PZ7MqMfB5PIxJ+grS5S00/n5Zcu2Q==
+electron@13.1.6:
+  version "13.1.6"
+  resolved "https://registry.yarnpkg.com/electron/-/electron-13.1.6.tgz#6ecaf969255d62ce82cc0b5c948bf26e7dfb489b"
+  integrity sha512-XiB55/JTaQpDFQrD9pulYnOGwaWeMyRIub5ispvoE2bWBvM5zVMLptwMLb0m3KTMrfSkzhedZvOu7fwYvR7L7Q==
   dependencies:
     "@electron/get" "^1.0.1"
     "@types/node" "^14.6.2"
@@ -10004,10 +10004,10 @@ vm-browserify@^1.0.1:
   resolved "https://registry.yarnpkg.com/vm-browserify/-/vm-browserify-1.1.2.tgz#78641c488b8e6ca91a75f511e7a3b32a86e5dda0"
   integrity sha512-2ham8XPWTONajOR0ohOKOHXkm3+gaBmGut3SRuu75xLd/RRaY6vqgh8NBYYk7+RW3u5AtzPQZG8F10LHkl0lAQ==
 
-vscode-debugprotocol@1.47.0:
-  version "1.47.0"
-  resolved "https://registry.yarnpkg.com/vscode-debugprotocol/-/vscode-debugprotocol-1.47.0.tgz#700055bea38633a9530a5a552fb3ea314d76b73f"
-  integrity sha512-ii7oCz3Wfr/SGtFr5AYop5dJm0dUmpg0hq2lTzTBdaht8nSheYMMjPntxULBR+2TUxXLcCKFZkF2UEJQduYsIQ==
+vscode-debugprotocol@1.48.0-pre.0:
+  version "1.48.0-pre.0"
+  resolved "https://registry.yarnpkg.com/vscode-debugprotocol/-/vscode-debugprotocol-1.48.0-pre.0.tgz#954e6a034da879d39ed5ef749a063d15eba14f10"
+  integrity sha512-iPaDd/5CWaYfOdfaMALvCADfWAU9j563IpvxXryg09hx9Cy7ydsulvbdRAini6tTKXdYndNBZgDIJ3PmlJoRgQ==
 
 vscode-nls-dev@^3.3.1:
   version "3.3.1"
