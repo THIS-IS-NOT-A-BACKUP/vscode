@@ -26,6 +26,7 @@ import * as extHostProtocol from 'vs/workbench/api/common/extHost.protocol';
 import { CommandsConverter } from 'vs/workbench/api/common/extHostCommands';
 import { ExtHostDocumentsAndEditors } from 'vs/workbench/api/common/extHostDocumentsAndEditors';
 import { ExtHostNotebookController } from 'vs/workbench/api/common/extHostNotebook';
+import { getPrivateApiFor, TestItemImpl } from 'vs/workbench/api/common/extHostTestingPrivateApi';
 import { SaveReason } from 'vs/workbench/common/editor';
 import * as notebooks from 'vs/workbench/contrib/notebook/common/notebookCommon';
 import { ICellRange } from 'vs/workbench/contrib/notebook/common/notebookRange';
@@ -720,6 +721,28 @@ export namespace CallHierarchyItem {
 		result._itemId = item._itemId;
 
 		return result;
+	}
+
+	export function from(item: vscode.CallHierarchyItem, sessionId?: string, itemId?: string): extHostProtocol.ICallHierarchyItemDto {
+
+		sessionId = sessionId ?? (<types.CallHierarchyItem>item)._sessionId;
+		itemId = itemId ?? (<types.CallHierarchyItem>item)._itemId;
+
+		if (sessionId === undefined || itemId === undefined) {
+			throw new Error('invalid item');
+		}
+
+		return {
+			_sessionId: sessionId,
+			_itemId: itemId,
+			name: item.name,
+			detail: item.detail,
+			kind: SymbolKind.from(item.kind),
+			uri: item.uri,
+			range: Range.from(item.range),
+			selectionRange: Range.from(item.selectionRange),
+			tags: item.tags?.map(SymbolTag.from)
+		};
 	}
 }
 
@@ -1665,7 +1688,6 @@ export namespace TestItem {
 			label: item.label,
 			uri: URI.revive(item.uri),
 			range: Range.to(item.range || undefined),
-			dispose: () => undefined,
 			invalidateResults: () => undefined,
 			canResolveChildren: false,
 			busy: false,
@@ -1673,17 +1695,19 @@ export namespace TestItem {
 		};
 	}
 
-	export function to(item: ITestItem, parent?: vscode.TestItem): types.TestItemImpl {
-		const testItem = new types.TestItemImpl(item.extId, item.label, URI.revive(item.uri), undefined, parent);
+	export function to(item: ITestItem): TestItemImpl {
+		const testItem = new TestItemImpl(item.extId, item.label, URI.revive(item.uri));
 		testItem.range = Range.to(item.range || undefined);
 		testItem.description = item.description || undefined;
 		return testItem;
 	}
 
-	export function toItemFromContext(context: ITestItemContext): types.TestItemImpl {
-		let node: types.TestItemImpl | undefined;
+	export function toItemFromContext(context: ITestItemContext): TestItemImpl {
+		let node: TestItemImpl | undefined;
 		for (const test of context.tests) {
-			node = to(test.item, node);
+			const next = to(test.item);
+			getPrivateApiFor(next).parent = node;
+			node = next;
 		}
 
 		return node!;
@@ -1770,5 +1794,46 @@ export namespace CodeActionTriggerKind {
 			case modes.CodeActionTriggerType.Auto:
 				return types.CodeActionTriggerKind.Automatic;
 		}
+	}
+}
+
+export namespace TypeHierarchyItem {
+
+	export function to(item: extHostProtocol.ITypeHierarchyItemDto): types.TypeHierarchyItem {
+		const result = new types.TypeHierarchyItem(
+			SymbolKind.to(item.kind),
+			item.name,
+			item.detail || '',
+			URI.revive(item.uri),
+			Range.to(item.range),
+			Range.to(item.selectionRange)
+		);
+
+		result._sessionId = item._sessionId;
+		result._itemId = item._itemId;
+
+		return result;
+	}
+
+	export function from(item: vscode.TypeHierarchyItem, sessionId?: string, itemId?: string): extHostProtocol.ITypeHierarchyItemDto {
+
+		sessionId = sessionId ?? (<types.TypeHierarchyItem>item)._sessionId;
+		itemId = itemId ?? (<types.TypeHierarchyItem>item)._itemId;
+
+		if (sessionId === undefined || itemId === undefined) {
+			throw new Error('invalid item');
+		}
+
+		return {
+			_sessionId: sessionId,
+			_itemId: itemId,
+			kind: SymbolKind.from(item.kind),
+			name: item.name,
+			detail: item.detail ?? '',
+			uri: item.uri,
+			range: Range.from(item.range),
+			selectionRange: Range.from(item.selectionRange),
+			tags: item.tags?.map(SymbolTag.from)
+		};
 	}
 }

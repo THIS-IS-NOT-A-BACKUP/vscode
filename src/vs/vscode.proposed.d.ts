@@ -933,6 +933,20 @@ declare module 'vscode' {
 	}
 	//#endregion
 
+	export class TaskGroup2 {
+		static Clean: TaskGroup2;
+		static Build: TaskGroup2;
+		static Rebuild: TaskGroup2;
+		static Test: TaskGroup2;
+		readonly isDefault?: boolean;
+		readonly id: string;
+		private constructor(id: string, label: string);
+	}
+
+	export class Task2 extends Task {
+		group?: TaskGroup2;
+	}
+
 	//#region Custom editor move https://github.com/microsoft/vscode/issues/86146
 
 	// TODO: Also for custom editor
@@ -1771,7 +1785,7 @@ declare module 'vscode' {
 		 * Creates a new test controller.
 		 *
 		 * @param id Identifier for the controller, must be globally unique.
-		 */
+		*/
 		export function createTestController(id: string, label: string): TestController;
 
 		/**
@@ -1787,6 +1801,16 @@ declare module 'vscode' {
 		 * @stability experimental
 		 */
 		export function createTestObserver(): TestObserver;
+
+		/**
+		 * Creates a new managed {@link TestItem} instance. It can be added into
+		 * the {@link TestItem.children} of an existing item, or into the
+		 * {@link TestController.items}.
+		 * @param id Unique identifier for the TestItem.
+		 * @param label Human-readable label of the test item.
+		 * @param uri URI this TestItem is associated with. May be a file or directory.
+		 */
+		export function createTestItem(id: string, label: string, uri?: Uri): TestItem;
 
 		/**
 		 * List of test results stored by the editor, sorted in descending
@@ -1845,7 +1869,7 @@ declare module 'vscode' {
 		readonly removed: ReadonlyArray<TestItem>;
 	}
 
-	// Todo: this is basically the same as the TaskGroup, which is a class that
+	// Todo@api: this is basically the same as the TaskGroup, which is a class that
 	// allows custom groups to be created. However I don't anticipate having any
 	// UI for that, so enum for now?
 	export enum TestRunConfigurationGroup {
@@ -1866,6 +1890,8 @@ declare module 'vscode' {
 	 * instances associated with the request will be
 	 * automatically cancelled as well.
 	 */
+	// todo@api We have been there with NotebookCtrl#executeHandler and I believe the recommendation is still not to inline.
+	// At least with that we can still do it later
 	export type TestRunHandler = (request: TestRunRequest, token: CancellationToken) => Thenable<void> | void;
 
 	export interface TestRunConfiguration {
@@ -1925,10 +1951,12 @@ declare module 'vscode' {
 	/**
 	 * Interface to discover and execute tests.
 	 */
+	// todo@api maybe some words on this being the "entry point"
 	export interface TestController {
 		/**
 		 * The ID of the controller, passed in {@link vscode.test.createTestController}
 		 */
+		// todo@api maybe explain what the id is used for and iff it must be globally unique or only unique within the extension
 		readonly id: string;
 
 		/**
@@ -1937,20 +1965,18 @@ declare module 'vscode' {
 		label: string;
 
 		/**
-		 * Root test item. Tests in the workspace should be added as children of
-		 * the root. The extension controls when to add these, although the
+		 * Available test items. Tests in the workspace should be added in this
+		 * collection. The extension controls when to add these, although the
 		 * editor may request children using the {@link resolveChildrenHandler},
 		 * and the extension should add tests for a file when
 		 * {@link vscode.workspace.onDidOpenTextDocument} fires in order for
 		 * decorations for tests within the file to be visible.
 		 *
 		 * Tests in this collection should be watched and updated by the extension
-		 * as files change. See  {@link resolveChildrenHandler} for details around
+		 * as files change. See {@link resolveChildrenHandler} for details around
 		 * for the lifecycle of watches.
 		 */
-		// todo@API a little weird? what is its label, id, busy state etc? Can I dispose this?
-		// todo@API allow createTestItem-calls without parent and simply treat them as root (similar to createSourceControlResourceGroup)
-		readonly root: TestItem;
+		readonly items: TestItemCollection;
 
 		/**
 		 * Creates a configuration used for running tests. Extensions must create
@@ -1963,27 +1989,10 @@ declare module 'vscode' {
 		createRunConfiguration(label: string, group: TestRunConfigurationGroup, runHandler: TestRunHandler, isDefault?: boolean): TestRunConfiguration;
 
 		/**
-		 * Creates a new managed {@link TestItem} instance as a child of this
-		 * one.
-		 * @param id Unique identifier for the TestItem.
-		 * @param label Human-readable label of the test item.
-		 * @param parent Parent of the item. This is required; top-level items
-		 * should be created as children of the {@link root}.
-		 * @param uri URI this TestItem is associated with. May be a file or directory.
-		 * @param data Custom data to be stored in {@link TestItem.data}
-		 */
-		createTestItem(
-			id: string,
-			label: string,
-			parent: TestItem,
-			uri?: Uri,
-		): TestItem;
-
-		/**
 		 * A function provided by the extension that the editor may call to request
 		 * children of a test item, if the {@link TestItem.canExpand} is `true`.
 		 * When called, the item should discover children and call
-		 * {@link TestController.createTestItem} as children are discovered.
+		 * {@link vscode.test.createTestItem} as children are discovered.
 		 *
 		 * The item in the explorer will automatically be marked as "busy" until
 		 * the function returns or the returned thenable resolves.
@@ -1994,6 +2003,7 @@ declare module 'vscode' {
 		 * @param item An unresolved test item for which
 		 * children are being requested
 		 */
+		// todo@API maybe just `resolveHandler` so that we could extends its usage in the future?
 		resolveChildrenHandler?: (item: TestItem) => Thenable<void> | void;
 
 		/**
@@ -2030,11 +2040,12 @@ declare module 'vscode' {
 	 */
 	export class TestRunRequest {
 		/**
-		 * Array of specific tests to run. The controllers should run all of the
-		 * given tests and all children of the given tests, excluding any tests
-		 * that appear in {@link TestRunRequest.exclude}.
+		 * Filter for specific tests to run. If given, the extension should run all
+		 * of the given tests and all children of the given tests, excluding
+		 * any tests that appear in {@link TestRunRequest.exclude}. If this is
+		 * not given, then the extension should simply run all tests.
 		 */
-		tests: TestItem[];
+		include?: TestItem[];
 
 		/**
 		 * An array of tests the user has marked as excluded in the editor. May be
@@ -2051,11 +2062,11 @@ declare module 'vscode' {
 		configuration?: TestRunConfiguration;
 
 		/**
-		 * @param tests Array of specific tests to run.
+		 * @param tests Array of specific tests to run, or undefined to run all tests
 		 * @param exclude Tests to exclude from the run
 		 * @param configuration The run configuration used for this request.
 		 */
-		constructor(tests: readonly TestItem[], exclude?: readonly TestItem[], configuration?: TestRunConfiguration);
+		constructor(include?: readonly TestItem[], exclude?: readonly TestItem[], configuration?: TestRunConfiguration);
 	}
 
 	/**
@@ -2112,7 +2123,38 @@ declare module 'vscode' {
 		 * Signals that the end of the test run. Any tests whose states have not
 		 * been updated will be moved into the {@link TestResultState.Unset} state.
 		 */
+		// todo@api is the Unset logic smart and only considering those tests that are included?
 		end(): void;
+	}
+
+	/**
+	 * Collection of test items, found in {@link TestItem.children} and
+	 * {@link TestController.items}.
+	 */
+	export interface TestItemCollection {
+		/**
+		 * A read-only array of all the test items children. Can be retrieved, or
+		 * set in order to replace children in the collection.
+		 */
+		// todo@API unsure if this should readonly and have a separate replaceAll-like function
+		all: readonly TestItem[];
+
+		/**
+		 * Adds the test item to the children. If an item with the same ID already
+		 * exists, it'll be replaced.
+		 */
+		add(item: TestItem): void;
+
+		/**
+		 * Removes the a single test item from the collection.
+		 */
+		//todo@API `delete` as Map, EnvironmentVariableCollection, DiagnosticCollection
+		remove(itemId: string): void;
+
+		/**
+		 * Efficiently gets a test item by ID, if it exists, in the children.
+		 */
+		get(itemId: string): TestItem | undefined;
 	}
 
 	/**
@@ -2125,6 +2167,7 @@ declare module 'vscode' {
 		 * test results and tests in the document with those in the workspace
 		 * (test explorer). This must not change for the lifetime of the TestItem.
 		 */
+		// todo@API globally vs extension vs controller unique. I would strongly recommend non-global
 		readonly id: string;
 
 		/**
@@ -2135,13 +2178,14 @@ declare module 'vscode' {
 		/**
 		 * A mapping of children by ID to the associated TestItem instances.
 		 */
-		//todo@API use array over es6-map
-		readonly children: ReadonlyMap<string, TestItem>;
+		readonly children: TestItemCollection;
 
 		/**
-		 * The parent of this item, given in {@link TestController.createTestItem}.
-		 * This is undefined only for the {@link TestController.root}.
+		 * The parent of this item, given in {@link vscode.test.createTestItem}.
+		 * This is undefined top-level items in the `TestController`, and for
+		 * items that aren't yet assigned to a parent.
 		 */
+		// todo@api obsolete? doc is outdated at least
 		readonly parent?: TestItem;
 
 		/**
@@ -2192,12 +2236,8 @@ declare module 'vscode' {
 		 *
 		 * Extensions should generally not override this method.
 		 */
+		// todo@api still unsure about this
 		invalidateResults(): void;
-
-		/**
-		 * Removes the test and its children from the tree.
-		 */
-		dispose(): void;
 	}
 
 	/**
@@ -2217,6 +2257,7 @@ declare module 'vscode' {
 		// Test run has been skipped
 		Skipped = 5,
 		// Test run failed for some other reason (compilation error, timeout, etc)
+		// todo@api could I just use `Skipped` and TestItem#error?
 		Errored = 6
 	}
 
@@ -2987,4 +3028,95 @@ declare module 'vscode' {
 	export type DetailedCoverage = StatementCoverage | FunctionCoverage;
 
 	//#endregion
+
+
+	//#region https://github.com/microsoft/vscode/issues/15533 --- Type hierarchy --- @eskibear
+	export class TypeHierarchyItem {
+		/**
+		 * The name of this item.
+		 */
+		name: string;
+		/**
+		 * The kind of this item.
+		 */
+		kind: SymbolKind;
+		/**
+		 * Tags for this item.
+		 */
+		tags?: ReadonlyArray<SymbolTag>;
+		/**
+		 * More detail for this item, e.g. the signature of a function.
+		 */
+		detail?: string;
+		/**
+		 * The resource identifier of this item.
+		 */
+		uri: Uri;
+		/**
+		 * The range enclosing this symbol not including leading/trailing whitespace
+		 * but everything else, e.g. comments and code.
+		 */
+		range: Range;
+		/**
+		 * The range that should be selected and revealed when this symbol is being
+		 * picked, e.g. the name of a function. Must be contained by the
+		 * [`range`](#TypeHierarchyItem.range).
+		 */
+		selectionRange: Range;
+
+		constructor(kind: SymbolKind, name: string, detail: string, uri: Uri, range: Range, selectionRange: Range);
+	}
+
+	export interface TypeHierarchyProvider {
+
+		/**
+		 * Bootstraps type hierarchy by returning the item that is denoted by the given document
+		 * and position. This item will be used as entry into the type graph. Providers should
+		 * return `undefined` or `null` when there is no item at the given location.
+		 *
+		 * @param document The document in which the command was invoked.
+		 * @param position The position at which the command was invoked.
+		 * @param token A cancellation token.
+		 * @returns A type hierarchy item or a thenable that resolves to such. The lack of a result can be
+		 * signaled by returning `undefined` or `null`.
+		 */
+		prepareTypeHierarchy(document: TextDocument, position: Position, token: CancellationToken): ProviderResult<TypeHierarchyItem[]>;
+
+		/**
+		 * Provide all supertypes for an item, e.g all types from which a type is derived/inherited. In graph terms this describes directed
+		 * and annotated edges inside the type graph, e.g the given item is the starting node and the result is the nodes
+		 * that can be reached.
+		 *
+		 * @param item The hierarchy item for which super types should be computed.
+		 * @param token A cancellation token.
+		 * @returns A set of supertypes or a thenable that resolves to such. The lack of a result can be
+		 * signaled by returning `undefined` or `null`.
+		 */
+		provideTypeHierarchySupertypes(item: TypeHierarchyItem, token: CancellationToken): ProviderResult<TypeHierarchyItem[]>;
+
+		/**
+		 * Provide all subtypes for an item, e.g all types which are derived/inherited from the given item. In
+		 * graph terms this describes directed and annotated edges inside the type graph, e.g the given item is the starting
+		 * node and the result is the nodes that can be reached.
+		 *
+		 * @param item The hierarchy item for which subtypes should be computed.
+		 * @param token A cancellation token.
+		 * @returns A set of subtypes or a thenable that resolves to such. The lack of a result can be
+		 * signaled by returning `undefined` or `null`.
+		 */
+		provideTypeHierarchySubtypes(item: TypeHierarchyItem, token: CancellationToken): ProviderResult<TypeHierarchyItem[]>;
+	}
+
+	export namespace languages {
+		/**
+		 * Register a type hierarchy provider.
+		 *
+		 * @param selector A selector that defines the documents this provider is applicable to.
+		 * @param provider A type hierarchy provider.
+		 * @return A [disposable](#Disposable) that unregisters this provider when being disposed.
+		 */
+		export function registerTypeHierarchyProvider(selector: DocumentSelector, provider: TypeHierarchyProvider): Disposable;
+	}
+	//#endregion
+
 }
