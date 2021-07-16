@@ -913,14 +913,32 @@ declare module 'vscode' {
 		dragAndDropController?: DragAndDropController<T>;
 	}
 
+	export interface TreeDataTransferItem {
+		asString(): Thenable<string>;
+	}
+
+	export interface TreeDataTransfer {
+		/**
+		 * A map containing a mapping of the mime type of the corresponding data.
+		 * The type for tree elements is text/treeitem.
+		 * For example, you can reconstruct the your tree elements:
+		 * ```ts
+		 * JSON.parse(await (items.get('text/treeitems')!.asString()))
+		 * ```
+		 */
+		items: Map<string, TreeDataTransferItem>;
+	}
+
 	export interface DragAndDropController<T> extends Disposable {
+		readonly supportedTypes: string[];
+
 		/**
 		 * Extensions should fire `TreeDataProvider.onDidChangeTreeData` for any elements that need to be refreshed.
 		 *
 		 * @param source
 		 * @param target
 		 */
-		onDrop(source: T[], target: T): Thenable<void>;
+		onDrop(source: TreeDataTransfer, target: T): Thenable<void>;
 	}
 	//#endregion
 
@@ -932,20 +950,6 @@ declare module 'vscode' {
 		group?: string;
 	}
 	//#endregion
-
-	export class TaskGroup2 {
-		static Clean: TaskGroup2;
-		static Build: TaskGroup2;
-		static Rebuild: TaskGroup2;
-		static Test: TaskGroup2;
-		readonly isDefault?: boolean;
-		readonly id: string;
-		private constructor(id: string, label: string);
-	}
-
-	export class Task2 extends Task {
-		group?: TaskGroup2;
-	}
 
 	//#region Custom editor move https://github.com/microsoft/vscode/issues/86146
 
