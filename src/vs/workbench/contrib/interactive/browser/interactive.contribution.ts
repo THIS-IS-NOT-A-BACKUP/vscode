@@ -13,7 +13,7 @@ import { assertType } from 'vs/base/common/types';
 import { URI } from 'vs/base/common/uri';
 import { IBulkEditService } from 'vs/editor/browser/services/bulkEditService';
 import { CodeEditorWidget } from 'vs/editor/browser/widget/codeEditorWidget';
-import { Action2, registerAction2 } from 'vs/platform/actions/common/actions';
+import { Action2, MenuId, registerAction2 } from 'vs/platform/actions/common/actions';
 import { ContextKeyExpr } from 'vs/platform/contextkey/common/contextkey';
 import { ExtensionIdentifier } from 'vs/platform/extensions/common/extensions';
 import { SyncDescriptor } from 'vs/platform/instantiation/common/descriptors';
@@ -49,6 +49,7 @@ import { contrastBorder, listInactiveSelectionBackground, registerColor, transpa
 import { PANEL_BORDER } from 'vs/workbench/common/theme';
 import { registerThemingParticipant } from 'vs/platform/theme/common/themeService';
 import { peekViewBorder /*, peekViewEditorBackground, peekViewResultsBackground */ } from 'vs/editor/contrib/peekView/peekView';
+import * as icons from 'vs/workbench/contrib/notebook/browser/notebookIcons';
 
 
 Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane).registerEditorPane(
@@ -291,6 +292,11 @@ registerAction2(class extends Action2 {
 						name: 'controllerId',
 						description: 'Notebook controller Id',
 						isOptional: true
+					},
+					{
+						name: 'title',
+						description: 'Notebook editor title',
+						isOptional: true
 					}
 				]
 			}
@@ -298,7 +304,7 @@ registerAction2(class extends Action2 {
 		});
 	}
 
-	async run(accessor: ServicesAccessor, showOptions?: number | { viewColumn?: number, preserveFocus?: boolean }, resource?: URI, id?: string): Promise<{ notebookUri: URI, inputUri: URI; }> {
+	async run(accessor: ServicesAccessor, showOptions?: number | { viewColumn?: number, preserveFocus?: boolean }, resource?: URI, id?: string, title?: string): Promise<{ notebookUri: URI, inputUri: URI; }> {
 		const editorService = accessor.get(IEditorService);
 		const editorGroupService = accessor.get(IEditorGroupsService);
 		const historyService = accessor.get(IInteractiveHistoryService);
@@ -348,7 +354,7 @@ registerAction2(class extends Action2 {
 			}
 		}
 
-		const editorInput = InteractiveEditorInput.create(accessor.get(IInstantiationService), notebookUri, inputUri);
+		const editorInput = InteractiveEditorInput.create(accessor.get(IInstantiationService), notebookUri, inputUri, title);
 		historyService.clearHistory(notebookUri);
 		await editorService.openEditor(editorInput, { ...editorOptions, pinned: true }, group);
 		// Extensions must retain references to these URIs to manipulate the interactive editor
@@ -371,6 +377,12 @@ registerAction2(class extends Action2 {
 				},
 				weight: NOTEBOOK_EDITOR_WIDGET_ACTION_WEIGHT
 			},
+			menu: [
+				{
+					id: MenuId.InteractiveInputExecute
+				}
+			],
+			icon: icons.executeIcon,
 			f1: false
 		});
 	}

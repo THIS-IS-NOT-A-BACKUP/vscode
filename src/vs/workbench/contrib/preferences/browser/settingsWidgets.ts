@@ -1108,6 +1108,16 @@ export class ObjectSettingDropdownWidget extends AbstractListSettingWidget<IObje
 
 		selectBox.render(wrapper);
 
+		// Switch to the first item if the user set something invalid in the json
+		const selected = keyOrValue.options.findIndex(option => keyOrValue.data === option.value);
+		if (selected === -1 && keyOrValue.options.length) {
+			update(
+				originalKeyOrValue.type === 'boolean'
+					? { ...originalKeyOrValue, data: true }
+					: { ...originalKeyOrValue, data: keyOrValue.options[0].value }
+			);
+		}
+
 		return { widget: selectBox, element: wrapper };
 	}
 
@@ -1146,13 +1156,14 @@ export class ObjectSettingDropdownWidget extends AbstractListSettingWidget<IObje
 			: undefined;
 
 		// avoid rendering double '.'
-		if (isDefined(enumDescription) && enumDescription.endsWith('.')) {
-			enumDescription = enumDescription.slice(0, enumDescription.length - 1);
+		if (isDefined(enumDescription)) {
+			if (enumDescription.endsWith('.')) {
+				enumDescription = enumDescription.slice(0, enumDescription.length - 1);
+			}
+			return `${enumDescription}. Currently set to ${item.value.data}.`;
 		}
 
-		return isDefined(enumDescription)
-			? `${enumDescription}. Currently set to ${item.value.data}.`
-			: localize('objectPairHintLabel', "The property `{0}` is set to `{1}`.", item.key.data, item.value.data);
+		return localize('objectPairHintLabel', "The property `{0}` is set to `{1}`.", item.key.data, item.value.data);
 	}
 
 	protected getLocalizedStrings() {
@@ -1237,7 +1248,7 @@ export class ObjectSettingCheckboxWidget extends AbstractListSettingWidget<IObje
 
 		const valueElement = DOM.append(rowElement, $('.setting-list-object-value'));
 		valueElement.textContent = changedItem.key.data;
-		valueElement.setAttribute('title', (changedItem.value as IObjectBoolData).description ?? '');
+		valueElement.setAttribute('title', this.getLocalizedRowTitle(changedItem));
 		this._register(DOM.addDisposableListener(valueElement, DOM.EventType.MOUSE_DOWN, e => {
 			const targetElement = <HTMLElement>e.target;
 			if (targetElement.tagName.toLowerCase() !== 'a') {
@@ -1281,7 +1292,12 @@ export class ObjectSettingCheckboxWidget extends AbstractListSettingWidget<IObje
 	}
 
 	protected getLocalizedRowTitle(item: IObjectDataItem): string {
-		return localize('objectPairHintLabel', "The property `{0}` is set to `{1}`.", item.key.data, item.value.data);
+		const description = (item.value as IObjectBoolData).description;
+		if (description) {
+			return description;
+		} else {
+			return localize('objectPairHintLabel', "The property `{0}` is set to `{1}`.", item.key.data, item.value.data);
+		}
 	}
 
 	protected getLocalizedStrings() {

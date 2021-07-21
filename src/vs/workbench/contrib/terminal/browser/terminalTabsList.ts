@@ -47,6 +47,7 @@ import { ILifecycleService } from 'vs/workbench/services/lifecycle/common/lifecy
 import { IWorkspaceContextService } from 'vs/platform/workspace/common/workspace';
 import { IProcessDetails } from 'vs/platform/terminal/common/terminalProcess';
 import { TerminalContextKeys } from 'vs/workbench/contrib/terminal/common/terminalContextKey';
+import { getTerminalResourcesFromDragEvent, parseTerminalUri } from 'vs/workbench/contrib/terminal/browser/terminalUri';
 
 const $ = DOM.$;
 
@@ -577,8 +578,8 @@ class TerminalTabsDragAndDrop implements IListDragAndDrop<ITerminalInstance> {
 		// Attach terminals type to event
 		const terminals: ITerminalInstance[] = dndData.filter(e => 'instanceId' in (e as any));
 		if (terminals.length > 0) {
+			originalEvent.dataTransfer.setData(DataTransfers.TERMINALS, JSON.stringify(terminals.map(e => e.resource.toString())));
 			originalEvent.dataTransfer.setData(DataTransfers.RESOURCES, JSON.stringify(terminals.map(e => e.resource.toString())));
-			originalEvent.dataTransfer.setData(DataTransfers.TERMINALS, JSON.stringify(terminals.map(e => e.instanceId)));
 		}
 	}
 
@@ -618,29 +619,29 @@ class TerminalTabsDragAndDrop implements IListDragAndDrop<ITerminalInstance> {
 		this._autoFocusInstance = undefined;
 
 		let sourceInstances: ITerminalInstance[] | undefined;
-		const terminalResources = originalEvent.dataTransfer?.getData(DataTransfers.RESOURCES);
-		const terminals = originalEvent.dataTransfer?.getData(DataTransfers.TERMINALS);
 		let promises: Promise<IProcessDetails | undefined>[] = [];
-		if (terminals && terminalResources) {
-			const json = JSON.parse(terminalResources);
-			for (const entry of json) {
-				const uri = URI.parse(entry);
-				const [, workspaceId, instanceId] = uri.path.split('/');
-				if (workspaceId && instanceId) {
-					const instance = this._terminalService.instances.find(e => e.resource.path === instanceId);
-					if (instance) {
-						sourceInstances = [instance];
-						this._terminalService.moveToTerminalView(instance);
-					} else if (this._offProcessTerminalService && workspaceId !== this._workspaceContextService.getWorkspace().id) {
-						promises.push(this._offProcessTerminalService.requestDetachInstance(workspaceId, Number.parseInt(instanceId)));
+		const resources = getTerminalResourcesFromDragEvent(originalEvent);
+		if (resources) {
+			for (const uri of resources) {
+				const instance = this._terminalService.getInstanceFromResource(uri);
+				if (instance) {
+					sourceInstances = [instance];
+					this._terminalService.moveToTerminalView(instance);
+				} else if (this._offProcessTerminalService) {
+					const terminalIdentifier = parseTerminalUri(uri);
+					if (terminalIdentifier.instanceId) {
+						promises.push(this._offProcessTerminalService.requestDetachInstance(terminalIdentifier.workspaceId, terminalIdentifier.instanceId));
 					}
 				}
 			}
 			let processes = await Promise.all(promises);
 			processes = processes.filter(p => p !== undefined);
+			let lastInstance: ITerminalInstance | undefined;
 			for (const attachPersistentProcess of processes) {
-				const instance = this._terminalService.createTerminal({ config: { attachPersistentProcess } });
-				this._terminalService.setActiveInstance(instance);
+				lastInstance = this._terminalService.createTerminal({ config: { attachPersistentProcess } });
+			}
+			if (lastInstance) {
+				this._terminalService.setActiveInstance(lastInstance);
 			}
 			return;
 		}
