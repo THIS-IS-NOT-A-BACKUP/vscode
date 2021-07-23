@@ -2018,7 +2018,7 @@ export class ExtensionStatusAction extends ExtensionAction {
 				if (this.extension.gallery.webExtension) {
 					message = new MarkdownString(localize('user disabled', "You have configured the '{0}' extension to be disabled in {1}. To enable it, please open user settings and remove it from `remote.extensionKind` setting.", this.extension.displayName || this.extension.identifier.id, productName));
 				} else {
-					message = new MarkdownString(`${localize('not web tooltip', "The '{0}' extension is not available in {1}. Click {2} to learn more.", this.extension.displayName || this.extension.identifier.id, productName, `[${localize('more info', "More Information")}](https://aka.ms/vscode-remote-codespaces#_why-is-an-extension-not-installable-in-the-browser)`)}`);
+					message = new MarkdownString(`${localize('not web tooltip', "The '{0}' extension is not available in {1}", this.extension.displayName || this.extension.identifier.id, productName)} ([${localize('learn more', "learn more")}](https://aka.ms/vscode-remote-codespaces#_why-is-an-extension-not-installable-in-the-browser)).`);
 				}
 				this.updateStatus({ icon: infoIcon, message }, true);
 				return;
@@ -2637,7 +2637,6 @@ registerThemingParticipant((theme: IColorTheme, collector: ICssStyleCollector) =
 		collector.addRule(`.extension-list-item .monaco-action-bar .action-item .action-label.extension-action.extension-status-error { color: ${errorColor}; }`);
 		collector.addRule(`.extension-editor .monaco-action-bar .action-item .action-label.extension-action.extension-status-error { color: ${errorColor}; }`);
 		collector.addRule(`.extension-editor .body .subcontent .runtime-status ${ThemeIcon.asCSSSelector(errorIcon)} { color: ${errorColor}; }`);
-		collector.addRule(`.monaco-workbench .extension-editor > .header > .details > .actions > .status ${ThemeIcon.asCSSSelector(errorIcon)} { color: ${errorColor}; }`);
 		collector.addRule(`.monaco-hover.extension-hover .markdown-hover .hover-contents ${ThemeIcon.asCSSSelector(errorIcon)} { color: ${errorColor}; }`);
 	}
 
@@ -2646,7 +2645,6 @@ registerThemingParticipant((theme: IColorTheme, collector: ICssStyleCollector) =
 		collector.addRule(`.extension-list-item .monaco-action-bar .action-item .action-label.extension-action.extension-status-warning { color: ${warningColor}; }`);
 		collector.addRule(`.extension-editor .monaco-action-bar .action-item .action-label.extension-action.extension-status-warning { color: ${warningColor}; }`);
 		collector.addRule(`.extension-editor .body .subcontent .runtime-status ${ThemeIcon.asCSSSelector(warningIcon)} { color: ${warningColor}; }`);
-		collector.addRule(`.monaco-workbench .extension-editor > .header > .details > .actions > .status ${ThemeIcon.asCSSSelector(warningIcon)} { color: ${warningColor}; }`);
 		collector.addRule(`.monaco-hover.extension-hover .markdown-hover .hover-contents ${ThemeIcon.asCSSSelector(warningIcon)} { color: ${warningColor}; }`);
 	}
 
@@ -2655,7 +2653,6 @@ registerThemingParticipant((theme: IColorTheme, collector: ICssStyleCollector) =
 		collector.addRule(`.extension-list-item .monaco-action-bar .action-item .action-label.extension-action.extension-status-info { color: ${infoColor}; }`);
 		collector.addRule(`.extension-editor .monaco-action-bar .action-item .action-label.extension-action.extension-status-info { color: ${infoColor}; }`);
 		collector.addRule(`.extension-editor .body .subcontent .runtime-status ${ThemeIcon.asCSSSelector(infoIcon)} { color: ${infoColor}; }`);
-		collector.addRule(`.monaco-workbench .extension-editor > .header > .details > .actions > .status ${ThemeIcon.asCSSSelector(infoIcon)} { color: ${infoColor}; }`);
 		collector.addRule(`.monaco-hover.extension-hover .markdown-hover .hover-contents ${ThemeIcon.asCSSSelector(infoIcon)} { color: ${infoColor}; }`);
 	}
 });
