@@ -624,12 +624,12 @@ export class TerminalService implements ITerminalService {
 		}
 	}
 
-	async splitInstance(instanceToSplit: ITerminalInstance, shell?: IShellLaunchConfig, cwd?: string | URI): Promise<ITerminalInstance | null> {
+	async splitInstance(instanceToSplit: ITerminalInstance, shell?: IShellLaunchConfig, cwd?: string | URI): Promise<ITerminalInstance> {
 		const shellLaunchConfig = this._convertProfileToShellLaunchConfig(shell);
 
 		const contributedDefaultProfile = await this._getContributedDefaultProfile(shellLaunchConfig);
 		if (contributedDefaultProfile) {
-			await this.createContributedTerminalProfile(contributedDefaultProfile.extensionIdentifier, contributedDefaultProfile.id, { isSplitTerminal: true, icon: contributedDefaultProfile.icon, color: contributedDefaultProfile.color });
+			await this._createContributedTerminalProfile(contributedDefaultProfile.extensionIdentifier, contributedDefaultProfile.id, { isSplitTerminal: true, icon: contributedDefaultProfile.icon, color: contributedDefaultProfile.color });
 			return this._terminalGroupService.instances[this._terminalGroupService.instances.length - 1];
 		}
 
@@ -652,7 +652,7 @@ export class TerminalService implements ITerminalService {
 			default:
 				const group = this._terminalGroupService.getGroupForInstance(instanceToSplit);
 				if (!group) {
-					return null;
+					throw new Error(`Cannot split a terminal without a group ${instanceToSplit}`);
 				}
 				instance = group.split(shellLaunchConfig);
 				break;
@@ -934,7 +934,7 @@ export class TerminalService implements ITerminalService {
 			let instance;
 
 			if ('id' in value.profile) {
-				await this.createContributedTerminalProfile(value.profile.extensionIdentifier, value.profile.id, {
+				await this._createContributedTerminalProfile(value.profile.extensionIdentifier, value.profile.id, {
 					isSplitTerminal: !!(keyMods?.alt && activeInstance),
 					icon: value.profile.icon
 				});
@@ -948,7 +948,7 @@ export class TerminalService implements ITerminalService {
 				}
 			}
 
-			if (instance && this.configHelper.config.defaultLocation === TerminalLocation.TerminalView) {
+			if (instance && this.configHelper.config.defaultLocation !== TerminalLocation.Editor) {
 				this._terminalGroupService.showPanel(true);
 				this.setActiveInstance(instance);
 				return instance;
@@ -1009,9 +1009,9 @@ export class TerminalService implements ITerminalService {
 		return instance?.target === TerminalLocation.Editor ? this._terminalEditorService : this._terminalGroupService;
 	}
 
-	async createContributedTerminalProfile(extensionIdentifierentifier: string, id: string, options: ICreateContributedTerminalProfileOptions): Promise<void> {
+	private async _createContributedTerminalProfile(extensionIdentifier: string, id: string, options: ICreateContributedTerminalProfileOptions): Promise<void> {
 		await this._extensionService.activateByEvent(`onTerminalProfile:${id}`);
-		const extMap = this._profileProviders.get(extensionIdentifierentifier);
+		const extMap = this._profileProviders.get(extensionIdentifier);
 		const profileProvider = extMap?.get(id);
 		if (!profileProvider) {
 			this._notificationService.error(`No terminal profile provider registered for id "${id}"`);
@@ -1023,16 +1023,15 @@ export class TerminalService implements ITerminalService {
 			await this.activeInstance?.focusWhenReady();
 		} catch (e) {
 			this._notificationService.error(e.message);
-			throw new Error('nope');
 		}
 	}
 
-	private async _registerContributedProfile(extensionIdentifierentifier: string, id: string, title: string, options: ICreateContributedTerminalProfileOptions): Promise<void> {
+	private async _registerContributedProfile(extensionIdentifier: string, id: string, title: string, options: ICreateContributedTerminalProfileOptions): Promise<void> {
 		const platformKey = await this._getPlatformKey();
 		const profilesConfig = await this._configurationService.getValue(`terminal.integrated.profiles.${platformKey}`);
 		if (typeof profilesConfig === 'object') {
 			const newProfile: IExtensionTerminalProfile = {
-				extensionIdentifier: extensionIdentifierentifier,
+				extensionIdentifier: extensionIdentifier,
 				icon: options.icon,
 				id,
 				title: title,
@@ -1108,6 +1107,15 @@ export class TerminalService implements ITerminalService {
 		return undefined;
 	}
 
+	private _optionsAreBasic(options?: ICreateTerminalOptions): boolean {
+		if (!options) {
+			return true;
+		} else if (Object.entries(options).length > 2) {
+			return false;
+		}
+		return Array.from(Object.keys(options)).filter(k => k !== 'target' && k !== 'forceSplit').length === 0;
+	}
+
 	async createTerminal(options?: ICreateTerminalOptions): Promise<ITerminalInstance> {
 		const config = options?.config;
 		const shellLaunchConfig = config && 'extensionIdentifier' in config
@@ -1118,19 +1126,21 @@ export class TerminalService implements ITerminalService {
 		let contributedProfile = config && 'extensionIdentifier' in config ? config : undefined;
 
 		// Get the default profile as a contributed profile if it exists
-		if (!contributedProfile && !options) {
+		if (!contributedProfile && this._optionsAreBasic(options)) {
 			contributedProfile = await this._getContributedDefaultProfile(shellLaunchConfig);
 		}
 
 		// Launch the contributed profile
 		if (contributedProfile) {
-			// TODO: createContributedTerminalProfile should be private if we want all terminal creation to go through createTerminal
-			await this.createContributedTerminalProfile(contributedProfile.extensionIdentifier, contributedProfile.id, {
-				isSplitTerminal: false,
-				icon: contributedProfile.icon
+			await this._createContributedTerminalProfile(contributedProfile.extensionIdentifier, contributedProfile.id, {
+				isSplitTerminal: options?.forceSplit || false,
+				icon: contributedProfile.icon,
+				target: options?.target
 			});
-			// TODO: The extension terminal may be created in the editor area
-			return this._terminalGroupService.instances[this._terminalGroupService.instances.length - 1];
+			const instanceHost = options?.target === TerminalLocation.Editor ? this._terminalEditorService : this._terminalGroupService;
+			const instance = instanceHost.instances[instanceHost.instances.length - 1];
+			await instance.focusWhenReady();
+			return instance;
 		}
 
 		if (options?.cwd) {
@@ -1156,7 +1166,7 @@ export class TerminalService implements ITerminalService {
 		if (target === TerminalLocation.Editor) {
 			instance = this._terminalInstanceService.createInstance(shellLaunchConfig, undefined, options?.resource);
 			instance.target = TerminalLocation.Editor;
-			this._terminalEditorService.openEditor(instance, options?.sideGroup);
+			this._terminalEditorService.openEditor(instance, options?.forceSplit);
 		} else {
 			// TODO: pass resource?
 			const group = this._terminalGroupService.createGroup(shellLaunchConfig);

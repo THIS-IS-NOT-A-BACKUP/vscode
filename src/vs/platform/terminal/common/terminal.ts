@@ -402,9 +402,10 @@ export interface ICreateTerminalOptions {
 	 */
 	target?: TerminalLocation;
 	/**
-	 * Create the editor terminal in beside the current editor.
+	 * Creates a split terminal without requiring a terminal instance to split, for example when splitting
+	 * a terminal editor
 	 */
-	sideGroup?: boolean;
+	forceSplit?: boolean;
 	/**
 	 * The terminal's resource, passed when the terminal has moved windows.
 	 */
