@@ -13,7 +13,7 @@ import { Cache, CacheResult } from 'vs/base/common/cache';
 import { Action, IAction } from 'vs/base/common/actions';
 import { getErrorMessage, isPromiseCanceledError, onUnexpectedError } from 'vs/base/common/errors';
 import { dispose, toDisposable, Disposable, DisposableStore, IDisposable } from 'vs/base/common/lifecycle';
-import { append, $, finalHandler, join, addDisposableListener, EventType, setParentFlowTo, reset } from 'vs/base/browser/dom';
+import { append, $, finalHandler, join, addDisposableListener, EventType, setParentFlowTo, reset, Dimension } from 'vs/base/browser/dom';
 import { EditorPane } from 'vs/workbench/browser/parts/editor/editorPane';
 import { IViewletService } from 'vs/workbench/services/viewlet/browser/viewlet';
 import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
@@ -175,6 +175,7 @@ export class ExtensionEditor extends EditorPane {
 	private readonly transientDisposables = this._register(new DisposableStore());
 	private activeElement: IActiveElement | null = null;
 	private editorLoadComplete: boolean = false;
+	private dimension: Dimension | undefined;
 
 	constructor(
 		@ITelemetryService telemetryService: ITelemetryService,
@@ -469,7 +470,15 @@ export class ExtensionEditor extends EditorPane {
 					const statusIconActionBar = disposables.add(new ActionBar(template.status, { animated: false }));
 					statusIconActionBar.push(extensionStatus, { icon: true, label: false });
 				}
-				append(append(template.status, $('.status-text')), renderMarkdown(new MarkdownString(status.message.value, { isTrusted: true, supportThemeIcons: true })));
+				append(append(template.status, $('.status-text')),
+					renderMarkdown(new MarkdownString(status.message.value, { isTrusted: true, supportThemeIcons: true }), {
+						actionHandler: {
+							callback: (content) => {
+								this.openerService.open(content, { allowCommands: true }).catch(onUnexpectedError);
+							},
+							disposeables: disposables
+						}
+					}));
 			}
 		};
 		updateStatus();
@@ -485,8 +494,11 @@ export class ExtensionEditor extends EditorPane {
 			reset(template.recommendation);
 			const extRecommendations = this.extensionRecommendationsService.getAllRecommendationsWithReason();
 			if (extRecommendations[extension.identifier.id.toLowerCase()]) {
-				append(template.recommendation, $(`div${ThemeIcon.asCSSSelector(starEmptyIcon)}`));
-				append(template.recommendation, $(`div.recommendation-text`, undefined, extRecommendations[extension.identifier.id.toLowerCase()].reasonText));
+				const reasonText = extRecommendations[extension.identifier.id.toLowerCase()].reasonText;
+				if (reasonText) {
+					append(template.recommendation, $(`div${ThemeIcon.asCSSSelector(starEmptyIcon)}`));
+					append(template.recommendation, $(`div.recommendation-text`, undefined, reasonText));
+				}
 			} else if (this.extensionIgnoredRecommendationsService.globalIgnoredRecommendations.indexOf(extension.identifier.id.toLowerCase()) !== -1) {
 				append(template.recommendation, $(`div.recommendation-text`, undefined, localize('recommendationHasBeenIgnored', "You have chosen not to receive recommendations for this extension.")));
 			}
@@ -707,6 +719,10 @@ export class ExtensionEditor extends EditorPane {
 		const details = append(template.content, $('.details'));
 		const readmeContainer = append(details, $('.readme-container'));
 		const additionalDetailsContainer = append(details, $('.additional-details-container'));
+
+		const layout = () => details.classList.toggle('narrow', this.dimension && this.dimension.width < 500);
+		layout();
+		this.contentDisposables.add(toDisposable(arrays.insert(this.layoutParticipants, { layout })));
 
 		let activeElement: IActiveElement | null = null;
 		const manifest = await this.extensionManifest!.get().promise;
@@ -1545,7 +1561,8 @@ export class ExtensionEditor extends EditorPane {
 		return result.promise;
 	}
 
-	layout(): void {
+	layout(dimension: Dimension): void {
+		this.dimension = dimension;
 		this.layoutParticipants.forEach(p => p.layout());
 	}
 

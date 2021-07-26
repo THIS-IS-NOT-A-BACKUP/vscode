@@ -165,8 +165,19 @@ export function registerTerminalActions() {
 
 			let event: MouseEvent | PointerEvent | KeyboardEvent | undefined;
 			let options: ICreateTerminalOptions | undefined;
-			if (typeof eventOrOptionsOrProfile === 'object' && eventOrOptionsOrProfile && 'profileName' in eventOrOptionsOrProfile) {
-				const config = terminalService.availableProfiles.find(profile => profile.profileName === eventOrOptionsOrProfile.profileName);
+			if (typeof eventOrOptionsOrProfile === 'object' && eventOrOptionsOrProfile && ('profileName' in eventOrOptionsOrProfile || 'title' in eventOrOptionsOrProfile)) {
+				const config = terminalService.allProfiles?.find(profile => {
+					if (profile) {
+						if ('title' in profile) {
+							return profile.title === eventOrOptionsOrProfile.profileName;
+						} else if ('profileName' in profile) {
+							return profile.profileName === eventOrOptionsOrProfile.profileName;
+						} else {
+							return false;
+						}
+					}
+					return false;
+				});
 				if (!config) {
 					throw new Error(`Could not find terminal profile "${eventOrOptionsOrProfile.profileName}"`);
 				}
@@ -1767,7 +1778,7 @@ export function registerTerminalActions() {
 				precondition: TerminalContextKeys.processSupported,
 				keybinding: {
 					primary: KeyMod.CtrlCmd | KeyCode.KEY_W,
-					mac: undefined,
+					win: { primary: KeyMod.CtrlCmd | KeyCode.F4, secondary: [KeyMod.CtrlCmd | KeyCode.KEY_W] },
 					weight: KeybindingWeight.WorkbenchContrib,
 					when: ContextKeyExpr.and(TerminalContextKeys.focus, ResourceContextKey.Scheme.isEqualTo(Schemas.vscodeTerminal))
 				}
