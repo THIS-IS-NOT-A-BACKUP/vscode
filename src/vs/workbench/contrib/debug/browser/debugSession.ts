@@ -255,7 +255,8 @@ export class DebugSession implements IDebugSession {
 				supportsRunInTerminalRequest: true, // #10574
 				locale: platform.locale,
 				supportsProgressReporting: true, // #92253
-				supportsInvalidatedEvent: true // #106745
+				supportsInvalidatedEvent: true, // #106745
+				supportsMemoryReferences: true //#129684
 			});
 
 			this.initialized = true;
@@ -880,12 +881,12 @@ export class DebugSession implements IDebugSession {
 					if (!event.body.preserveFocusHint && thread.getCallStack().length) {
 						await this.debugService.focusStackFrame(undefined, thread);
 						if (thread.stoppedDetails) {
-							if (this.configurationService.getValue<IDebugConfiguration>('debug').openDebug === 'openOnDebugBreak' && !this.isSimpleUI) {
-								this.viewletService.openViewlet(VIEWLET_ID);
+							if (thread.stoppedDetails.reason === 'breakpoint' && this.configurationService.getValue<IDebugConfiguration>('debug').openDebug === 'openOnDebugBreak' && !this.isSimpleUI) {
+								await this.viewletService.openViewlet(VIEWLET_ID);
 							}
 
 							if (this.configurationService.getValue<IDebugConfiguration>('debug').focusWindowOnBreak) {
-								this.hostService.focus({ force: true /* Application may not be active */ });
+								await this.hostService.focus({ force: true /* Application may not be active */ });
 							}
 						}
 					}
