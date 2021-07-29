@@ -877,7 +877,6 @@ export class DebugSession implements IDebugSession {
 				// Second retrieves the rest of the call stack. For performance reasons #25605
 				const promises = this.model.fetchCallStack(<Thread>thread);
 				const focus = async () => {
-					// Don't switch view when DisassemblyView is in focus.
 					if (!event.body.preserveFocusHint && thread.getCallStack().length) {
 						await this.debugService.focusStackFrame(undefined, thread);
 						if (thread.stoppedDetails) {
@@ -952,18 +951,20 @@ export class DebugSession implements IDebugSession {
 
 			this.model.clearThreads(this.getId(), false, threadId);
 			this._onDidChangeState.fire();
-			// If the focused thread does get stopped in the next 800ms auto focus another thread or session https://github.com/microsoft/vscode/issues/125144
-			if (typeof threadId === 'number') {
-				const thread = this.debugService.getViewModel().focusedThread;
-				if (thread && thread.threadId === threadId && !thread.stopped) {
-					const toFocusThreadId = this.getStoppedDetails()?.threadId;
-					const toFocusThread = typeof toFocusThreadId === 'number' ? this.getThread(toFocusThreadId) : undefined;
-					this.debugService.focusStackFrame(undefined, toFocusThread);
-				}
-			} else {
-				const session = this.debugService.getViewModel().focusedSession;
-				if (session && session.getId() === this.getId() && session.state !== State.Stopped) {
-					this.debugService.focusStackFrame(undefined);
+			// If there is some session or thread that is stopped pass focus to it
+			if (this.debugService.getModel().getSessions().some(s => s.state === State.Stopped) || this.getAllThreads().some(t => t.stopped)) {
+				if (typeof threadId === 'number') {
+					const thread = this.debugService.getViewModel().focusedThread;
+					if (thread && thread.threadId === threadId && !thread.stopped) {
+						const toFocusThreadId = this.getStoppedDetails()?.threadId;
+						const toFocusThread = typeof toFocusThreadId === 'number' ? this.getThread(toFocusThreadId) : undefined;
+						this.debugService.focusStackFrame(undefined, toFocusThread);
+					}
+				} else {
+					const session = this.debugService.getViewModel().focusedSession;
+					if (session && session.getId() === this.getId() && session.state !== State.Stopped) {
+						this.debugService.focusStackFrame(undefined);
+					}
 				}
 			}
 		}));
