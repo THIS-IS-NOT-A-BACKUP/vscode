@@ -67,6 +67,7 @@ import { ViewContext } from 'vs/workbench/contrib/notebook/browser/viewModel/vie
 import { NotebookEditorToolbar } from 'vs/workbench/contrib/notebook/browser/notebookEditorToolbar';
 import { INotebookRendererMessagingService } from 'vs/workbench/contrib/notebook/common/notebookRendererMessagingService';
 import { IAckOutputHeight, IMarkupCellInitialization } from 'vs/workbench/contrib/notebook/browser/view/renderers/webviewMessages';
+import { SuggestController } from 'vs/editor/contrib/suggest/suggestController';
 
 const $ = DOM.$;
 
@@ -930,8 +931,16 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 			this._onDidChangeVisibleRanges.fire();
 		}));
 
-		this._register(this._list.onDidScroll(() => {
+		this._register(this._list.onDidScroll((e) => {
 			this._onDidScroll.fire();
+
+			if (e.scrollTop !== e.oldScrollTop) {
+				this._renderedEditors.forEach((editor, cell) => {
+					if (this.getActiveCell() === cell && editor) {
+						SuggestController.get(editor).cancelSuggestWidget();
+					}
+				});
+			}
 		}));
 
 		const widgetFocusTracker = DOM.trackFocus(this.getDomNode());
@@ -2274,9 +2283,13 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 			throw new Error('Editor is not initalized successfully');
 		}
 
+		if (!this._fontInfo) {
+			this._generateFontInfo();
+		}
+
 		return {
-			width: this._dimension!.width,
-			height: this._dimension!.height,
+			width: this._dimension?.width ?? 0,
+			height: this._dimension?.height ?? 0,
 			fontInfo: this._fontInfo!
 		};
 	}
@@ -2286,9 +2299,13 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 			throw new Error('Editor is not initalized successfully');
 		}
 
+		if (!this._fontInfo) {
+			this._generateFontInfo();
+		}
+
 		return {
-			width: this._dimension!.width,
-			height: this._dimension!.height,
+			width: this._dimension?.width ?? 0,
+			height: this._dimension?.height ?? 0,
 			fontInfo: this._fontInfo!
 		};
 	}
