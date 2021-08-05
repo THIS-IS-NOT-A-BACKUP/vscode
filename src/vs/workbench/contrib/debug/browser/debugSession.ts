@@ -36,7 +36,6 @@ import { filterExceptionsFromTelemetry } from 'vs/workbench/contrib/debug/common
 import { DebugCompoundRoot } from 'vs/workbench/contrib/debug/common/debugCompoundRoot';
 import { IUriIdentityService } from 'vs/workbench/services/uriIdentity/common/uriIdentity';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
-import { IContextKeyService } from 'vs/platform/contextkey/common/contextkey';
 
 export class DebugSession implements IDebugSession {
 
@@ -86,7 +85,6 @@ export class DebugSession implements IDebugSession {
 		@IUriIdentityService private readonly uriIdentityService: IUriIdentityService,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@ICustomEndpointTelemetryService private readonly customEndpointTelemetryService: ICustomEndpointTelemetryService,
-		@IContextKeyService contextKeyService: IContextKeyService
 	) {
 		this._options = options || {};
 		if (this.hasSeparateRepl()) {
@@ -650,6 +648,14 @@ export class DebugSession implements IDebugSession {
 		}
 
 		return this.raw.setVariable({ variablesReference, name, value });
+	}
+
+	setExpression(frameId: number, expression: string, value: string): Promise<DebugProtocol.SetExpressionResponse | undefined> {
+		if (!this.raw) {
+			throw new Error(localize('noDebugAdapter', "No debugger available, can not send '{0}'", 'setExpression'));
+		}
+
+		return this.raw.setExpression({ expression, value, frameId });
 	}
 
 	gotoTargets(source: DebugProtocol.Source, line: number, column?: number): Promise<DebugProtocol.GotoTargetsResponse | undefined> {

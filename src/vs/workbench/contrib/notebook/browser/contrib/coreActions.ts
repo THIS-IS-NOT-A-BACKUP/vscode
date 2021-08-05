@@ -1020,6 +1020,10 @@ abstract class InsertCellCommand extends NotebookAction {
 
 	async runWithContext(accessor: ServicesAccessor, context: INotebookActionContext): Promise<void> {
 		let newCell: CellViewModel | null = null;
+		if (context.ui) {
+			context.notebookEditor.focus();
+		}
+
 		if (context.cell) {
 			newCell = context.notebookEditor.insertNotebookCell(context.cell, this.kind, this.direction, undefined, true);
 		} else {
@@ -1951,7 +1955,7 @@ registerAction2(class NotebookConfigureLayoutAction extends Action2 {
 		});
 	}
 	run(accessor: ServicesAccessor): void {
-		accessor.get(IPreferencesService).openSettings(false, '@tag:notebookLayout');
+		accessor.get(IPreferencesService).openSettings({ jsonEditor: false, query: '@tag:notebookLayout' });
 	}
 });
 

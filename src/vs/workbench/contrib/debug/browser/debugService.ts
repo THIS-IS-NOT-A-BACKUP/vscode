@@ -537,6 +537,14 @@ export class DebugService implements IDebugService {
 	private async doCreateSession(sessionId: string, root: IWorkspaceFolder | undefined, configuration: { resolved: IConfig, unresolved: IConfig | undefined }, options?: IDebugSessionOptions): Promise<boolean> {
 
 		const session = this.instantiationService.createInstance(DebugSession, sessionId, configuration, root, this.model, options);
+		if (this.model.getSessions().some(s => s.getLabel() === session.getLabel())) {
+			// There is already a session with the same name, prompt user #127721
+			const result = await this.dialogService.confirm({ message: nls.localize('multipleSession', "'{0}' is already running. Are you sure you want to start it again?", session.getLabel()) });
+			if (!result.confirmed) {
+				return false;
+			}
+		}
+
 		this.model.addSession(session);
 		// register listeners as the very first thing!
 		this.registerSessionListeners(session);
@@ -869,7 +877,7 @@ export class DebugService implements IDebugService {
 	addWatchExpression(name?: string): void {
 		const we = this.model.addWatchExpression(name);
 		if (!name) {
-			this.viewModel.setSelectedExpression(we);
+			this.viewModel.setSelectedExpression(we, false);
 		}
 		this.debugStorage.storeWatchExpressions(this.model.getWatchExpressions());
 	}

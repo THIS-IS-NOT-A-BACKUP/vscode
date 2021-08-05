@@ -784,7 +784,7 @@ declare module 'vscode' {
 		/**
 		 * The validation message to display.
 		 */
-		readonly message: string;
+		readonly message: string | MarkdownString;
 
 		/**
 		 * The validation type.
@@ -800,7 +800,7 @@ declare module 'vscode' {
 		/**
 		 * Shows a transient contextual message on the input.
 		 */
-		showValidationMessage(message: string, type: SourceControlInputBoxValidationType): void;
+		showValidationMessage(message: string | MarkdownString, type: SourceControlInputBoxValidationType): void;
 
 		/**
 		 * A validation function for the input box. It's possible to change
@@ -2751,6 +2751,17 @@ declare module 'vscode' {
 
 	namespace languages {
 		export function createLanguageStatusItem(selector: DocumentSelector): LanguageStatusItem;
+	}
+
+	//#endregion
+
+	//#region https://github.com/microsoft/vscode/issues/129053
+
+	export namespace env {
+		/**
+		 * The environment in which the app is embedded in. i.e. 'desktop', 'codespaces', 'web'.
+		 */
+		export const embedderIdentifier: string;
 	}
 
 	//#endregion

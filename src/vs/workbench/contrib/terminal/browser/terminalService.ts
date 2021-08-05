@@ -171,6 +171,7 @@ export class TerminalService implements ITerminalService {
 		@IEditorResolverService editorResolverService: IEditorResolverService,
 		@IExtensionService private readonly _extensionService: IExtensionService,
 		@INotificationService private readonly _notificationService: INotificationService,
+		@IThemeService private readonly _themeService: IThemeService,
 		@optional(ILocalTerminalService) localTerminalService: ILocalTerminalService
 	) {
 		this._localTerminalService = localTerminalService;
@@ -842,6 +843,8 @@ export class TerminalService implements ITerminalService {
 		let keyMods: IKeyMods | undefined;
 		const profiles = await this._detectProfiles(true);
 		const platformKey = await this._getPlatformKey();
+		const profilesKey = `${TerminalSettingPrefix.Profiles}${platformKey}`;
+		const defaultProfileKey = `${TerminalSettingPrefix.DefaultProfile}${platformKey}`;
 
 		const options: IPickOptions<IProfileQuickPickItem> = {
 			placeHolder: type === 'createInstance' ? nls.localize('terminal.integrated.selectProfileToCreate', "Select the terminal profile to create") : nls.localize('terminal.integrated.chooseDefaultProfile', "Select your default terminal profile"),
@@ -852,8 +855,7 @@ export class TerminalService implements ITerminalService {
 				if ('id' in context.item.profile) {
 					return;
 				}
-				const configKey = `terminal.integrated.profiles.${platformKey}`;
-				const configProfiles = this._configurationService.getValue<{ [key: string]: ITerminalProfileObject }>(configKey);
+				const configProfiles = this._configurationService.getValue<{ [key: string]: ITerminalProfileObject }>(profilesKey);
 				const existingProfiles = configProfiles ? Object.keys(configProfiles) : [];
 				const name = await this._quickInputService.input({
 					prompt: nls.localize('enterTerminalProfileName', "Enter terminal profile name"),
@@ -873,7 +875,7 @@ export class TerminalService implements ITerminalService {
 					path: context.item.profile.path,
 					args: context.item.profile.args
 				};
-				await this._configurationService.updateValue(configKey, newConfigValue, ConfigurationTarget.USER);
+				await this._configurationService.updateValue(profilesKey, newConfigValue, ConfigurationTarget.USER);
 			},
 			onKeyMods: mods => keyMods = mods
 		};
@@ -889,7 +891,19 @@ export class TerminalService implements ITerminalService {
 
 		quickPickItems.push({ type: 'separator', label: nls.localize('ICreateContributedTerminalProfileOptions', "contributed") });
 		for (const contributed of this._terminalContributionService.terminalProfiles) {
-			const icon = contributed.icon ? (iconRegistry.get(contributed.icon) || Codicon.terminal) : Codicon.terminal;
+			if (typeof contributed.icon === 'string' && contributed.icon.startsWith('$(')) {
+				contributed.icon = contributed.icon.substring(2, contributed.icon.length - 1);
+			}
+			const icon = contributed.icon && typeof contributed.icon === 'string' ? (iconRegistry.get(contributed.icon) || Codicon.terminal) : Codicon.terminal;
+			const uriClasses = getUriClasses(contributed, this._themeService.getColorTheme().type, true);
+			const colorClass = getColorClass(contributed);
+			const iconClasses = [];
+			if (uriClasses) {
+				iconClasses.push(...uriClasses);
+			}
+			if (colorClass) {
+				iconClasses.push(colorClass);
+			}
 			quickPickItems.push({
 				label: `$(${icon.id}) ${contributed.title}`,
 				profile: {
@@ -898,7 +912,8 @@ export class TerminalService implements ITerminalService {
 					icon: contributed.icon,
 					id: contributed.id,
 					color: contributed.color
-				}
+				},
+				iconClasses
 			});
 		}
 
@@ -918,7 +933,8 @@ export class TerminalService implements ITerminalService {
 			if ('id' in value.profile) {
 				await this._createContributedTerminalProfile(value.profile.extensionIdentifier, value.profile.id, {
 					isSplitTerminal: !!(keyMods?.alt && activeInstance),
-					icon: value.profile.icon
+					icon: value.profile.icon,
+					color: value.profile.color
 				});
 				return;
 			} else {
@@ -940,7 +956,7 @@ export class TerminalService implements ITerminalService {
 				return; // Should never happen
 			} else if ('id' in value.profile) {
 				// extension contributed profile
-				await this._configurationService.updateValue(`terminal.integrated.defaultProfile.${platformKey}`, value.profile.title, ConfigurationTarget.USER);
+				await this._configurationService.updateValue(defaultProfileKey, value.profile.title, ConfigurationTarget.USER);
 
 				this._registerContributedProfile(value.profile.extensionIdentifier, value.profile.id, value.profile.title, {
 					color: value.profile.color,
@@ -952,7 +968,7 @@ export class TerminalService implements ITerminalService {
 
 		// Add the profile to settings if necessary
 		if (value.profile.isAutoDetected) {
-			const profilesConfig = await this._configurationService.getValue(`terminal.integrated.profiles.${platformKey}`);
+			const profilesConfig = await this._configurationService.getValue(profilesKey);
 			if (typeof profilesConfig === 'object') {
 				const newProfile: ITerminalProfileObject = {
 					path: value.profile.path
@@ -962,10 +978,10 @@ export class TerminalService implements ITerminalService {
 				}
 				(profilesConfig as { [key: string]: ITerminalProfileObject })[value.profile.profileName] = newProfile;
 			}
-			await this._configurationService.updateValue(`terminal.integrated.profiles.${platformKey}`, profilesConfig, ConfigurationTarget.USER);
+			await this._configurationService.updateValue(profilesKey, profilesConfig, ConfigurationTarget.USER);
 		}
 		// Set the default profile
-		await this._configurationService.updateValue(`terminal.integrated.defaultProfile.${platformKey}`, value.profile.profileName, ConfigurationTarget.USER);
+		await this._configurationService.updateValue(defaultProfileKey, value.profile.profileName, ConfigurationTarget.USER);
 		return undefined;
 	}
 
@@ -1010,7 +1026,7 @@ export class TerminalService implements ITerminalService {
 
 	private async _registerContributedProfile(extensionIdentifier: string, id: string, title: string, options: ICreateContributedTerminalProfileOptions): Promise<void> {
 		const platformKey = await this._getPlatformKey();
-		const profilesConfig = await this._configurationService.getValue(`terminal.integrated.profiles.${platformKey}`);
+		const profilesConfig = await this._configurationService.getValue(`${TerminalSettingPrefix.Profiles}${platformKey}`);
 		if (typeof profilesConfig === 'object') {
 			const newProfile: IExtensionTerminalProfile = {
 				extensionIdentifier: extensionIdentifier,
@@ -1022,7 +1038,7 @@ export class TerminalService implements ITerminalService {
 
 			(profilesConfig as { [key: string]: ITerminalProfileObject })[title] = newProfile;
 		}
-		await this._configurationService.updateValue(`terminal.integrated.profiles.${platformKey}`, profilesConfig, ConfigurationTarget.USER);
+		await this._configurationService.updateValue(`${TerminalSettingPrefix.Profiles}${platformKey}`, profilesConfig, ConfigurationTarget.USER);
 		return;
 	}
 
@@ -1107,7 +1123,8 @@ export class TerminalService implements ITerminalService {
 			await this._createContributedTerminalProfile(contributedProfile.extensionIdentifier, contributedProfile.id, {
 				isSplitTerminal: options?.forceSplit || !!options?.instanceToSplit,
 				icon: contributedProfile.icon,
-				target: options?.target
+				target: options?.target,
+				color: contributedProfile.color
 			});
 			const instanceHost = options?.target === TerminalLocation.Editor ? this._terminalEditorService : this._terminalGroupService;
 			const instance = instanceHost.instances[instanceHost.instances.length - 1];
