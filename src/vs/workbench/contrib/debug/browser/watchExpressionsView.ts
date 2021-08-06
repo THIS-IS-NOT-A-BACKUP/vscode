@@ -5,7 +5,7 @@
 
 import { RunOnceScheduler } from 'vs/base/common/async';
 import { IViewletViewOptions } from 'vs/workbench/browser/parts/views/viewsViewlet';
-import { IDebugService, IExpression, CONTEXT_WATCH_EXPRESSIONS_FOCUSED, WATCH_VIEW_ID, CONTEXT_WATCH_EXPRESSIONS_EXIST, CONTEXT_WATCH_ITEM_TYPE } from 'vs/workbench/contrib/debug/common/debug';
+import { IDebugService, IExpression, CONTEXT_WATCH_EXPRESSIONS_FOCUSED, WATCH_VIEW_ID, CONTEXT_WATCH_EXPRESSIONS_EXIST, CONTEXT_WATCH_ITEM_TYPE, CONTEXT_VARIABLE_IS_READONLY } from 'vs/workbench/contrib/debug/common/debug';
 import { Expression, Variable } from 'vs/workbench/contrib/debug/common/debugModel';
 import { IContextMenuService } from 'vs/platform/contextview/browser/contextView';
 import { IInstantiationService, ServicesAccessor } from 'vs/platform/instantiation/common/instantiation';
@@ -46,6 +46,7 @@ export class WatchExpressionsView extends ViewPane {
 	private tree!: WorkbenchAsyncDataTree<IDebugService | IExpression, IExpression, FuzzyScore>;
 	private watchExpressionsExist: IContextKey<boolean>;
 	private watchItemType: IContextKey<string | undefined>;
+	private variableReadonly: IContextKey<boolean>;
 	private menu: IMenu;
 
 	constructor(
@@ -71,6 +72,7 @@ export class WatchExpressionsView extends ViewPane {
 			this.tree.updateChildren();
 		}, 50);
 		this.watchExpressionsExist = CONTEXT_WATCH_EXPRESSIONS_EXIST.bindTo(contextKeyService);
+		this.variableReadonly = CONTEXT_VARIABLE_IS_READONLY.bindTo(contextKeyService);
 		this.watchExpressionsExist.set(this.debugService.getModel().getWatchExpressions().length > 0);
 		this.watchItemType = CONTEXT_WATCH_ITEM_TYPE.bindTo(contextKeyService);
 	}
@@ -201,7 +203,8 @@ export class WatchExpressionsView extends ViewPane {
 		this.watchItemType.set(element instanceof Expression ? 'expression' : element instanceof Variable ? 'variable' : undefined);
 		const actions: IAction[] = [];
 		const actionsDisposable = createAndFillInContextMenuActions(this.menu, { arg: element, shouldForwardArgs: true }, actions);
-
+		const attributes = element instanceof Variable ? element.presentationHint?.attributes : undefined;
+		this.variableReadonly.set(!!attributes && attributes.indexOf('readOnly') >= 0);
 		this.contextMenuService.showContextMenu({
 			getAnchor: () => e.anchor,
 			getActions: () => actions,
@@ -278,11 +281,9 @@ export class WatchExpressionsRenderer extends AbstractExpressionsRenderer {
 				ariaLabel: localize('typeNewValue', "Type new value"),
 				onFinish: async (value: string, success: boolean) => {
 					if (success && value) {
-						const focusedSession = this.debugService.getViewModel().focusedSession;
 						const focusedFrame = this.debugService.getViewModel().focusedStackFrame;
-						if (focusedSession && focusedFrame) {
-							const path = expression instanceof Variable && expression.evaluateName ? expression.evaluateName : expression.name;
-							await focusedSession.setExpression(focusedFrame.frameId, path, value);
+						if (focusedFrame && (expression instanceof Variable || expression instanceof Expression)) {
+							await expression.setExpression(value, focusedFrame);
 							ignoreViewUpdates = true;
 							this.debugService.getViewModel().updateViews();
 							ignoreViewUpdates = false;

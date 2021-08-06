@@ -200,13 +200,14 @@ export class TerminalService implements ITerminalService {
 					}
 				}
 				const resolvedResource = this._terminalEditorService.resolveResource(instance || resource);
-				const editor = this._terminalEditorService.getInputFromResource(resolvedResource) || { editor: URI.revive(resolvedResource) };
+				const editor = this._terminalEditorService.getInputFromResource(resolvedResource) || { editor: resolvedResource };
 				return {
 					editor,
 					options: {
 						...options,
 						pinned: true,
-						forceReload: true
+						forceReload: true,
+						override: TerminalEditor.ID
 					}
 				};
 			});
@@ -1107,7 +1108,7 @@ export class TerminalService implements ITerminalService {
 
 
 	async createTerminal(options?: ICreateTerminalOptions): Promise<ITerminalInstance> {
-		const config = options?.config;
+		const config = options?.config || this._availableProfiles?.find(p => p.profileName === this._defaultProfileName);
 		const shellLaunchConfig = config && 'extensionIdentifier' in config ? {} : this._convertProfileToShellLaunchConfig(config || {});
 
 		// Get the contributed profile if it was provided

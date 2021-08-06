@@ -3,11 +3,12 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { URI } from 'vs/base/common/uri';
-import { IFileSystemProviderWithFileReadWriteCapability, FileSystemProviderCapabilities, IFileChange, IWatchOptions, IStat, FileOverwriteOptions, FileType, FileDeleteOptions, FileWriteOptions } from 'vs/platform/files/common/files';
+import { Emitter, Event } from 'vs/base/common/event';
 import { Disposable, IDisposable } from 'vs/base/common/lifecycle';
-import { Event, Emitter } from 'vs/base/common/event';
-import { extUri } from 'vs/base/common/resources';
+import { isLinux } from 'vs/base/common/platform';
+import { basename, extUri } from 'vs/base/common/resources';
+import { URI } from 'vs/base/common/uri';
+import { FileDeleteOptions, FileOverwriteOptions, FileSystemProviderCapabilities, FileType, FileWriteOptions, IFileChange, IFileSystemProviderWithFileReadWriteCapability, IStat, IWatchOptions } from 'vs/platform/files/common/files';
 
 function split(path: string): [string, string] | undefined {
 	const match = /^(.*)\/([^/]+)$/.exec(path);
@@ -35,9 +36,18 @@ export class HTMLFileSystemProvider implements IFileSystemProviderWithFileReadWr
 	private readonly files = new Map<string, FileSystemFileHandle>();
 	private readonly directories = new Map<string, FileSystemDirectoryHandle>();
 
-	readonly capabilities: FileSystemProviderCapabilities =
-		FileSystemProviderCapabilities.FileReadWrite
-		| FileSystemProviderCapabilities.PathCaseSensitive;
+	private _capabilities: FileSystemProviderCapabilities | undefined;
+	get capabilities(): FileSystemProviderCapabilities {
+		if (!this._capabilities) {
+			this._capabilities = FileSystemProviderCapabilities.FileReadWrite;
+
+			if (isLinux) {
+				this._capabilities |= FileSystemProviderCapabilities.PathCaseSensitive;
+			}
+		}
+
+		return this._capabilities;
+	}
 
 	readonly onDidChangeCapabilities = Event.None;
 
@@ -155,8 +165,14 @@ export class HTMLFileSystemProvider implements IFileSystemProviderWithFileReadWr
 		return result;
 	}
 
-	delete(resource: URI, opts: FileDeleteOptions): Promise<void> {
-		throw new Error('Method not implemented: delete');
+	async delete(resource: URI, opts: FileDeleteOptions): Promise<void> {
+		const parent = await this.getParentDirectoryHandle(resource);
+
+		if (!parent) {
+			throw new Error('Stat error: no parent found');
+		}
+
+		return parent.removeEntry(basename(resource), { recursive: opts.recursive });
 	}
 
 	rename(from: URI, to: URI, opts: FileOverwriteOptions): Promise<void> {
