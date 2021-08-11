@@ -9,6 +9,7 @@ import { IListRenderer, IListVirtualDelegate } from 'vs/base/browser/ui/list/lis
 import { ProgressBar } from 'vs/base/browser/ui/progressbar/progressbar';
 import { ToolBar } from 'vs/base/browser/ui/toolbar/toolbar';
 import { Action, IAction } from 'vs/base/common/actions';
+import { Codicon, CSSIcon } from 'vs/base/common/codicons';
 import { Color } from 'vs/base/common/color';
 import { combinedDisposable, Disposable, DisposableStore, IDisposable } from 'vs/base/common/lifecycle';
 import { MarshalledId } from 'vs/base/common/marshalling';
@@ -35,7 +36,7 @@ import { ServiceCollection } from 'vs/platform/instantiation/common/serviceColle
 import { IKeybindingService } from 'vs/platform/keybinding/common/keybinding';
 import { INotificationService } from 'vs/platform/notification/common/notification';
 import { DeleteCellAction, INotebookActionContext, INotebookCellActionContext } from 'vs/workbench/contrib/notebook/browser/contrib/coreActions';
-import { BaseCellRenderTemplate, CodeCellLayoutInfo, CodeCellRenderTemplate, ICellViewModel, INotebookEditor, isCodeCellRenderTemplate, MarkdownCellRenderTemplate, NOTEBOOK_CELL_EXECUTION_STATE, NOTEBOOK_CELL_LIST_FOCUSED, NOTEBOOK_CELL_TYPE, NOTEBOOK_EDITOR_FOCUSED } from 'vs/workbench/contrib/notebook/browser/notebookBrowser';
+import { BaseCellRenderTemplate, CodeCellLayoutInfo, CodeCellRenderTemplate, EXPAND_CELL_OUTPUT_COMMAND_ID, ICellViewModel, INotebookEditor, isCodeCellRenderTemplate, MarkdownCellRenderTemplate, NOTEBOOK_CELL_EXECUTION_STATE, NOTEBOOK_CELL_LIST_FOCUSED, NOTEBOOK_CELL_TYPE, NOTEBOOK_EDITOR_FOCUSED } from 'vs/workbench/contrib/notebook/browser/notebookBrowser';
 import { CodiconActionViewItem } from 'vs/workbench/contrib/notebook/browser/view/renderers/cellActionView';
 import { CellContextKeyManager } from 'vs/workbench/contrib/notebook/browser/view/renderers/cellContextKeys';
 import { CellDragAndDropController, DRAGGING_CLASS } from 'vs/workbench/contrib/notebook/browser/view/renderers/cellDnd';
@@ -712,6 +713,13 @@ export class CodeCellRenderer extends AbstractCellRenderer implements IListRende
 		const placeholder = DOM.append(cellOutputCollapseContainer, $('span.expandOutputPlaceholder')) as HTMLElement;
 		placeholder.textContent = 'Outputs are collapsed';
 		const expandIcon = DOM.append(cellOutputCollapseContainer, $('span.expandOutputIcon'));
+		expandIcon.classList.add(...CSSIcon.asClassNameArray(Codicon.more));
+
+		const keybinding = this.keybindingService.lookupKeybinding(EXPAND_CELL_OUTPUT_COMMAND_ID);
+		if (keybinding) {
+			placeholder.title = localize('cellExpandOutputButtonLabelWithDoubleClick', "Double click to expand cell output ({0})", keybinding.getLabel());
+			cellOutputCollapseContainer.title = localize('cellExpandOutputButtonLabel', "Expand Cell Output (${0})", keybinding.getLabel());
+		}
 
 		DOM.hide(cellOutputCollapseContainer);
 
@@ -811,9 +819,10 @@ export class CodeCellRenderer extends AbstractCellRenderer implements IListRende
 		const actionViewItemDisposables = disposables.add(new DisposableStore());
 		const dropdownAction = disposables.add(new Action('notebook.moreRunActions', localize('notebook.moreRunActionsLabel', "More..."), 'codicon-chevron-down', true));
 
+		const keybindingProvider = (action: IAction) => this.keybindingService.lookupKeybinding(action.id, executionContextKeyService);
 		const executionContextKeyService = disposables.add(getCodeCellExecutionContextKeyService(contextKeyService));
 		const toolbar = disposables.add(new ToolBar(container, this.contextMenuService, {
-			getKeyBinding: action => this.keybindingService.lookupKeybinding(action.id, executionContextKeyService),
+			getKeyBinding: keybindingProvider,
 			actionViewItemProvider: _action => {
 				actionViewItemDisposables.clear();
 
@@ -828,16 +837,15 @@ export class CodeCellRenderer extends AbstractCellRenderer implements IListRende
 					return undefined;
 				}
 
-				if (!this.notebookEditor.notebookOptions.getLayoutConfiguration().consolidatedRunButton) {
-					return undefined;
-				}
-
 				const item = this.instantiationService.createInstance(DropdownWithPrimaryActionViewItem,
 					primary,
 					dropdownAction,
 					actions.secondary,
 					'notebook-cell-run-toolbar',
-					this.contextMenuService);
+					this.contextMenuService,
+					{
+						getKeyBinding: keybindingProvider
+					});
 				actionViewItemDisposables.add(item.onDidChangeDropdownVisibility(visible => {
 					cellContainer.classList.toggle('cell-run-toolbar-dropdown-active', visible);
 				}));
