@@ -1762,7 +1762,7 @@ export enum TaskPanelKind {
 }
 
 @es5ClassCompat
-export class TaskGroup implements vscode.TaskGroup2 {
+export class TaskGroup implements vscode.TaskGroup {
 
 	isDefault?: boolean;
 	private _id: string;
@@ -2911,9 +2911,7 @@ export class FileDecoration {
 	badge?: string;
 	tooltip?: string;
 	color?: vscode.ThemeColor;
-	priority?: number;
 	propagate?: boolean;
-
 
 	constructor(badge?: string, tooltip?: string, color?: ThemeColor) {
 		this.badge = badge;

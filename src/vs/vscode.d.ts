@@ -502,7 +502,7 @@ declare module 'vscode' {
 		constructor(anchorLine: number, anchorCharacter: number, activeLine: number, activeCharacter: number);
 
 		/**
-		 * A selection is reversed if {@link Selection.active active}.isBefore({@link Selection.anchor anchor}).
+		 * A selection is reversed if its {@link Selection.anchor anchor} is the {@link Selection.end end} position.
 		 */
 		isReversed: boolean;
 	}
@@ -6419,6 +6419,17 @@ declare module 'vscode' {
 		 * The test all task group;
 		 */
 		static Test: TaskGroup;
+
+		/**
+		 * Whether the task that is part of this group is the default for the group.
+		 * This property cannot be set through API, and is controlled by a user's task configurations.
+		 */
+		readonly isDefault?: boolean;
+
+		/**
+		 * The ID of the task group. Is one of TaskGroup.Clean.id, TaskGroup.Build.id, TaskGroup.Rebuild.id, or TaskGroup.Test.id.
+		 */
+		readonly id: string;
 
 		private constructor(id: string, label: string);
 	}
