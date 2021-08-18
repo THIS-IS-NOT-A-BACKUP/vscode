@@ -13,6 +13,8 @@ import { IModelService } from 'vs/editor/common/services/modelService';
 import { MutableDisposable } from 'vs/base/common/lifecycle';
 import { PLAINTEXT_MODE_ID } from 'vs/editor/common/modes/modesRegistry';
 import { withUndefinedAsNull } from 'vs/base/common/types';
+import { ILanguageDetectionService } from 'vs/workbench/services/languageDetection/common/languageDetectionWorkerService';
+import { ThrottledDelayer } from 'vs/base/common/async';
 
 /**
  * The base text editor model leverages the code editor model. This class is only intended to be subclassed and not instantiated.
@@ -24,16 +26,23 @@ export class BaseTextEditorModel extends EditorModel implements ITextEditorModel
 	private createdEditorModel: boolean | undefined;
 
 	private readonly modelDisposeListener = this._register(new MutableDisposable());
+	private readonly _autoDetectLanguageThrottler = this._register(new ThrottledDelayer<void>(600));
 
 	constructor(
 		@IModelService protected modelService: IModelService,
 		@IModeService protected modeService: IModeService,
-		textEditorModelHandle?: URI
+		@ILanguageDetectionService private readonly languageDetectionService: ILanguageDetectionService,
+		textEditorModelHandle?: URI,
+		preferredMode?: string
 	) {
 		super();
 
 		if (textEditorModelHandle) {
 			this.handleExistingModel(textEditorModelHandle);
+		}
+
+		if (preferredMode) {
+			this.setModeInternal(preferredMode);
 		}
 	}
 
@@ -66,7 +75,17 @@ export class BaseTextEditorModel extends EditorModel implements ITextEditorModel
 		return true;
 	}
 
+	private _hasModeSetExplicitly: boolean = false;
+	get hasModeSetExplicitly(): boolean { return this._hasModeSetExplicitly; }
+
 	setMode(mode: string): void {
+		// Remember that an explicit mode was set
+		this._hasModeSetExplicitly = true;
+
+		this.setModeInternal(mode);
+	}
+
+	private setModeInternal(mode: string): void {
 		if (!this.isResolved()) {
 			return;
 		}
@@ -80,6 +99,25 @@ export class BaseTextEditorModel extends EditorModel implements ITextEditorModel
 
 	getMode(): string | undefined {
 		return this.textEditorModel?.getModeId();
+	}
+
+	protected async autoDetectLanguage() {
+		this._autoDetectLanguageThrottler.trigger(() => this.autoDetectLanguageImpl());
+	}
+
+	private async autoDetectLanguageImpl() {
+		if (this.hasModeSetExplicitly || !this.textEditorModelHandle || !this.languageDetectionService.isEnabledForMode(this.getMode() ?? PLAINTEXT_MODE_ID)) {
+			return;
+		}
+
+		const lang = await this.languageDetectionService.detectLanguage(this.textEditorModelHandle);
+		if (!lang) {
+			return;
+		}
+
+		if (!this.isDisposed()) {
+			this.setModeInternal(lang);
+		}
 	}
 
 	/**
