@@ -389,6 +389,13 @@ export interface IShellLaunchConfig {
 	 * The color ID to use for this terminal. If not specified it will use the default fallback
 	 */
 	color?: string;
+
+	/**
+	 * When a parent terminal is provided via API, the group needs
+	 * to find the index in order to place the child
+	 * directly to the right of its parent.
+	 */
+	parentTerminalId?: number;
 }
 
 export interface ICreateContributedTerminalProfileOptions {
@@ -398,8 +405,8 @@ export interface ICreateContributedTerminalProfileOptions {
 }
 
 export enum TerminalLocation {
-	Panel = 0,
-	Editor = 1
+	Panel = 1,
+	Editor = 2
 }
 
 export const enum TerminalLocationString {

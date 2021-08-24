@@ -1,7 +1,7 @@
 {
   "name": "code-oss-dev",
   "version": "1.60.0",
-  "distro": "0ab49ee6d75fa79d5a0c5f3b7ae961f0b35c3318",
+  "distro": "d61a8a18e75883a2c79ff9694e1592ab8564fb76",
   "author": {
     "name": "Microsoft Corporation"
   },
@@ -84,16 +84,17 @@
     "vscode-regexpp": "^3.1.0",
     "vscode-ripgrep": "^1.12.0",
     "vscode-textmate": "5.4.0",
-    "xterm": "4.14.0-beta.21",
+    "xterm": "4.14.0-beta.22",
     "xterm-addon-search": "0.9.0-beta.4",
     "xterm-addon-serialize": "0.6.0-beta.8",
     "xterm-addon-unicode11": "0.3.0-beta.6",
     "xterm-addon-webgl": "0.12.0-beta.10",
-    "xterm-headless": "4.14.0-beta.11",
+    "xterm-headless": "4.14.0-beta.12",
     "yauzl": "^2.9.2",
     "yazl": "^2.4.3"
   },
   "devDependencies": {
+    "7zip": "0.0.6",
     "@types/applicationinsights": "0.20.0",
     "@types/chokidar": "2.1.3",
     "@types/cookie": "^0.3.3",
@@ -121,7 +122,6 @@
     "@types/yazl": "^2.4.2",
     "@typescript-eslint/eslint-plugin": "3.2.0",
     "@typescript-eslint/parser": "^3.3.0",
-    "7zip": "0.0.6",
     "ansi-colors": "^3.2.3",
     "asar": "^3.0.3",
     "chromium-pickle-js": "^0.2.0",
