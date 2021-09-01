@@ -898,7 +898,7 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 				return extHostTask.registerTaskProvider(extension, type, provider);
 			},
 			registerFileSystemProvider(scheme, provider, options) {
-				return extHostFileSystem.registerFileSystemProvider(extension.identifier, scheme, provider, options, extension.enableProposedApi);
+				return extHostFileSystem.registerFileSystemProvider(extension.identifier, scheme, provider, options);
 			},
 			get fs() {
 				return extHostConsumerFileSystem.value;
@@ -1289,7 +1289,6 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 			BranchCoverage: extHostTypes.BranchCoverage,
 			FunctionCoverage: extHostTypes.FunctionCoverage,
 			WorkspaceTrustState: extHostTypes.WorkspaceTrustState,
-			LanguageStatusSeverity: extHostTypes.LanguageStatusSeverity,
 		};
 	};
 }

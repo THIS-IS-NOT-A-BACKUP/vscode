@@ -16,7 +16,7 @@ import { KeyCode, KeyMod } from 'vs/base/common/keyCodes';
 import { KeybindingWeight } from 'vs/platform/keybinding/common/keybindingsRegistry';
 import { ServicesAccessor } from 'vs/platform/instantiation/common/instantiation';
 import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
-import { NOTEBOOK_ACTIONS_CATEGORY } from 'vs/workbench/contrib/notebook/browser/contrib/coreActions';
+import { NOTEBOOK_ACTIONS_CATEGORY } from 'vs/workbench/contrib/notebook/browser/controller/coreActions';
 import { localize } from 'vs/nls';
 import { FoldingRegion } from 'vs/editor/contrib/folding/foldingRanges';
 import { ICommandHandlerDescription } from 'vs/platform/commands/common/commands';
@@ -35,11 +35,11 @@ export class FoldingController extends Disposable implements INotebookEditorCont
 		this._register(this._notebookEditor.onDidChangeModel(() => {
 			this._localStore.clear();
 
-			if (!this._notebookEditor.viewModel) {
+			if (!this._notebookEditor.hasModel()) {
 				return;
 			}
 
-			this._localStore.add(this._notebookEditor.viewModel.viewContext.eventDispatcher.onDidChangeCellState(e => {
+			this._localStore.add(this._notebookEditor.onDidChangeCellState(e => {
 				if (e.source.editStateChanged && e.cell.cellKind === CellKind.Markup) {
 					this._foldingModel?.recompute();
 					// this._updateEditorFoldingRanges();

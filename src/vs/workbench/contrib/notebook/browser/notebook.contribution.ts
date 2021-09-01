@@ -60,9 +60,16 @@ import { IEditorGroupsService } from 'vs/workbench/services/editor/common/editor
 import { NotebookRendererMessagingService } from 'vs/workbench/contrib/notebook/browser/notebookRendererMessagingServiceImpl';
 import { INotebookRendererMessagingService } from 'vs/workbench/contrib/notebook/common/notebookRendererMessagingService';
 
+// Editor Controller
+import 'vs/workbench/contrib/notebook/browser/controller/coreActions';
+import 'vs/workbench/contrib/notebook/browser/controller/insertCellActions';
+import 'vs/workbench/contrib/notebook/browser/controller/executeActions';
+import 'vs/workbench/contrib/notebook/browser/controller/layoutActions';
+import 'vs/workbench/contrib/notebook/browser/controller/editActions';
+import 'vs/workbench/contrib/notebook/browser/controller/apiActions';
+
 // Editor Contribution
 import 'vs/workbench/contrib/notebook/browser/contrib/clipboard/notebookClipboard';
-import 'vs/workbench/contrib/notebook/browser/contrib/coreActions';
 import 'vs/workbench/contrib/notebook/browser/contrib/find/findController';
 import 'vs/workbench/contrib/notebook/browser/contrib/fold/folding';
 import 'vs/workbench/contrib/notebook/browser/contrib/format/formatting';
@@ -77,7 +84,7 @@ import 'vs/workbench/contrib/notebook/browser/contrib/cellStatusBar/contributedS
 import 'vs/workbench/contrib/notebook/browser/contrib/cellStatusBar/executionStatusBarItemController';
 import 'vs/workbench/contrib/notebook/browser/contrib/editorStatusBar/editorStatusBar';
 import 'vs/workbench/contrib/notebook/browser/contrib/undoRedo/notebookUndoRedo';
-import 'vs/workbench/contrib/notebook/browser/contrib/cellOperations/cellOperations';
+import 'vs/workbench/contrib/notebook/browser/contrib/cellCommands/cellCommands';
 import 'vs/workbench/contrib/notebook/browser/contrib/viewportCustomMarkdown/viewportCustomMarkdown';
 import 'vs/workbench/contrib/notebook/browser/contrib/troubleshoot/layout';
 import 'vs/workbench/contrib/notebook/browser/contrib/codeRenderer/codeRenderer';

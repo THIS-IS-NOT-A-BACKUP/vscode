@@ -18,7 +18,7 @@ import { Registry } from 'vs/platform/registry/common/platform';
 import { ThemeIcon } from 'vs/platform/theme/common/themeService';
 import { Extensions as WorkbenchExtensions, IWorkbenchContribution, IWorkbenchContributionsRegistry } from 'vs/workbench/common/contributions';
 import { IExtensionsViewPaneContainer, VIEWLET_ID as EXTENSION_VIEWLET_ID } from 'vs/workbench/contrib/extensions/common/extensions';
-import { NOTEBOOK_ACTIONS_CATEGORY, SELECT_KERNEL_ID } from 'vs/workbench/contrib/notebook/browser/contrib/coreActions';
+import { NOTEBOOK_ACTIONS_CATEGORY, SELECT_KERNEL_ID } from 'vs/workbench/contrib/notebook/browser/controller/coreActions';
 import { getNotebookEditorFromEditorPane, INotebookEditor, KERNEL_EXTENSIONS, NOTEBOOK_MISSING_KERNEL_EXTENSION, NOTEBOOK_IS_ACTIVE_EDITOR, NOTEBOOK_KERNEL_COUNT } from 'vs/workbench/contrib/notebook/browser/notebookBrowser';
 import { NotebookEditorWidget } from 'vs/workbench/contrib/notebook/browser/notebookEditorWidget';
 import { configureKernelIcon, selectKernelIcon } from 'vs/workbench/contrib/notebook/browser/notebookIcons';
@@ -404,13 +404,17 @@ export class ActiveCellStatus extends Disposable implements IWorkbenchContributi
 	}
 
 	private _getSelectionsText(editor: INotebookEditor, vm: NotebookViewModel): string | undefined {
+		if (!editor.hasModel()) {
+			return undefined;
+		}
+
 		const activeCell = editor.getActiveCell();
 		if (!activeCell) {
 			return undefined;
 		}
 
-		const idxFocused = vm.getCellIndex(activeCell) + 1;
-		const numSelected = vm.getSelections().reduce((prev, range) => prev + (range.end - range.start), 0);
+		const idxFocused = editor.getCellIndex(activeCell) + 1;
+		const numSelected = editor.getSelections().reduce((prev, range) => prev + (range.end - range.start), 0);
 		const totalCells = vm.getCells().length;
 		return numSelected > 1 ?
 			nls.localize('notebook.multiActiveCellIndicator', "Cell {0} ({1} selected)", idxFocused, numSelected) :
