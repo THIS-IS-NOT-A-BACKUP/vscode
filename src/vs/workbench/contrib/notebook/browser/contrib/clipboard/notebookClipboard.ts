@@ -12,7 +12,6 @@ import { IEditorService } from 'vs/workbench/services/editor/common/editorServic
 import { cellRangeToViewCells, expandCellRangesWithHiddenCells, getNotebookEditorFromEditorPane, ICellViewModel, INotebookEditor, NOTEBOOK_CELL_EDITABLE, NOTEBOOK_EDITOR_EDITABLE, NOTEBOOK_EDITOR_FOCUSED } from 'vs/workbench/contrib/notebook/browser/notebookBrowser';
 import { CopyAction, CutAction, PasteAction } from 'vs/editor/contrib/clipboard/clipboard';
 import { IClipboardService } from 'vs/platform/clipboard/common/clipboardService';
-import { CellViewModel } from 'vs/workbench/contrib/notebook/browser/viewModel/notebookViewModel';
 import { cloneNotebookCellTextModel, NotebookCellTextModel } from 'vs/workbench/contrib/notebook/common/model/notebookCellTextModel';
 import { CellEditType, ICellEditOperation, ISelectionState, SelectionStateType } from 'vs/workbench/contrib/notebook/common/notebookCommon';
 import { INotebookService } from 'vs/workbench/contrib/notebook/common/notebookService';
@@ -81,21 +80,20 @@ export function runPasteCells(editor: INotebookEditor, activeCell: ICellViewMode
 	if (!editor.hasModel()) {
 		return false;
 	}
-	const viewModel = editor._getViewModel();
 	const textModel = editor.textModel;
 
-	if (viewModel.options.isReadOnly) {
+	if (editor.isReadOnly) {
 		return false;
 	}
 
 	const originalState: ISelectionState = {
 		kind: SelectionStateType.Index,
-		focus: viewModel.getFocus(),
-		selections: viewModel.getSelections()
+		focus: editor.getFocus(),
+		selections: editor.getSelections()
 	};
 
 	if (activeCell) {
-		const currCellIndex = viewModel.getCellIndex(activeCell);
+		const currCellIndex = editor.getCellIndex(activeCell);
 		const newFocusIndex = typeof currCellIndex === 'number' ? currCellIndex + 1 : 0;
 		textModel.applyEdits([
 			{
@@ -143,11 +141,10 @@ export function runCopyCells(accessor: ServicesAccessor, editor: INotebookEditor
 
 	const clipboardService = accessor.get<IClipboardService>(IClipboardService);
 	const notebookService = accessor.get<INotebookService>(INotebookService);
-	const viewModel = editor._getViewModel();
-	const selections = viewModel.getSelections();
+	const selections = editor.getSelections();
 
 	if (targetCell) {
-		const targetCellIndex = viewModel.getCellIndex(targetCell);
+		const targetCellIndex = editor.getCellIndex(targetCell);
 		const containingSelection = selections.find(selection => selection.start <= targetCellIndex && targetCellIndex < selection.end);
 
 		if (!containingSelection) {
@@ -157,7 +154,7 @@ export function runCopyCells(accessor: ServicesAccessor, editor: INotebookEditor
 		}
 	}
 
-	const selectionRanges = expandCellRangesWithHiddenCells(editor, viewModel.getSelections());
+	const selectionRanges = expandCellRangesWithHiddenCells(editor, editor.getSelections());
 	const selectedCells = cellRangeToViewCells(editor, selectionRanges);
 
 	if (!selectedCells.length) {
@@ -418,9 +415,7 @@ registerAction2(class extends NotebookAction {
 		const notebookService = accessor.get<INotebookService>(INotebookService);
 		const pasteCells = notebookService.getToCopy();
 
-		const viewModel = context.notebookEditor._getViewModel();
-
-		if (!viewModel || viewModel.options.isReadOnly) {
+		if (!context.notebookEditor.hasModel() || context.notebookEditor.isReadOnly) {
 			return;
 		}
 
@@ -449,10 +444,10 @@ registerAction2(class extends NotebookCellAction {
 	async runWithContext(accessor: ServicesAccessor, context: INotebookCellActionContext) {
 		const notebookService = accessor.get<INotebookService>(INotebookService);
 		const pasteCells = notebookService.getToCopy();
+		const editor = context.notebookEditor;
+		const textModel = editor.textModel;
 
-		const viewModel = context.notebookEditor._getViewModel();
-
-		if (!viewModel || viewModel.options.isReadOnly) {
+		if (editor.isReadOnly) {
 			return;
 		}
 
@@ -460,16 +455,25 @@ registerAction2(class extends NotebookCellAction {
 			return;
 		}
 
-		const currCellIndex = viewModel.getCellIndex(context.cell);
+		const originalState: ISelectionState = {
+			kind: SelectionStateType.Index,
+			focus: editor.getFocus(),
+			selections: editor.getSelections()
+		};
 
-		let topPastedCell: CellViewModel | undefined = undefined;
-		pasteCells.items.reverse().map(cell => cloneNotebookCellTextModel(cell)).forEach(pasteCell => {
-			topPastedCell = viewModel.createCell(currCellIndex, pasteCell.source, pasteCell.language, pasteCell.cellKind, pasteCell.metadata, pasteCell.outputs, true);
-			return;
-		});
-
-		if (topPastedCell) {
-			context.notebookEditor.focusNotebookCell(topPastedCell, 'container');
-		}
+		const currCellIndex = context.notebookEditor.getCellIndex(context.cell);
+		const newFocusIndex = currCellIndex;
+		textModel.applyEdits([
+			{
+				editType: CellEditType.Replace,
+				index: currCellIndex,
+				count: 0,
+				cells: pasteCells.items.map(cell => cloneNotebookCellTextModel(cell))
+			}
+		], true, originalState, () => ({
+			kind: SelectionStateType.Index,
+			focus: { start: newFocusIndex, end: newFocusIndex + 1 },
+			selections: [{ start: newFocusIndex, end: newFocusIndex + pasteCells.items.length }]
+		}), undefined, true);
 	}
 });

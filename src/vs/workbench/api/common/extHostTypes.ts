@@ -1280,6 +1280,13 @@ export class CallHierarchyOutgoingCall {
 	}
 }
 
+export enum LanguageStatusSeverity {
+	Information = 0,
+	Warning = 1,
+	Error = 2
+}
+
+
 @es5ClassCompat
 export class CodeLens {
 
@@ -3331,14 +3338,7 @@ export class TestMessage implements vscode.TestMessage {
 
 @es5ClassCompat
 export class TestTag implements vscode.TestTag {
-	constructor(
-		public readonly id: string,
-		public readonly label?: string,
-	) {
-		if (/\s/.test(id)) {
-			throw new Error(`Test tag ID "${id}" may not include whitespace`);
-		}
-	}
+	constructor(public readonly id: string) { }
 }
 
 //#endregion
