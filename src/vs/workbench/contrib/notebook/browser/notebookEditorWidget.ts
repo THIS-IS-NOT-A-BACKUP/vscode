@@ -52,7 +52,7 @@ import { CodeCellRenderer, ListTopCellToolbar, MarkupCellRenderer, NotebookCellL
 import { CodeCellViewModel } from 'vs/workbench/contrib/notebook/browser/viewModel/codeCellViewModel';
 import { NotebookEventDispatcher } from 'vs/workbench/contrib/notebook/browser/viewModel/eventDispatcher';
 import { MarkupCellViewModel } from 'vs/workbench/contrib/notebook/browser/viewModel/markupCellViewModel';
-import { CellViewModel, IModelDecorationsChangeAccessor, INotebookEditorViewState, NotebookViewModel } from 'vs/workbench/contrib/notebook/browser/viewModel/notebookViewModel';
+import { CellViewModel, IModelDecorationsChangeAccessor, INotebookEditorViewState, INotebookViewCellsUpdateEvent, NotebookViewModel } from 'vs/workbench/contrib/notebook/browser/viewModel/notebookViewModel';
 import { NotebookTextModel } from 'vs/workbench/contrib/notebook/common/model/notebookTextModel';
 import { CellKind, SelectionStateType } from 'vs/workbench/contrib/notebook/common/notebookCommon';
 import { ICellRange } from 'vs/workbench/contrib/notebook/common/notebookRange';
@@ -219,6 +219,34 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 	//#region Eventing
 	private readonly _onDidChangeCellState = this._register(new Emitter<NotebookCellStateChangedEvent>());
 	readonly onDidChangeCellState = this._onDidChangeCellState.event;
+	private readonly _onDidChangeViewCells = this._register(new Emitter<INotebookViewCellsUpdateEvent>());
+	readonly onDidChangeViewCells: Event<INotebookViewCellsUpdateEvent> = this._onDidChangeViewCells.event;
+	private readonly _onDidChangeModel = this._register(new Emitter<NotebookTextModel | undefined>());
+	readonly onDidChangeModel: Event<NotebookTextModel | undefined> = this._onDidChangeModel.event;
+	private readonly _onDidChangeOptions = this._register(new Emitter<void>());
+	readonly onDidChangeOptions: Event<void> = this._onDidChangeOptions.event;
+	private readonly _onDidScroll = this._register(new Emitter<void>());
+	readonly onDidScroll: Event<void> = this._onDidScroll.event;
+	private readonly _onDidChangeActiveCell = this._register(new Emitter<void>());
+	readonly onDidChangeActiveCell: Event<void> = this._onDidChangeActiveCell.event;
+	private readonly _onDidChangeSelection = this._register(new Emitter<void>());
+	readonly onDidChangeSelection: Event<void> = this._onDidChangeSelection.event;
+	private readonly _onDidChangeVisibleRanges = this._register(new Emitter<void>());
+	readonly onDidChangeVisibleRanges: Event<void> = this._onDidChangeVisibleRanges.event;
+	private readonly _onDidFocusEditorWidget = this._register(new Emitter<void>());
+	readonly onDidFocusEditorWidget = this._onDidFocusEditorWidget.event;
+	private readonly _onDidFocusEmitter = this._register(new Emitter<void>());
+	readonly onDidFocus = this._onDidFocusEmitter.event;
+	private readonly _onDidBlurEmitter = this._register(new Emitter<void>());
+	readonly onDidBlur = this._onDidBlurEmitter.event;
+	private readonly _onDidChangeActiveEditor = this._register(new Emitter<this>());
+	readonly onDidChangeActiveEditor: Event<this> = this._onDidChangeActiveEditor.event;
+	private readonly _onMouseUp: Emitter<INotebookEditorMouseEvent> = this._register(new Emitter<INotebookEditorMouseEvent>());
+	readonly onMouseUp: Event<INotebookEditorMouseEvent> = this._onMouseUp.event;
+	private readonly _onMouseDown: Emitter<INotebookEditorMouseEvent> = this._register(new Emitter<INotebookEditorMouseEvent>());
+	readonly onMouseDown: Event<INotebookEditorMouseEvent> = this._onMouseDown.event;
+	private readonly _onDidReceiveMessage = this._register(new Emitter<INotebookWebviewMessage>());
+	readonly onDidReceiveMessage: Event<INotebookWebviewMessage> = this._onDidReceiveMessage.event;
 
 	//#endregion
 	private _overlayContainer!: HTMLElement;
@@ -251,10 +279,6 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 	private _outputRenderer: OutputRenderer;
 	protected readonly _contributions = new Map<string, INotebookEditorContribution>();
 	private _scrollBeyondLastLine: boolean;
-	private readonly _onDidFocusEmitter = this._register(new Emitter<void>());
-	public readonly onDidFocus = this._onDidFocusEmitter.event;
-	private readonly _onDidBlurEmitter = this._register(new Emitter<void>());
-	public readonly onDidBlur = this._onDidBlurEmitter.event;
 	private readonly _insetModifyQueueByOutputId = new SequencerByKey<string>();
 	private _kernelManger: NotebookEditorKernelManager;
 	private _cellContextKeyManager: CellContextKeyManager | null = null;
@@ -267,12 +291,6 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 	get isDisposed() {
 		return this._isDisposed;
 	}
-
-	private readonly _onDidChangeModel = this._register(new Emitter<NotebookTextModel | undefined>());
-	readonly onDidChangeModel: Event<NotebookTextModel | undefined> = this._onDidChangeModel.event;
-
-	private readonly _onDidFocusEditorWidget = this._register(new Emitter<void>());
-	readonly onDidFocusEditorWidget = this._onDidFocusEditorWidget.event;
 
 	set viewModel(newModel: NotebookViewModel | undefined) {
 		this._notebookViewModel = newModel;
@@ -291,9 +309,6 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 		return this._notebookViewModel?.options.isReadOnly ?? false;
 	}
 
-	private readonly _onDidChangeActiveEditor = this._register(new Emitter<this>());
-	readonly onDidChangeActiveEditor: Event<this> = this._onDidChangeActiveEditor.event;
-
 	get activeCodeEditor(): IEditor | undefined {
 		if (this._isDisposed) {
 			return;
@@ -303,10 +318,6 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 		return this._renderedEditors.get(focused);
 	}
 
-	private readonly _onDidScroll = this._register(new Emitter<void>());
-	readonly onDidScroll: Event<void> = this._onDidScroll.event;
-	private readonly _onDidChangeActiveCell = this._register(new Emitter<void>());
-	readonly onDidChangeActiveCell: Event<void> = this._onDidChangeActiveCell.event;
 	private _cursorNavigationMode: boolean = false;
 	get cursorNavigationMode(): boolean {
 		return this._cursorNavigationMode;
@@ -316,11 +327,6 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 		this._cursorNavigationMode = v;
 	}
 
-	private readonly _onDidChangeSelection = this._register(new Emitter<void>());
-	get onDidChangeSelection(): Event<void> { return this._onDidChangeSelection.event; }
-
-	private readonly _onDidChangeVisibleRanges = this._register(new Emitter<void>());
-	onDidChangeVisibleRanges: Event<void> = this._onDidChangeVisibleRanges.event;
 
 	get visibleRanges() {
 		return this._list.visibleRanges || [];
@@ -491,7 +497,7 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 	}
 
 	setSelections(selections: ICellRange[]) {
-		if (!this.hasModel()) {
+		if (!this.viewModel) {
 			return;
 		}
 
@@ -508,7 +514,7 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 	}
 
 	setFocus(focus: ICellRange) {
-		if (!this.hasModel()) {
+		if (!this.viewModel) {
 			return;
 		}
 
@@ -1112,7 +1118,7 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 			this._readOnly = options?.isReadOnly;
 		}
 
-		if (!this.hasModel()) {
+		if (!this.viewModel) {
 			return;
 		}
 
@@ -1170,6 +1176,7 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 		}
 
 		this._updateForOptions();
+		this._onDidChangeOptions.fire();
 	}
 
 	private _detachModel() {
@@ -1187,7 +1194,7 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 
 
 	private _updateForOptions(): void {
-		if (!this.hasModel()) {
+		if (!this.viewModel) {
 			return;
 		}
 
@@ -1279,6 +1286,10 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 				}
 			}
 		}
+
+		this._localStore.add(this.viewModel.onDidChangeViewCells(e => {
+			this._onDidChangeViewCells.fire(e);
+		}));
 
 		this._localStore.add(this.viewModel.onDidChangeSelection(() => {
 			this._onDidChangeSelection.fire();
@@ -1915,15 +1926,6 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 
 	//#endregion
 
-	//#region Mouse Events
-	private readonly _onMouseUp: Emitter<INotebookEditorMouseEvent> = this._register(new Emitter<INotebookEditorMouseEvent>());
-	public readonly onMouseUp: Event<INotebookEditorMouseEvent> = this._onMouseUp.event;
-
-	private readonly _onMouseDown: Emitter<INotebookEditorMouseEvent> = this._register(new Emitter<INotebookEditorMouseEvent>());
-	public readonly onMouseDown: Event<INotebookEditorMouseEvent> = this._onMouseDown.event;
-
-	//#endregion
-
 	//#region Kernel/Execution
 
 	private async _loadKernelPreloads(): Promise<void> {
@@ -1942,7 +1944,7 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 	}
 
 	async cancelNotebookCells(cells?: Iterable<ICellViewModel>): Promise<void> {
-		if (!this.hasModel()) {
+		if (!this.viewModel || !this.hasModel()) {
 			return;
 		}
 		if (!cells) {
@@ -1952,7 +1954,7 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 	}
 
 	async executeNotebookCells(cells?: Iterable<ICellViewModel>): Promise<void> {
-		if (!this.hasModel()) {
+		if (!this.viewModel || !this.hasModel()) {
 			return;
 		}
 		if (!cells) {
@@ -2078,121 +2080,6 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 		const index = this.viewModel.getCellIndex(cell);
 
 		return this.viewModel.splitNotebookCell(index);
-	}
-
-	async deleteNotebookCell(cell: ICellViewModel): Promise<boolean> {
-		if (!this.viewModel) {
-			return false;
-		}
-
-		if (this.viewModel.options.isReadOnly) {
-			return false;
-		}
-
-		if (this._pendingLayouts?.has(cell)) {
-			this._pendingLayouts.get(cell)!.dispose();
-		}
-
-		const index = this.viewModel.getCellIndex(cell);
-		this.viewModel.deleteCell(index, true);
-		return true;
-	}
-
-	async moveCellDown(cell: ICellViewModel): Promise<ICellViewModel | null> {
-		if (!this.viewModel) {
-			return null;
-		}
-
-		if (this.viewModel.options.isReadOnly) {
-			return null;
-		}
-
-		const index = this.viewModel.getCellIndex(cell);
-		if (index === this.viewModel.length - 1) {
-			return null;
-		}
-
-		const newIdx = index + 2; // This is the adjustment for the index before the cell has been "removed" from its original index
-		return this._moveCellToIndex(index, 1, newIdx);
-	}
-
-	async moveCellUp(cell: ICellViewModel): Promise<ICellViewModel | null> {
-		if (!this.viewModel) {
-			return null;
-		}
-
-		if (this.viewModel.options.isReadOnly) {
-			return null;
-		}
-
-		const index = this.viewModel.getCellIndex(cell);
-		if (index === 0) {
-			return null;
-		}
-
-		const newIdx = index - 1;
-		return this._moveCellToIndex(index, 1, newIdx);
-	}
-
-	async moveCellsToIdx(index: number, length: number, toIdx: number): Promise<ICellViewModel | null> {
-		if (!this.viewModel) {
-			return null;
-		}
-
-		if (this.viewModel.options.isReadOnly) {
-			return null;
-		}
-
-		return this._moveCellToIndex(index, length, toIdx);
-	}
-
-	/**
-	 * @param index The current index of the cell
-	 * @param desiredIndex The desired index, in an index scheme for the state of the tree before the current cell has been "removed".
-	 * @example to move the cell from index 0 down one spot, call with (0, 2)
-	 */
-	private async _moveCellToIndex(index: number, length: number, desiredIndex: number): Promise<ICellViewModel | null> {
-		if (!this.viewModel) {
-			return null;
-		}
-
-		if (index < desiredIndex) {
-			// The cell is moving "down", it will free up one index spot and consume a new one
-			desiredIndex -= length;
-		}
-
-		if (index === desiredIndex) {
-			return null;
-		}
-
-		if (!this.viewModel.moveCellToIdx(index, length, desiredIndex, true)) {
-			throw new Error('Notebook Editor move cell, index out of range');
-		}
-
-		// this._list.move(index, desiredIndex);
-
-		let r: (val: ICellViewModel | null) => void;
-		DOM.scheduleAtNextAnimationFrame(() => {
-			if (this._isDisposed) {
-				r(null);
-				return;
-			}
-
-			if (!this.viewModel) {
-				r(null);
-				return;
-			}
-
-			const viewCell = this.viewModel.cellAt(desiredIndex);
-			if (viewCell) {
-				this._list.revealElementInView(viewCell);
-				r(viewCell);
-			} else {
-				r(null);
-			}
-		});
-
-		return new Promise(resolve => { r = resolve; });
 	}
 
 	getActiveCell() {
@@ -2496,11 +2383,6 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditor 
 	}
 
 	//#region --- webview IPC ----
-
-	private readonly _onDidReceiveMessage = this._register(new Emitter<INotebookWebviewMessage>());
-
-	readonly onDidReceiveMessage: Event<INotebookWebviewMessage> = this._onDidReceiveMessage.event;
-
 	postMessage(message: any) {
 		if (this._webview?.isResolved()) {
 			this._webview.postKernelMessage(message);

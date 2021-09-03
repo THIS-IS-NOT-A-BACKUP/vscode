@@ -308,7 +308,7 @@ export class NotebookCellOutline extends Disposable implements IOutline<OutlineE
 			} else {
 				selectionListener.value = combinedDisposable(
 					notebookEditor.onDidChangeSelection(() => this._recomputeActive()),
-					notebookEditor.viewModel.onDidChangeViewCells(() => this._recomputeState())
+					notebookEditor.onDidChangeViewCells(() => this._recomputeState())
 				);
 			}
 		};

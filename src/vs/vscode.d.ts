@@ -4737,8 +4737,8 @@ declare module 'vscode' {
 		 * @param document The document in which the command was invoked.
 		 * @param position The position at which the command was invoked.
 		 * @param token A cancellation token.
-		 * @returns A call hierarchy item or a thenable that resolves to such. The lack of a result can be
-		 * signaled by returning `undefined` or `null`.
+		 * @returns One or multiple call hierarchy items or a thenable that resolves to such. The lack of a result can be
+		 * signaled by returning `undefined`, `null`, or an empty array.
 		 */
 		prepareCallHierarchy(document: TextDocument, position: Position, token: CancellationToken): ProviderResult<CallHierarchyItem | CallHierarchyItem[]>;
 
@@ -7425,6 +7425,14 @@ declare module 'vscode' {
 		 * Defaults to false (scripts-disabled).
 		 */
 		readonly enableScripts?: boolean;
+
+		/**
+		 * Controls whether forms are enabled in the webview content or not.
+		 *
+		 * Defaults to true if {@link enableScripts scripts are enabled}. Otherwise defaults to false.
+		 * Explicitly setting this property to either true or false overrides the default.
+		 */
+		readonly enableForms?: boolean;
 
 		/**
 		 * Controls whether command uris are enabled in webview content or not.

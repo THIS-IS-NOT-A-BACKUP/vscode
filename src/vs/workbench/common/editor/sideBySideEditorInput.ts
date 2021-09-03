@@ -49,19 +49,19 @@ export class SideBySideEditorInput extends EditorInput implements ISideBySideEdi
 		return undefined; // use `EditorResourceAccessor` to obtain one side's resource
 	}
 
-	get primary(): EditorInput {
+	get primary(): IEditorInput {
 		return this._primary;
 	}
 
-	get secondary(): EditorInput {
+	get secondary(): IEditorInput {
 		return this._secondary;
 	}
 
 	constructor(
 		protected readonly name: string | undefined,
 		protected readonly description: string | undefined,
-		private readonly _secondary: EditorInput,
-		private readonly _primary: EditorInput
+		private readonly _secondary: IEditorInput,
+		private readonly _primary: IEditorInput
 	) {
 		super();
 
@@ -168,6 +168,16 @@ export class SideBySideEditorInput extends EditorInput implements ISideBySideEdi
 
 		if (isResourceSideBySideEditorInput(otherInput)) {
 			return this.primary.matches(otherInput.primary) && this.secondary.matches(otherInput.secondary);
+		}
+
+		if (this.primary.matches(this.secondary)) {
+			// Special case: both sides of the input are the same editor
+			// so we allow this editor to match even on one of the sides
+			// to avoid the following case: the user splits an editor into
+			// 2 sides. Now, whenever the user opens the same file again,
+			// we want the side by side editor to become active, not the
+			// file in another new editor.
+			return this.primary.matches(otherInput);
 		}
 
 		return false;

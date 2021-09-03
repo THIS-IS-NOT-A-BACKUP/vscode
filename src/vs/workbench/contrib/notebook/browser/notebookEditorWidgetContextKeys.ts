@@ -115,7 +115,8 @@ export class NotebookEditorContextKeys {
 			});
 		};
 
-		for (const cell of this._editor.viewModel.viewCells) {
+		for (let i = 0; i < this._editor.getLength(); i++) {
+			const cell = this._editor.cellAt(i);
 			this._cellStateListeners.push(addCellStateListener(cell));
 			this._cellOutputsListeners.push(addCellOutputsListener(cell));
 		}
@@ -123,7 +124,7 @@ export class NotebookEditorContextKeys {
 		recomputeOutputsExistence();
 		this._updateForInstalledExtension();
 
-		this._viewModelDisposables.add(this._editor.viewModel.onDidChangeViewCells(e => {
+		this._viewModelDisposables.add(this._editor.onDidChangeViewCells(e => {
 			e.splices.reverse().forEach(splice => {
 				const [start, deleted, newCells] = splice;
 				const deletedCellStates = this._cellStateListeners.splice(start, deleted, ...newCells.map(addCellStateListener));
