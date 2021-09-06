@@ -7,9 +7,9 @@ import { localize } from 'vs/nls';
 import { isObject, isString, isUndefined, isNumber, withNullAsUndefined } from 'vs/base/common/types';
 import { ServicesAccessor } from 'vs/platform/instantiation/common/instantiation';
 import { KeybindingsRegistry, KeybindingWeight } from 'vs/platform/keybinding/common/keybindingsRegistry';
-import { TextCompareEditorVisibleContext, IEditorIdentifier, IEditorCommandsContext, ActiveEditorGroupEmptyContext, MultipleEditorGroupsContext, CloseDirection, IEditorInput, IVisibleEditorPane, ActiveEditorStickyContext, EditorsOrder, EditorInputCapabilities, isEditorIdentifier, ActiveEditorGroupLockedContext, ActiveEditorContext, ActiveEditorCanSplitInGroupContext } from 'vs/workbench/common/editor';
+import { TextCompareEditorVisibleContext, IEditorIdentifier, IEditorCommandsContext, ActiveEditorGroupEmptyContext, MultipleEditorGroupsContext, CloseDirection, IEditorInput, IVisibleEditorPane, ActiveEditorStickyContext, EditorsOrder, EditorInputCapabilities, isEditorIdentifier, ActiveEditorGroupLockedContext, ActiveEditorContext, ActiveEditorCanSplitInGroupContext, GroupIdentifier } from 'vs/workbench/common/editor';
 import { EditorGroupColumn, columnToEditorGroup } from 'vs/workbench/services/editor/common/editorGroupColumn';
-import { IEditorService, SIDE_GROUP } from 'vs/workbench/services/editor/common/editorService';
+import { ACTIVE_GROUP_TYPE, IEditorService, SIDE_GROUP, SIDE_GROUP_TYPE } from 'vs/workbench/services/editor/common/editorService';
 import { EditorContextKeys } from 'vs/editor/common/editorContextKeys';
 import { TextDiffEditor } from 'vs/workbench/browser/parts/editor/textDiffEditor';
 import { KeyMod, KeyCode, KeyChord } from 'vs/base/common/keyCodes';
@@ -70,6 +70,7 @@ export const SPLIT_EDITOR_RIGHT = 'workbench.action.splitEditorRight';
 export const SPLIT_EDITOR_IN_GROUP = 'workbench.action.splitEditorInGroup';
 export const TOGGLE_SPLIT_EDITOR_IN_GROUP = 'workbench.action.toggleSplitEditorInGroup';
 export const JOIN_EDITOR_IN_GROUP = 'workbench.action.joinEditorInGroup';
+export const TOGGLE_SPLIT_EDITOR_IN_GROUP_LAYOUT = 'workbench.action.toggleSplitEditorInGroupLayout';
 
 export const FOCUS_LEFT_SIDE_EDITOR = 'workbench.action.focusLeftSideEditor';
 export const FOCUS_RIGHT_SIDE_EDITOR = 'workbench.action.focusRightSideEditor';
@@ -522,7 +523,7 @@ function registerOpenEditorAPICommands(): void {
 		const configurationService = accessor.get(IConfigurationService);
 
 		const [columnArg, optionsArg] = columnAndOptions ?? [];
-		let group: IEditorGroup | undefined = undefined;
+		let group: IEditorGroup | GroupIdentifier | ACTIVE_GROUP_TYPE | SIDE_GROUP_TYPE | undefined = undefined;
 
 		if (columnArg === SIDE_GROUP) {
 			const direction = preferredSideBySideGroupDirection(configurationService);
@@ -533,7 +534,7 @@ function registerOpenEditorAPICommands(): void {
 			}
 			group = neighbourGroup;
 		} else {
-			group = editorGroupsService.getGroup(columnToEditorGroup(editorGroupsService, columnArg)) ?? editorGroupsService.activeGroup;
+			group = columnToEditorGroup(editorGroupsService, columnArg);
 		}
 
 		return editorService.openEditor({ resource: URI.revive(resource), options: { ...optionsArg, pinned: true, override: id } }, group);
@@ -1027,6 +1028,31 @@ function registerSplitEditorInGroupCommands(): void {
 			} else if (activeEditorPane?.input) {
 				await commandService.executeCommand(SPLIT_EDITOR_IN_GROUP);
 			}
+		}
+	});
+
+	registerAction2(class extends Action2 {
+		constructor() {
+			super({
+				id: TOGGLE_SPLIT_EDITOR_IN_GROUP_LAYOUT,
+				title: localize('toggleSplitEditorInGroupLayout', "Toggle Split Editor in Group Layout"),
+				category: CATEGORIES.View,
+				precondition: ActiveEditorContext.isEqualTo(SideBySideEditor.ID),
+				f1: true
+			});
+		}
+		async run(accessor: ServicesAccessor): Promise<void> {
+			const configurationService = accessor.get(IConfigurationService);
+			const currentSetting = configurationService.getValue<unknown>(SideBySideEditor.SIDE_BY_SIDE_LAYOUT_SETTING);
+
+			let newSetting: 'vertical' | 'horizontal';
+			if (currentSetting !== 'horizontal') {
+				newSetting = 'horizontal';
+			} else {
+				newSetting = 'vertical';
+			}
+
+			return configurationService.updateValue(SideBySideEditor.SIDE_BY_SIDE_LAYOUT_SETTING, newSetting);
 		}
 	});
 }
