@@ -911,6 +911,7 @@ declare module 'vscode' {
 		 * For more information on events that can send data see "DEC Private Mode Set (DECSET)" on
 		 * https://invisible-island.net/xterm/ctlseqs/ctlseqs.html
 		 */
+		// todo@API Maybe, isInteractedWith to align with other isXYZ
 		readonly interactedWith: boolean;
 	}
 
@@ -1118,6 +1119,13 @@ declare module 'vscode' {
 		 * An optional flag to sort the final results by index of first query match in label. Defaults to true.
 		 */
 		sortByLabel: boolean;
+	}
+
+	//#endregion
+
+	//#region https://github.com/microsoft/vscode/issues/132068
+
+	export interface QuickPick<T extends QuickPickItem> extends QuickInput {
 
 		/*
 		 * An optional flag that can be set to true to maintain the scroll position of the quick pick when the quick pick items are updated. Defaults to false.
@@ -2312,7 +2320,7 @@ declare module 'vscode' {
 
 		/**
 		 * The resource represented by the tab if availble.
-		 * If the tab contains more than one resource then primary will represent the left resource, and secondary the right one.
+		 * If the tab contains more than one resource then primary will represent the right resource, and secondary the left one.
 		 * Note: Not all editor types have a resource associated with them
 		 */
 		readonly resource?: Uri | { primary?: Uri, secondary?: Uri };
@@ -2901,7 +2909,7 @@ declare module 'vscode' {
 		 *
 		 * @param selector A selector that defines the documents this provider is applicable to.
 		 * @param provider A type hierarchy provider.
-		 * @return A [disposable](#Disposable) that unregisters this provider when being disposed.
+		 * @returns {@link Disposable disposable} that unregisters this provider when being disposed.
 		 */
 		export function registerTypeHierarchyProvider(selector: DocumentSelector, provider: TypeHierarchyProvider): Disposable;
 	}
