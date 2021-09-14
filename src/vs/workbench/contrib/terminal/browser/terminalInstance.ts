@@ -46,7 +46,7 @@ import { TypeAheadAddon } from 'vs/workbench/contrib/terminal/browser/terminalTy
 import { BrowserFeatures } from 'vs/base/browser/canIUse';
 import { IPreferencesService } from 'vs/workbench/services/preferences/common/preferences';
 import { IEnvironmentVariableInfo } from 'vs/workbench/contrib/terminal/common/environmentVariable';
-import { IProcessDataEvent, IShellLaunchConfig, ITerminalDimensionsOverride, ITerminalLaunchError, TerminalShellType, TerminalSettingId, TitleEventSource, TerminalIcon, TerminalSettingPrefix, ITerminalProfileObject, TerminalLocation, TerminalPropertyType } from 'vs/platform/terminal/common/terminal';
+import { IProcessDataEvent, IShellLaunchConfig, ITerminalDimensionsOverride, ITerminalLaunchError, TerminalShellType, TerminalSettingId, TitleEventSource, TerminalIcon, TerminalSettingPrefix, ITerminalProfileObject, TerminalLocation, ProcessPropertyType, ProcessCapability, IProcessPropertyMap } from 'vs/platform/terminal/common/terminal';
 import { IProductService } from 'vs/platform/product/common/productService';
 import { formatMessageForTerminal } from 'vs/workbench/contrib/terminal/common/terminalStrings';
 import { AutoOpenBarrier } from 'vs/base/common/async';
@@ -163,6 +163,8 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 	private _lastLayoutDimensions: dom.Dimension | undefined;
 
 	private _hasHadInput: boolean;
+
+	private _capabilities: ProcessCapability[] = [];
 
 	readonly statusList: ITerminalStatusList;
 	disableLayout: boolean = false;
@@ -653,6 +655,7 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 					this._onCursorMove();
 					return false;
 				});
+				this._capabilities = processTraits.capabilities;
 			}
 			this._linkManager = this._instantiationService.createInstance(TerminalLinkManager, xterm, this._processManager!);
 			this._areLinksReady = true;
@@ -850,7 +853,10 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 		this._initDragAndDrop(container);
 
 		this._widgetManager.attachToElement(xterm.element);
-		this._processManager.onProcessReady(() => this._linkManager?.setWidgetManager(this._widgetManager));
+		this._processManager.onProcessReady((e) => {
+			this._linkManager?.setWidgetManager(this._widgetManager);
+			this._capabilities = e.capabilities;
+		});
 
 		// const computedStyle = window.getComputedStyle(this._container);
 		// const computedStyle = window.getComputedStyle(this._container.parentElement!);
@@ -1153,15 +1159,19 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 
 	protected _createProcessManager(): void {
 		this._processManager = this._instantiationService.createInstance(TerminalProcessManager, this._instanceId, this._configHelper);
-		this._processManager.onProcessReady(async () => {
+		this._processManager.onProcessReady(async (e) => {
 			this._onProcessIdReady.fire(this);
 			this._initialCwd = await this.getInitialCwd();
-
+			this._capabilities = e.capabilities;
 			// Set the initial name based on the _resolved_ shell launch config, this will also
 			// ensure the resolved icon gets shown
 			this._processManager.onDidChangeProperty(e => {
-				if (e.type === TerminalPropertyType.Cwd || e.type === TerminalPropertyType.InitialCwd) {
+				if (e.type === ProcessPropertyType.Cwd) {
 					this._cwd = e.value;
+					this.setTitle(this.title, TitleEventSource.Api);
+				} else if (e.type === ProcessPropertyType.InitialCwd) {
+					this._initialCwd = e.value;
+					this._cwd = this._initialCwd;
 					this.setTitle(this.title, TitleEventSource.Api);
 				}
 			});
@@ -1169,7 +1179,7 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 				this.setTitle(this._shellLaunchConfig.name, TitleEventSource.Api);
 			} else {
 				// Only listen for process title changes when a name is not provided
-				if (this._configHelper.config.titleMode === 'sequence') {
+				if (this._configHelper.config.titleMode === 'sequence' || this._configHelper.config.tabs.title.includes('${sequence}') || this._configHelper.config.tabs.description.includes('${sequence}')) {
 					// Set the title to the first event if the sequence hasn't set it yet
 					Event.once(this._processManager.onProcessTitle)(e => {
 						if (!this._title) {
@@ -1500,7 +1510,7 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 	@debounce(2000)
 	private async _updateProcessCwd(): Promise<string> {
 		// reset cwd if it has changed, so file based url paths can be resolved
-		const cwd = await this.getCwd();
+		const cwd = await this.refreshProperty(ProcessPropertyType.Cwd);
 		if (cwd && this._linkManager) {
 			this._linkManager.processCwd = cwd;
 		}
@@ -1771,6 +1781,9 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 			case TitleEventSource.Api:
 				// If the title has not been set by the API or the rename command, unregister the handler that
 				// automatically updates the terminal name
+				if (title && title !== '') {
+					this._processName = title;
+				}
 				dispose(this._messageTitleDisposable);
 				this._messageTitleDisposable = undefined;
 				break;
@@ -1787,13 +1800,13 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 
 		// Remove special characters that could mess with rendering
 		title = title.replace(/[\n\r\t]/g, '');
-
 		const cwd = this._cwd || this._initialCwd || '';
 		const properties = {
 			cwd,
-			cwdFolder: path.basename(cwd),
+			cwdFolder: this.getCwdFolder(),
+			workspaceFolder: path.basename(cwd),
 			local: this.shellLaunchConfig.description === 'Local' ? 'Local' : undefined,
-			process: this._processName || title,
+			process: this._processName,
 			sequence: this._sequence,
 			task: this.shellLaunchConfig.description === 'Task' ? 'Task' : undefined,
 			separator: { label: this._configHelper.config.tabs.separator }
@@ -1814,6 +1827,37 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 			this._titleReadyComplete = undefined;
 		}
 		this._onTitleChanged.fire(this);
+	}
+
+	getCwdFolder(): string {
+		//  oh instead of looking against initialCwd we should be looking again the default cwd of the workspace for single root workspaces ?
+		// ie.terminal.integrated.cwd if it's defined, otherwise the workspace folder. That would cause the last 2 to still say "hi"
+		const cwd = this._cwd || this._initialCwd;
+		const zeroRootWorkspace = this._workspaceContextService.getWorkspace().folders.length === 0;
+		const singleRootWorkspace = this._workspaceContextService.getWorkspace().folders.length === 1;
+		if (!cwd ||
+			!this._capabilities.includes(ProcessCapability.CwdDetection) ||
+			zeroRootWorkspace ||
+			(singleRootWorkspace && this._equalIgnoringSlashes(this._workspaceContextService.getWorkspace().folders[0].uri.toString(), cwd))) {
+			return '';
+		}
+		return path.basename(cwd);
+	}
+
+	private _equalIgnoringSlashes(workspaceUri: string, cwd: string): boolean {
+		let workspacePaths = workspaceUri.includes('/') ? workspaceUri.split('/') : workspaceUri.split('\\');
+		let cwdPaths = cwd.includes('/') ? cwd.split('/') : cwd.split('\\');
+		workspacePaths = workspacePaths.slice(4);
+		cwdPaths = cwdPaths.slice(1);
+		if (workspacePaths.length !== cwdPaths.length) {
+			return false;
+		}
+		for (let i = 0; i < cwdPaths.length; i++) {
+			if (workspacePaths[i] !== cwdPaths[i]) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	waitForTitle(): Promise<string> {
@@ -1959,8 +2003,12 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 		return this._initialCwd;
 	}
 
-	getCwd(): Promise<string> {
-		return this._processManager.refreshProperty(TerminalPropertyType.Cwd);
+	async getCwd(): Promise<string> {
+		return await this._processManager.getInitialCwd();
+	}
+
+	async refreshProperty<T extends ProcessPropertyType>(type: ProcessPropertyType): Promise<IProcessPropertyMap[T]> {
+		return this._processManager.refreshProperty(type);
 	}
 
 	registerLinkProvider(provider: ITerminalExternalLinkProvider): IDisposable {
