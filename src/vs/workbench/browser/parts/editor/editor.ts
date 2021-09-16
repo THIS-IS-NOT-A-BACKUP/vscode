@@ -59,16 +59,16 @@ export function getEditorPartOptions(configurationService: IConfigurationService
 		Object.assign(options, config.workbench.editor);
 
 		// Special handle array types and convert to Set
-		if (isObject(config.workbench.editor.experimentalAutoLockGroups)) {
-			options.experimentalAutoLockGroups = new Set();
+		if (isObject(config.workbench.editor.autoLockGroups)) {
+			options.autoLockGroups = new Set();
 
-			for (const [editorId, enablement] of Object.entries(config.workbench.editor.experimentalAutoLockGroups)) {
+			for (const [editorId, enablement] of Object.entries(config.workbench.editor.autoLockGroups)) {
 				if (enablement === true) {
-					options.experimentalAutoLockGroups.add(editorId);
+					options.autoLockGroups.add(editorId);
 				}
 			}
 		} else {
-			options.experimentalAutoLockGroups = undefined;
+			options.autoLockGroups = undefined;
 		}
 	}
 
@@ -204,6 +204,11 @@ export interface IInternalEditorCloseOptions extends IInternalEditorTitleControl
 	 * used to optimize how error toasts are appearing if any.
 	 */
 	fromError?: boolean;
+
+	/**
+	 * A hint that the editor is closed because it moves to another group.
+	 */
+	fromMove?: boolean;
 }
 
 export interface IInternalMoveCopyOptions extends IInternalEditorTitleControlOptions {
