@@ -758,16 +758,58 @@ export enum EditorCloseContext {
 }
 
 export interface IEditorCloseEvent extends IEditorIdentifier {
-	context: EditorCloseContext;
-	index: number;
-	sticky: boolean;
+
+	/**
+	 * More information around why the editor was closed.
+	 */
+	readonly context: EditorCloseContext;
+
+	/**
+	 * The index of the editor before closing.
+	 */
+	readonly index: number;
+
+	/**
+	 * Whether the editor was sticky or not.
+	 */
+	readonly sticky: boolean;
+}
+
+export interface IEditorWillMoveEvent extends IEditorIdentifier {
+
+	/**
+	 * The target group of the move operation.
+	 */
+	readonly target: GroupIdentifier;
 }
 
 export interface IEditorMoveEvent extends IEditorIdentifier {
-	target: GroupIdentifier;
+
+	/**
+	 * The target group of the move operation.
+	 */
+	readonly target: GroupIdentifier;
+
+	/**
+	 * The index of the editor before moving.
+	 */
+	readonly index: number;
+
+	/**
+	 * The index of the editor after moving.
+	 */
+	readonly newIndex: number;
 }
 
-export interface IEditorOpenEvent extends IEditorIdentifier { }
+export interface IEditorWillOpenEvent extends IEditorIdentifier { }
+
+export interface IEditorOpenEvent extends IEditorIdentifier {
+
+	/**
+	 * The index the editor opens in.
+	 */
+	readonly index: number;
+}
 
 export type GroupIdentifier = number;
 

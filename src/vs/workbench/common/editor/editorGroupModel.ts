@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Event, Emitter } from 'vs/base/common/event';
-import { IEditorFactoryRegistry, IEditorIdentifier, IEditorCloseEvent, GroupIdentifier, EditorsOrder, EditorExtensions, IUntypedEditorInput, SideBySideEditor, EditorCloseContext } from 'vs/workbench/common/editor';
+import { IEditorFactoryRegistry, GroupIdentifier, EditorsOrder, EditorExtensions, IUntypedEditorInput, SideBySideEditor, IEditorMoveEvent, IEditorOpenEvent, EditorCloseContext, IEditorCloseEvent } from 'vs/workbench/common/editor';
 import { EditorInput } from 'vs/workbench/common/editor/editorInput';
 import { SideBySideEditorInput } from 'vs/workbench/common/editor/sideBySideEditorInput';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
@@ -19,15 +19,6 @@ const EditorOpenPositioning = {
 	FIRST: 'first',
 	LAST: 'last'
 };
-
-export interface EditorCloseEvent extends IEditorCloseEvent {
-	readonly editor: EditorInput;
-}
-
-export interface EditorIdentifier extends IEditorIdentifier {
-	readonly groupId: GroupIdentifier;
-	readonly editor: EditorInput;
-}
 
 export interface IEditorOpenOptions {
 	readonly pinned?: boolean;
@@ -91,10 +82,10 @@ export class EditorGroupModel extends Disposable {
 	private readonly _onDidActivateEditor = this._register(new Emitter<EditorInput>());
 	readonly onDidActivateEditor = this._onDidActivateEditor.event;
 
-	private readonly _onDidOpenEditor = this._register(new Emitter<EditorInput>());
+	private readonly _onDidOpenEditor = this._register(new Emitter<IEditorOpenEvent>());
 	readonly onDidOpenEditor = this._onDidOpenEditor.event;
 
-	private readonly _onDidCloseEditor = this._register(new Emitter<EditorCloseEvent>());
+	private readonly _onDidCloseEditor = this._register(new Emitter<IEditorCloseEvent>());
 	readonly onDidCloseEditor = this._onDidCloseEditor.event;
 
 	private readonly _onWillDisposeEditor = this._register(new Emitter<EditorInput>());
@@ -109,7 +100,7 @@ export class EditorGroupModel extends Disposable {
 	private readonly _onDidChangeEditorCapabilities = this._register(new Emitter<EditorInput>());
 	readonly onDidChangeEditorCapabilities = this._onDidChangeEditorCapabilities.event;
 
-	private readonly _onDidMoveEditor = this._register(new Emitter<EditorInput>());
+	private readonly _onDidMoveEditor = this._register(new Emitter<IEditorMoveEvent>());
 	readonly onDidMoveEditor = this._onDidMoveEditor.event;
 
 	private readonly _onDidChangeEditorPinned = this._register(new Emitter<EditorInput>());
@@ -295,7 +286,7 @@ export class EditorGroupModel extends Disposable {
 			this.registerEditorListeners(newEditor);
 
 			// Event
-			this._onDidOpenEditor.fire(newEditor);
+			this._onDidOpenEditor.fire({ editor: newEditor, groupId: this.id, index: targetIndex });
 
 			// Handle active
 			if (makeActive) {
@@ -386,7 +377,7 @@ export class EditorGroupModel extends Disposable {
 		}
 	}
 
-	closeEditor(candidate: EditorInput, context = EditorCloseContext.UNKNOWN, openNext = true): EditorCloseEvent | undefined {
+	closeEditor(candidate: EditorInput, context = EditorCloseContext.UNKNOWN, openNext = true): IEditorCloseEvent | undefined {
 		const event = this.doCloseEditor(candidate, context, openNext);
 
 		if (event) {
@@ -398,7 +389,7 @@ export class EditorGroupModel extends Disposable {
 		return undefined;
 	}
 
-	private doCloseEditor(candidate: EditorInput, context: EditorCloseContext, openNext: boolean): EditorCloseEvent | undefined {
+	private doCloseEditor(candidate: EditorInput, context: EditorCloseContext, openNext: boolean): IEditorCloseEvent | undefined {
 		const index = this.indexOf(candidate);
 		if (index === -1) {
 			return undefined; // not found
@@ -475,7 +466,7 @@ export class EditorGroupModel extends Disposable {
 		this.editors.splice(toIndex, 0, editor);
 
 		// Event
-		this._onDidMoveEditor.fire(editor);
+		this._onDidMoveEditor.fire({ editor, groupId: this.id, index, newIndex: toIndex, target: this.id });
 
 		return editor;
 	}
