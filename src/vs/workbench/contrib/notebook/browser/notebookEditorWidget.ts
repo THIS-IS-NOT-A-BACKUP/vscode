@@ -1229,9 +1229,7 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditorD
 				this._outputFocus.set(false);
 				this.updateEditorFocus();
 
-				if (!this._overlayContainer.contains(document.activeElement)) {
-					this._webviewFocused = false;
-				}
+				this._webviewFocused = false;
 			}));
 
 			this._localStore.add(this._webview.webview.onDidFocus(() => {
@@ -2907,6 +2905,6 @@ registerThemingParticipant((theme, collector) => {
 
 	const iconForegroundColor = theme.getColor(iconForeground);
 	if (iconForegroundColor) {
-		collector.addRule(`.monaco-workbench .notebookOverlay .codicon-debug-continue { color: ${iconForegroundColor}; }`);
+		collector.addRule(`.monaco-workbench .notebookOverlay .codicon-debug-continue { color: ${iconForegroundColor} !important; }`);
 	}
 });
