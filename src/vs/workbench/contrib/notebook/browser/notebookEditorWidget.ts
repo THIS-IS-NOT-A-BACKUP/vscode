@@ -37,7 +37,7 @@ import { contrastBorder, diffInserted, diffRemoved, editorBackground, errorForeg
 import { IThemeService, registerThemingParticipant } from 'vs/platform/theme/common/themeService';
 import { PANEL_BORDER } from 'vs/workbench/common/theme';
 import { debugIconStartForeground } from 'vs/workbench/contrib/debug/browser/debugColors';
-import { CellEditState, CellFocusMode, IActiveNotebookEditorDelegate, ICellOutputViewModel, ICellViewModel, ICommonCellInfo, IDisplayOutputLayoutUpdateRequest, IFocusNotebookCellOptions, IGenericCellViewModel, IInsetRenderOutput, INotebookCellList, INotebookCellOutputLayoutInfo, INotebookDeltaDecoration, INotebookEditorContribution, INotebookEditorContributionDescription, INotebookEditorCreationOptions, INotebookEditorDelegate, INotebookEditorMouseEvent, INotebookEditorOptions, NotebookCellStateChangedEvent, NotebookLayoutChangedEvent, NotebookLayoutInfo, NOTEBOOK_EDITOR_EDITABLE, NOTEBOOK_EDITOR_FOCUSED, NOTEBOOK_OUTPUT_FOCUSED, RenderOutputType } from 'vs/workbench/contrib/notebook/browser/notebookBrowser';
+import { CellEditState, CellFocusMode, IActiveNotebookEditorDelegate, ICellOutputViewModel, ICellViewModel, ICommonCellInfo, IDisplayOutputLayoutUpdateRequest, IFocusNotebookCellOptions, IGenericCellViewModel, IInsetRenderOutput, INotebookCellOutputLayoutInfo, INotebookDeltaDecoration, INotebookEditorContribution, INotebookEditorContributionDescription, INotebookEditorCreationOptions, INotebookEditorDelegate, INotebookEditorMouseEvent, INotebookEditorOptions, NotebookCellStateChangedEvent, NotebookLayoutChangedEvent, NotebookLayoutInfo, NOTEBOOK_EDITOR_EDITABLE, NOTEBOOK_EDITOR_FOCUSED, NOTEBOOK_OUTPUT_FOCUSED, RenderOutputType } from 'vs/workbench/contrib/notebook/browser/notebookBrowser';
 import { NotebookDecorationCSSRules, NotebookRefCountedStyleSheet } from 'vs/workbench/contrib/notebook/browser/viewParts/notebookEditorDecorations';
 import { NotebookEditorContextKeys } from 'vs/workbench/contrib/notebook/browser/viewParts/notebookEditorWidgetContextKeys';
 import { NotebookEditorToolbar } from 'vs/workbench/contrib/notebook/browser/viewParts/notebookEditorToolbar';
@@ -68,6 +68,7 @@ import { INotebookRendererMessagingService } from 'vs/workbench/contrib/notebook
 import { IAckOutputHeight, IMarkupCellInitialization } from 'vs/workbench/contrib/notebook/browser/view/renderers/webviewMessages';
 import { SuggestController } from 'vs/editor/contrib/suggest/suggestController';
 import { registerZIndex, ZIndex } from 'vs/platform/layout/browser/zIndexRegistry';
+import { INotebookCellList } from 'vs/workbench/contrib/notebook/browser/view/notebookRenderingCommon';
 
 const $ = DOM.$;
 
@@ -382,10 +383,10 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditorD
 		}));
 
 		const that = this;
-		this._outputRenderer = this._register(new OutputRenderer({
+		this._outputRenderer = this._register(this.instantiationService.createInstance(OutputRenderer, {
 			get creationOptions() { return that.creationOptions; },
 			getCellOutputLayoutInfo: that._getCellOutputLayoutInfo.bind(that)
-		}, this.instantiationService));
+		}));
 		this._scrollBeyondLastLine = this.configurationService.getValue<boolean>('editor.scrollBeyondLastLine');
 
 		this._register(this.configurationService.onDidChangeConfiguration(e => {
@@ -1264,7 +1265,7 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditorD
 			setScrollTop(scrollTop: number) { that._listViewInfoAccessor.setScrollTop(scrollTop); },
 			triggerScroll(event: IMouseWheelEvent) { that._listViewInfoAccessor.triggerScroll(event); },
 			getCellByInfo: that.getCellByInfo.bind(that),
-			getCellById: that.getCellById.bind(that),
+			getCellById: that._getCellById.bind(that),
 			toggleNotebookCellSelection: that._toggleNotebookCellSelection.bind(that),
 			focusNotebookCell: that.focusNotebookCell.bind(that),
 			focusNextNotebookCell: that.focusNextNotebookCell.bind(that),
@@ -2355,20 +2356,12 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditorD
 		return this.viewModel?.viewCells.find(vc => vc.handle === cellHandle) as CodeCellViewModel;
 	}
 
-	getCellById(cellId: string): ICellViewModel | undefined {
-		return this.viewModel?.viewCells.find(vc => vc.id === cellId);
-	}
-
 	getCellByHandle(handle: number): ICellViewModel | undefined {
 		return this.viewModel?.getCellByHandle(handle);
 	}
 
 	getCellIndex(cell: ICellViewModel) {
-		return this.getCellIndexByHandle(cell.handle);
-	}
-
-	getCellIndexByHandle(handle: number): number | undefined {
-		return this.viewModel?.getCellIndexByHandle(handle);
+		return this.viewModel?.getCellIndexByHandle(cell.handle);
 	}
 
 	getNextVisibleCellIndex(index: number): number | undefined {
@@ -2467,8 +2460,12 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditorD
 		}
 	}
 
+	private _getCellById(cellId: string): ICellViewModel | undefined {
+		return this.viewModel?.viewCells.find(vc => vc.id === cellId);
+	}
+
 	private _updateMarkupCellHeight(cellId: string, height: number, isInit: boolean) {
-		const cell = this.getCellById(cellId);
+		const cell = this._getCellById(cellId);
 		if (cell && cell instanceof MarkupCellViewModel) {
 			const { bottomToolbarGap } = this._notebookOptions.computeBottomToolbarDimensions(this.viewModel?.viewType);
 			this._debug('updateMarkdownCellHeight', cell.handle, height + bottomToolbarGap, isInit);
@@ -2477,7 +2474,7 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditorD
 	}
 
 	private _setMarkupCellEditState(cellId: string, editState: CellEditState): void {
-		const cell = this.getCellById(cellId);
+		const cell = this._getCellById(cellId);
 		if (cell instanceof MarkupCellViewModel) {
 			this.revealInView(cell);
 			cell.updateEditState(editState, 'setMarkdownCellEditState');
@@ -2485,28 +2482,28 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditorD
 	}
 
 	private _didStartDragMarkupCell(cellId: string, event: { dragOffsetY: number; }): void {
-		const cell = this.getCellById(cellId);
+		const cell = this._getCellById(cellId);
 		if (cell instanceof MarkupCellViewModel) {
 			this._dndController?.startExplicitDrag(cell, event.dragOffsetY);
 		}
 	}
 
 	private _didDragMarkupCell(cellId: string, event: { dragOffsetY: number; }): void {
-		const cell = this.getCellById(cellId);
+		const cell = this._getCellById(cellId);
 		if (cell instanceof MarkupCellViewModel) {
 			this._dndController?.explicitDrag(cell, event.dragOffsetY);
 		}
 	}
 
 	private _didDropMarkupCell(cellId: string, event: { dragOffsetY: number, ctrlKey: boolean, altKey: boolean; }): void {
-		const cell = this.getCellById(cellId);
+		const cell = this._getCellById(cellId);
 		if (cell instanceof MarkupCellViewModel) {
 			this._dndController?.explicitDrop(cell, event);
 		}
 	}
 
 	private _didEndDragMarkupCell(cellId: string): void {
-		const cell = this.getCellById(cellId);
+		const cell = this._getCellById(cellId);
 		if (cell instanceof MarkupCellViewModel) {
 			this._dndController?.endExplicitDrag(cell);
 		}

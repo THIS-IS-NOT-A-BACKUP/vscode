@@ -23,7 +23,7 @@ import { IConfigurationService } from 'vs/platform/configuration/common/configur
 import { IEditorOptions as ICodeEditorOptions } from 'vs/editor/common/config/editorOptions';
 import { BareFontInfo, FontInfo } from 'vs/editor/common/config/fontInfo';
 import { getPixelRatio, getZoomLevel } from 'vs/base/browser/browser';
-import { CellEditState, ICellOutputViewModel, IDisplayOutputLayoutUpdateRequest, IGenericCellViewModel, IInsetRenderOutput, INotebookDelegateForWebview, INotebookEditorCreationOptions, INotebookEditorOptions, NotebookLayoutInfo, NOTEBOOK_DIFF_EDITOR_ID } from 'vs/workbench/contrib/notebook/browser/notebookBrowser';
+import { CellEditState, ICellOutputViewModel, IDisplayOutputLayoutUpdateRequest, IGenericCellViewModel, IInsetRenderOutput, INotebookEditorCreationOptions, INotebookEditorOptions, NotebookLayoutInfo, NOTEBOOK_DIFF_EDITOR_ID } from 'vs/workbench/contrib/notebook/browser/notebookBrowser';
 import { DiffSide, DIFF_CELL_MARGIN, IDiffCellInfo, INotebookTextDiffEditor } from 'vs/workbench/contrib/notebook/browser/diff/notebookDiffEditorBrowser';
 import { Emitter, Event } from 'vs/base/common/event';
 import { DisposableStore, IDisposable, toDisposable } from 'vs/base/common/lifecycle';
@@ -37,7 +37,7 @@ import { SequencerByKey } from 'vs/base/common/async';
 import { generateUuid } from 'vs/base/common/uuid';
 import { IMouseWheelEvent, StandardMouseEvent } from 'vs/base/browser/mouseEvent';
 import { DiffNestedCellViewModel } from 'vs/workbench/contrib/notebook/browser/diff/diffNestedCellViewModel';
-import { BackLayerWebView } from 'vs/workbench/contrib/notebook/browser/view/renderers/backLayerWebView';
+import { BackLayerWebView, INotebookDelegateForWebview } from 'vs/workbench/contrib/notebook/browser/view/renderers/backLayerWebView';
 import { NotebookDiffEditorEventDispatcher, NotebookDiffLayoutChangedEvent } from 'vs/workbench/contrib/notebook/browser/diff/eventDispatcher';
 import { readFontInfo } from 'vs/editor/browser/config/configuration';
 import { NotebookOptions } from 'vs/workbench/contrib/notebook/common/notebookOptions';
@@ -105,7 +105,7 @@ export class NotebookTextDiffEditor extends EditorPane implements INotebookTextD
 		const editorOptions = this.configurationService.getValue<ICodeEditorOptions>('editor');
 		this._fontInfo = readFontInfo(BareFontInfo.createFromRawSettings(editorOptions, getZoomLevel(), getPixelRatio()));
 		this._revealFirst = true;
-		this._outputRenderer = new OutputRenderer(this, this.instantiationService);
+		this._outputRenderer = this.instantiationService.createInstance(OutputRenderer, this);
 	}
 
 	toggleNotebookCellSelection(cell: IGenericCellViewModel) {
