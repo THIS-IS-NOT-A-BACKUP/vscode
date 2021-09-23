@@ -3,22 +3,25 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as nsfw from 'nsfw';
-import { ThrottledDelayer } from 'vs/base/common/async';
+import * as nsfw from 'vscode-nsfw';
+import { existsSync } from 'fs';
+import { RunOnceScheduler, ThrottledDelayer } from 'vs/base/common/async';
+import { CancellationToken, CancellationTokenSource } from 'vs/base/common/cancellation';
 import { toErrorMessage } from 'vs/base/common/errorMessage';
 import { Emitter } from 'vs/base/common/event';
 import { parse, ParsedPattern } from 'vs/base/common/glob';
-import { Disposable } from 'vs/base/common/lifecycle';
+import { Disposable, IDisposable } from 'vs/base/common/lifecycle';
 import { TernarySearchTree } from 'vs/base/common/map';
 import { normalizeNFC } from 'vs/base/common/normalization';
-import { join } from 'vs/base/common/path';
+import { dirname, join } from 'vs/base/common/path';
 import { isMacintosh } from 'vs/base/common/platform';
 import { realcaseSync, realpathSync } from 'vs/base/node/extpath';
 import { FileChangeType } from 'vs/platform/files/common/files';
 import { IWatcherService } from 'vs/platform/files/node/watcher/nsfw/watcher';
 import { IDiskFileChange, ILogMessage, normalizeFileChanges, IWatchRequest } from 'vs/platform/files/node/watcher/watcher';
+import { watchFolder } from 'vs/base/node/watcher';
 
-interface IWatcher {
+interface IWatcher extends IDisposable {
 
 	/**
 	 * The NSFW instance is resolved when the watching has started.
@@ -26,14 +29,32 @@ interface IWatcher {
 	readonly instance: Promise<nsfw.NSFW>;
 
 	/**
+	 * The watch request associated to the watcher.
+	 */
+	request: IWatchRequest;
+
+	/**
 	 * Associated ignored patterns for the watcher that can be updated.
 	 */
 	ignored: ParsedPattern[];
+
+	/**
+	 * How often this watcher has been restarted in case of an unexpected
+	 * shutdown.
+	 */
+	restarts: number;
+
+	/**
+	 * The cancellation token associated with the lifecycle of the watcher.
+	 */
+	token: CancellationToken;
 }
 
 export class NsfwWatcherService extends Disposable implements IWatcherService {
 
 	private static readonly FS_EVENT_DELAY = 50; // aggregate and only emit events when changes have stopped for this duration (in ms)
+
+	private static readonly MAX_RESTARTS = 5; // number of restarts we allow before giving up in case of unexpected shutdown
 
 	private static readonly MAP_NSFW_ACTION_TO_FILE_CHANGE = new Map<number, number>(
 		[
@@ -57,7 +78,14 @@ export class NsfwWatcherService extends Disposable implements IWatcherService {
 	constructor() {
 		super();
 
+		this.registerListeners();
+	}
+
+	private registerListeners(): void {
+
+		// Error handling on process
 		process.on('uncaughtException', (error: Error | string) => this.onError(error));
+		process.on('unhandledRejection', (error: Error | string) => this.onError(error));
 	}
 
 	async watch(requests: IWatchRequest[]): Promise<void> {
@@ -93,6 +121,7 @@ export class NsfwWatcherService extends Disposable implements IWatcherService {
 		for (const request of normalizedRequests) {
 			const watcher = this.watchers.get(request.path);
 			if (watcher) {
+				watcher.request = request;
 				watcher.ignored = this.toExcludePatterns(request.excludes);
 			}
 		}
@@ -102,21 +131,32 @@ export class NsfwWatcherService extends Disposable implements IWatcherService {
 		return Array.isArray(excludes) ? excludes.map(exclude => parse(exclude)) : [];
 	}
 
-	private startWatching(request: IWatchRequest): void {
+	private startWatching(request: IWatchRequest, restarts = 0): void {
+		const cts = new CancellationTokenSource();
+
+		let undeliveredFileEvents: IDiskFileChange[] = [];
+		const fileEventDelayer = new ThrottledDelayer<void>(NsfwWatcherService.FS_EVENT_DELAY);
+
+		let nsfwPromiseResolve: (watcher: nsfw.NSFW) => void;
+		const instance = new Promise<nsfw.NSFW>(resolve => nsfwPromiseResolve = resolve);
 
 		// Remember as watcher instance
-		let nsfwPromiseResolve: (watcher: nsfw.NSFW) => void;
 		const watcher: IWatcher = {
-			instance: new Promise<nsfw.NSFW>(resolve => nsfwPromiseResolve = resolve),
-			ignored: this.toExcludePatterns(request.excludes)
+			request,
+			instance,
+			ignored: this.toExcludePatterns(request.excludes),
+			restarts,
+			token: cts.token,
+			dispose: () => {
+				cts.dispose(true);
+				fileEventDelayer.dispose();
+				instance.then(instance => instance.stop());
+			}
 		};
 		this.watchers.set(request.path, watcher);
 
 		// Path checks for symbolic links / wrong casing
 		const { realBasePathDiffers, realBasePathLength } = this.checkRequest(request);
-
-		let undeliveredFileEvents: IDiskFileChange[] = [];
-		const fileEventDelayer = new ThrottledDelayer<void>(NsfwWatcherService.FS_EVENT_DELAY);
 
 		const onFileEvent = (path: string, type: FileChangeType) => {
 			if (!this.isPathIgnored(path, watcher.ignored)) {
@@ -128,6 +168,9 @@ export class NsfwWatcherService extends Disposable implements IWatcherService {
 
 		nsfw(request.path, events => {
 			for (const event of events) {
+				if (watcher.token.isCancellationRequested) {
+					break; // return early when disposed
+				}
 
 				// Logging
 				if (this.verboseLogging) {
@@ -149,6 +192,9 @@ export class NsfwWatcherService extends Disposable implements IWatcherService {
 
 			// Send events delayed and normalized
 			fileEventDelayer.trigger(async () => {
+				if (watcher.token.isCancellationRequested) {
+					return; // return early when disposed
+				}
 
 				// Remember as delivered
 				const events = undeliveredFileEvents;
@@ -156,21 +202,20 @@ export class NsfwWatcherService extends Disposable implements IWatcherService {
 
 				// Broadcast to clients normalized
 				const normalizedEvents = normalizeFileChanges(this.normalizeEvents(events, request, realBasePathDiffers, realBasePathLength));
-				this._onDidChangeFile.fire(normalizedEvents);
-
-				// Logging
-				if (this.verboseLogging) {
-					for (const event of normalizedEvents) {
-						this.log(` >> normalized ${event.type === FileChangeType.ADDED ? '[ADDED]' : event.type === FileChangeType.DELETED ? '[DELETED]' : '[CHANGED]'} ${event.path}`);
-					}
-				}
+				this.emitEvents(normalizedEvents);
 			});
 		}, {
-			errorCallback: error => this.onError(error)
+			errorCallback: error => {
+				if (!watcher.token.isCancellationRequested) {
+					this.onError(error, watcher); // error handling only if we are not disposed yet
+				}
+			}
 		}).then(async nsfwWatcher => {
 
-			// Begin watching
-			await nsfwWatcher.start();
+			// Begin watching unless disposed already
+			if (!watcher.token.isCancellationRequested) {
+				await nsfwWatcher.start();
+			}
 
 			return nsfwWatcher;
 		}).then(nsfwWatcher => {
@@ -180,14 +225,26 @@ export class NsfwWatcherService extends Disposable implements IWatcherService {
 		});
 	}
 
+	private emitEvents(events: IDiskFileChange[]): void {
+
+		// Send outside
+		this._onDidChangeFile.fire(events);
+
+		// Logging
+		if (this.verboseLogging) {
+			for (const event of events) {
+				this.log(` >> normalized ${event.type === FileChangeType.ADDED ? '[ADDED]' : event.type === FileChangeType.DELETED ? '[DELETED]' : '[CHANGED]'} ${event.path}`);
+			}
+		}
+	}
+
 	private checkRequest(request: IWatchRequest): { realBasePathDiffers: boolean, realBasePathLength: number } {
 		let realBasePathDiffers = false;
 		let realBasePathLength = request.path.length;
 
-		// NSFW does not report file changes in the path provided on macOS if
-		// - the path uses wrong casing
-		// - the path is a symbolic link
-		// We have to detect this case and massage the events to correct this.
+		// macOS: nsfw will report paths in their dereferenced and real casing
+		// form, so we need to detect this early on to be able to rewrite the
+		// file events to the original requested form.
 		// Note: Other platforms do not seem to have these path issues.
 		if (isMacintosh) {
 			try {
@@ -231,7 +288,7 @@ export class NsfwWatcherService extends Disposable implements IWatcherService {
 		return events;
 	}
 
-	private onError(error: unknown): void {
+	private onError(error: unknown, watcher?: IWatcher): void {
 		const msg = toErrorMessage(error);
 
 		// Specially handle ENOSPC errors that can happen when
@@ -239,10 +296,99 @@ export class NsfwWatcherService extends Disposable implements IWatcherService {
 		// we are running into a limit. We only want to warn
 		// once in this case to avoid log spam.
 		// See https://github.com/microsoft/vscode/issues/7950
-		if (msg.indexOf('Inotify limit reached') !== -1 && !this.enospcErrorLogged) {
-			this.enospcErrorLogged = true;
-			this.error('Inotify limit reached (ENOSPC)');
+		if (msg.indexOf('Inotify limit reached') !== -1) {
+			if (!this.enospcErrorLogged) {
+				this.enospcErrorLogged = true; // only log this error once to protect against log spam
+				this.error('Inotify limit reached (ENOSPC)', watcher);
+			}
 		}
+
+		// Specially handle this error that indicates the watcher
+		// has stopped and we need to restart it.
+		else if (msg.indexOf('Service shutdown unexpectedly') !== -1) {
+			const handled = this.onUnexpectedShutdown(watcher);
+			if (!handled) {
+				this.error('Watcher service shutdown unexpectedly (ESHUTDOWN)', watcher);
+			}
+		}
+
+		// Log any other error
+		else {
+			this.error(msg, watcher);
+		}
+	}
+
+	private onUnexpectedShutdown(watcher?: IWatcher): boolean {
+		if (!watcher || watcher.restarts >= NsfwWatcherService.MAX_RESTARTS) {
+			return false; // we need a watcher that has not been restarted 5 times already
+		}
+
+		let handled = false;
+
+		// Just try to restart watcher now if the path still exists
+		if (existsSync(watcher.request.path)) {
+			this.warn('Watcher service shutdown unexpectedly and will be restarted', watcher);
+			this.restartWatching(watcher);
+
+			handled = true;
+		}
+
+		// Otherwise try to monitor the path coming back before
+		// restarting the watcher
+		else {
+			handled = this.onWatchedPathDeleted(watcher);
+		}
+
+		return handled;
+	}
+
+	private onWatchedPathDeleted(watcher: IWatcher): boolean {
+		this.warn('Watcher service shutdown unexpectedly because watched path got deleted', watcher);
+
+		// Send a manual event given we know the root got deleted
+		this.emitEvents([{ path: watcher.request.path, type: FileChangeType.DELETED }]);
+
+		const parentPath = dirname(watcher.request.path);
+		if (existsSync(parentPath)) {
+			const disposable = watchFolder(parentPath, (type, path) => {
+				if (watcher.token.isCancellationRequested) {
+					return; // return early when disposed
+				}
+
+				// Watcher path came back! Restart watching...
+				if (path === watcher.request.path && (type === 'added' || type === 'changed')) {
+
+					// Stop watching that parent folder
+					disposable.dispose();
+
+					// Send a manual event given we know the root got added again
+					this.emitEvents([{ path: watcher.request.path, type: FileChangeType.ADDED }]);
+
+					// Restart the file watching delayed
+					const scheduler = new RunOnceScheduler(() => {
+						if (watcher.token.isCancellationRequested) {
+							return; // return early when disposed
+						}
+
+						this.warn('Watcher service restarts for watched path got created again', watcher);
+
+						this.restartWatching(watcher);
+						scheduler.dispose();
+					}, 800);
+					scheduler.schedule();
+					watcher.token.onCancellationRequested(() => scheduler.dispose());
+				}
+			}, error => {
+				// Ignore
+			});
+
+			// Make sure to stop watching when the watcher is disposed
+			watcher.token.onCancellationRequested(() => disposable.dispose());
+
+			return true; // handled
+		}
+
+		return false; // not handled
 	}
 
 	async stop(): Promise<void> {
@@ -253,10 +399,15 @@ export class NsfwWatcherService extends Disposable implements IWatcherService {
 		this.watchers.clear();
 	}
 
+	private restartWatching(watcher: IWatcher): void {
+		this.stopWatching(watcher.request.path);
+		this.startWatching(watcher.request, watcher.restarts + 1);
+	}
+
 	private stopWatching(path: string): void {
 		const watcher = this.watchers.get(path);
 		if (watcher) {
-			watcher.instance.then(watcher => watcher.stop());
+			watcher.dispose();
 			this.watchers.delete(path);
 		}
 	}
@@ -296,8 +447,8 @@ export class NsfwWatcherService extends Disposable implements IWatcherService {
 		return Array.from(requestTrie).map(([, request]) => request);
 	}
 
-	private isPathIgnored(absolutePath: string, ignored: ParsedPattern[] | undefined): boolean {
-		return Array.isArray(ignored) && ignored.some(ignore => ignore(absolutePath));
+	private isPathIgnored(absolutePath: string, ignored: ParsedPattern[]): boolean {
+		return ignored.some(ignore => ignore(absolutePath));
 	}
 
 	async setVerboseLogging(enabled: boolean): Promise<void> {
@@ -305,18 +456,22 @@ export class NsfwWatcherService extends Disposable implements IWatcherService {
 	}
 
 	private log(message: string) {
-		this._onDidLogMessage.fire({ type: 'trace', message: `[File Watcher (nsfw)] ${message}` });
+		this._onDidLogMessage.fire({ type: 'trace', message: this.toMessage(message) });
 	}
 
-	private warn(message: string) {
-		this._onDidLogMessage.fire({ type: 'warn', message: `[File Watcher (nsfw)] ${message}` });
+	private warn(message: string, watcher?: IWatcher) {
+		this._onDidLogMessage.fire({ type: 'warn', message: this.toMessage(message, watcher) });
 	}
 
-	private error(message: string) {
-		this._onDidLogMessage.fire({ type: 'error', message: `[File Watcher (nsfw)] ${message}` });
+	private error(message: string, watcher: IWatcher | undefined) {
+		this._onDidLogMessage.fire({ type: 'error', message: this.toMessage(message, watcher) });
 	}
 
-	private debug(message: string) {
-		this._onDidLogMessage.fire({ type: 'debug', message: `[File Watcher (nsfw)] ${message}` });
+	private debug(message: string): void {
+		this._onDidLogMessage.fire({ type: 'debug', message: this.toMessage(message) });
+	}
+
+	private toMessage(message: string, watcher?: IWatcher): string {
+		return watcher ? `[File Watcher (nsfw)] ${message} (path: ${watcher.request.path})` : `[File Watcher (nsfw)] ${message}`;
 	}
 }
