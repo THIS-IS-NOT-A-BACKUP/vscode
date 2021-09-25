@@ -4,7 +4,6 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Action } from 'vs/base/common/actions';
-import { KeyCode, KeyMod } from 'vs/base/common/keyCodes';
 import { localize } from 'vs/nls';
 import { MenuId, MenuRegistry, SyncActionDescriptor } from 'vs/platform/actions/common/actions';
 import { ContextKeyExpr } from 'vs/platform/contextkey/common/contextkey';
@@ -90,5 +89,5 @@ MenuRegistry.appendMenuItems([
 ]);
 
 const actionRegistry = Registry.as<IWorkbenchActionRegistry>(WorkbenchExtensions.WorkbenchActions);
-actionRegistry.registerWorkbenchAction(SyncActionDescriptor.from(ToggleAuxiliaryBarAction, { primary: KeyMod.CtrlCmd | KeyMod.Alt | KeyCode.KEY_B }), 'View: Toggle Side Panel', CATEGORIES.View.value, ContextKeyExpr.equals('config.workbench.experimental.sidePanel.enabled', true));
+actionRegistry.registerWorkbenchAction(SyncActionDescriptor.from(ToggleAuxiliaryBarAction), 'View: Toggle Side Panel', CATEGORIES.View.value, ContextKeyExpr.equals('config.workbench.experimental.sidePanel.enabled', true));
 actionRegistry.registerWorkbenchAction(SyncActionDescriptor.from(FocusAuxiliaryBarAction), 'View: Focus into Side Panel', CATEGORIES.View.value, ContextKeyExpr.equals('config.workbench.experimental.sidePanel.enabled', true));
