@@ -1405,7 +1405,7 @@ declare module 'vscode' {
 	export interface NotebookDecorationRenderOptions {
 		backgroundColor?: string | ThemeColor;
 		borderColor?: string | ThemeColor;
-		top: ThemableDecorationAttachmentRenderOptions;
+		top?: ThemableDecorationAttachmentRenderOptions;
 	}
 
 	export interface NotebookEditorDecorationType {
@@ -2821,7 +2821,11 @@ declare module 'vscode' {
 
 	//#endregion
 
+	//#region @eamodio https://github.com/microsoft/vscode/issues/133935
+
 	export interface SourceControl {
 		actionButton?: Command;
 	}
+
+	//#endregion
 }

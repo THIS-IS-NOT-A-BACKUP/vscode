@@ -10014,10 +10014,10 @@ typescript@^2.6.2:
   resolved "https://registry.yarnpkg.com/typescript/-/typescript-2.6.2.tgz#3c5b6fd7f6de0914269027f03c0946758f7673a4"
   integrity sha1-PFtv1/beCRQmkCfwPAlGdY92c6Q=
 
-typescript@^4.5.0-dev.20210914:
-  version "4.5.0-dev.20210914"
-  resolved "https://registry.yarnpkg.com/typescript/-/typescript-4.5.0-dev.20210914.tgz#c6954939c125bf3bffe085594d58f0029f21ba94"
-  integrity sha512-ZV7f9sBWGz5ySBIKZrlTGtebI7X4oxI9/A+bDq+Rf3gfqzNOsgZjThL1gSiaJu7OvpNbtIF/dbraoIrfqVLNnA==
+typescript@^4.5.0-dev.20210927:
+  version "4.5.0-dev.20210927"
+  resolved "https://registry.yarnpkg.com/typescript/-/typescript-4.5.0-dev.20210927.tgz#708d676e1d5664d341f1efd6da74e59df4530a79"
+  integrity sha512-SwH1rcPWT0rtRerrAsVExE1RiXhqKZdVOLVo0T9iT2+Lehq3WT5zMbTPIf/LAZ6mQlYT5XxNMSMjJl+EHr2byQ==
 
 typical@^4.0.0:
   version "4.0.0"
@@ -10888,7 +10888,7 @@ xterm-headless@4.15.0-beta.3:
   resolved "https://registry.yarnpkg.com/xterm-headless/-/xterm-headless-4.15.0-beta.3.tgz#b1ba884e2e2feef17d92eaf3ff59b0b20c059dd8"
   integrity sha512-MmC75/XUz9z1fHBdJV0Mx9Fje+8hegocT1NfWUNLri3+XFvy5/UbLRhrGUw/lxWKgthseV6eqI44QTNh7fVTQg==
 
-xterm@^4.15.0-beta.3:
+xterm@4.15.0-beta.3:
   version "4.15.0-beta.3"
   resolved "https://registry.yarnpkg.com/xterm/-/xterm-4.15.0-beta.3.tgz#123ec4303be390e61cd24ae29872b9fa4e73ad30"
   integrity sha512-CXzu0xDHsrOxzC+Tm9ju+eqq0VFiYZPuzPAtfoKOp2PW+wt4fRkM4kysrdLdfE2kz6qyRckRxl+3l7VzlJHVCA==
