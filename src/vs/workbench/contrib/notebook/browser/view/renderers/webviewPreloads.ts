@@ -826,7 +826,6 @@ async function webviewPreloads(ctx: PreloadContext) {
 					if (!ext) {
 						throw new Error(`Could not find extending renderer: ${extensionId}`);
 					}
-
 					await ext.load();
 				}));
 			}
@@ -844,7 +843,6 @@ async function webviewPreloads(ctx: PreloadContext) {
 
 			return renderer.load();
 		}
-
 
 		public clearAll() {
 			outputRunner.cancelAll();
@@ -882,9 +880,10 @@ async function webviewPreloads(ctx: PreloadContext) {
 				return;
 			}
 
-			await Promise.all(renderers.map(x => x.load()));
+			// De-prioritize built-in renderers
+			renderers.sort((a, b) => +a.data.isBuiltin - +b.data.isBuiltin);
 
-			renderers[0].api?.renderOutputItem(info, element);
+			(await renderers[0].load())?.renderOutputItem(info, element);
 		}
 	}();
 
@@ -1552,6 +1551,7 @@ export interface RendererMetadata {
 	readonly mimeTypes: readonly string[];
 	readonly extends: string | undefined;
 	readonly messaging: boolean;
+	readonly isBuiltin: boolean;
 }
 
 export function preloadsScriptStr(styleValues: PreloadStyles, options: PreloadOptions, renderers: readonly RendererMetadata[], isWorkspaceTrusted: boolean, nonce: string) {
@@ -1562,7 +1562,7 @@ export function preloadsScriptStr(styleValues: PreloadStyles, options: PreloadOp
 		isWorkspaceTrusted,
 		nonce,
 	};
-	// TS will try compiling `import()` in webviewPreloads, so use an helper function instead
+	// TS will try compiling `import()` in webviewPreloads, so use a helper function instead
 	// of using `import(...)` directly
 	return `
 		const __import = (x) => import(x);
