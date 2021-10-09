@@ -48,7 +48,6 @@ import { ITestProfileService } from 'vs/workbench/contrib/testing/common/testPro
 import { LiveTestResult } from 'vs/workbench/contrib/testing/common/testResult';
 import { ITestResultService } from 'vs/workbench/contrib/testing/common/testResultService';
 import { getContextForTestItem, ITestService, testsInFile } from 'vs/workbench/contrib/testing/common/testService';
-import { ITextEditorService } from 'vs/workbench/services/textfile/common/textEditorService';
 
 function isOriginalInDiffEditor(codeEditorService: ICodeEditorService, codeEditor: ICodeEditor): boolean {
 	const diffEditors = codeEditorService.listDiffEditors();
@@ -209,6 +208,7 @@ export class TestingDecorationService extends Disposable implements ITestingDeco
 					}
 				}
 
+				const messageLines = new Set<number>();
 				for (const test of lastResult.tests) {
 					for (let taskId = 0; taskId < test.tasks.length; taskId++) {
 						const state = test.tasks[taskId];
@@ -218,7 +218,15 @@ export class TestingDecorationService extends Disposable implements ITestingDeco
 								continue;
 							}
 
-							const previous = lastDecorations.findOnLine(m.location.range.startLineNumber, l => l instanceof TestMessageDecoration && l.testMessage === m);
+							// Only add one message per line number. Overlapping messages
+							// don't appear well, and the peek will show all of them (#134129)
+							const line = m.location.range.startLineNumber;
+							if (messageLines.has(line)) {
+								continue;
+							}
+							messageLines.add(line);
+
+							const previous = lastDecorations.findOnLine(line, l => l instanceof TestMessageDecoration && l.testMessage === m);
 							if (previous) {
 								newDecorations.push(previous);
 								continue;
@@ -302,14 +310,16 @@ export class TestingDecorations extends Disposable implements IEditorContributio
 			}
 		}));
 		this._register(this.editor.onDidChangeModelContent(e => {
-			if (!this.currentUri) {
+			const model = editor.getModel();
+			if (!this.currentUri || !model) {
 				return;
 			}
 
+			const currentDecorations = decorations.syncDecorations(this.currentUri);
 			for (const change of e.changes) {
-				const modelDecorations = editor.getModel()?.getDecorationsInRange(change.range) ?? [];
+				const modelDecorations = model.getLinesDecorations(change.range.startLineNumber, change.range.endLineNumber);
 				for (const { id } of modelDecorations) {
-					const decoration = decorations.syncDecorations(this.currentUri).get(id);
+					const decoration = currentDecorations.get(id);
 					if (decoration instanceof TestMessageDecoration) {
 						decorations.invalidateResultMessage(decoration.testMessage);
 					}
@@ -563,7 +573,7 @@ abstract class RunTestDecoration {
 		}[],
 		private visible: boolean,
 		protected readonly model: ITextModel,
-		@ITextEditorService private readonly codeEditorService: ICodeEditorService,
+		@ICodeEditorService private readonly codeEditorService: ICodeEditorService,
 		@ITestService protected readonly testService: ITestService,
 		@IContextMenuService protected readonly contextMenuService: IContextMenuService,
 		@ICommandService protected readonly commandService: ICommandService,
@@ -832,7 +842,7 @@ class TestMessageDecoration implements ITestDecoration {
 		options.stickiness = TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges;
 		options.collapseOnReplaceEdit = true;
 		options.after = {
-			content: renderStringAsPlaintext(message),
+			content: ' '.repeat(4) + renderStringAsPlaintext(message),
 			inlineClassName: `test-message-inline-content test-message-inline-content-s${severity} ${this.contentIdClass}`
 		};
 		options.showIfCollapsed = true;
