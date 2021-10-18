@@ -5,7 +5,8 @@
 
 import { ipcRenderer } from 'electron';
 import { CancellationToken, CancellationTokenSource } from 'vs/base/common/cancellation';
-import { IDisposable, toDisposable } from 'vs/base/common/lifecycle';
+import { Emitter } from 'vs/base/common/event';
+import { Disposable, IDisposable, toDisposable } from 'vs/base/common/lifecycle';
 import { FileAccess } from 'vs/base/common/network';
 import { generateUuid } from 'vs/base/common/uuid';
 import { ILogService } from 'vs/platform/log/common/log';
@@ -78,7 +79,7 @@ export class SharedProcessWorkerService implements ISharedProcessWorkerService {
 
 		// We cannot just send the `MessagePort` through our protocol back
 		// because the port can only be sent via `postMessage`. So we need
-		// to send it through the main process to back to the window.
+		// to send it through the main process back to the window.
 		this.logService.trace(`SharedProcess: createWorker sending message port back to window (${workerLogId})`);
 		ipcRenderer.postMessage('vscode:relaySharedProcessWorkerMessageChannel', configuration, [windowPort]);
 	}
@@ -98,6 +99,13 @@ export class SharedProcessWorkerService implements ISharedProcessWorkerService {
 			const sharedProcessWorker = new SharedProcessWebWorker(configuration.process.type, this.logService);
 			webWorkerPromise = sharedProcessWorker.init();
 
+			// Make sure to run through our normal
+			// `disposeWorker` call when the process
+			// terminates by itself.
+			sharedProcessWorker.onDidProcessSelfTerminate(configuration => {
+				this.disposeWorker(configuration);
+			});
+
 			this.workers.set(configuration.process.moduleId, webWorkerPromise);
 		}
 
@@ -114,15 +122,19 @@ export class SharedProcessWorkerService implements ISharedProcessWorkerService {
 	}
 }
 
-class SharedProcessWebWorker {
+class SharedProcessWebWorker extends Disposable {
+
+	private readonly _onDidProcessSelfTerminate = this._register(new Emitter<ISharedProcessWorkerConfiguration>());
+	readonly onDidProcessSelfTerminate = this._onDidProcessSelfTerminate.event;
 
 	private readonly workerReady: Promise<Worker> = this.doInit();
-	private readonly mapMessageNonceToMessageResolve = new Map<string, () => void>();
+	private readonly mapMessageNonceToPendingMessageResolve = new Map<string, () => void>();
 
 	constructor(
 		private readonly type: string,
 		private readonly logService: ILogService
 	) {
+		super();
 	}
 
 	async init(): Promise<SharedProcessWebWorker> {
@@ -148,46 +160,53 @@ class SharedProcessWebWorker {
 		};
 
 		worker.onmessage = event => {
-			const { id, message, nonce } = event.data as IWorkerToSharedProcessMessage;
+			const { id, message, configuration, nonce } = event.data as IWorkerToSharedProcessMessage;
 
 			switch (id) {
 
 				// Lifecycle: Ready
-				case SharedProcessWorkerMessages.WorkerReady:
+				case SharedProcessWorkerMessages.Ready:
 					readyResolve(worker);
 					break;
 
 				// Lifecycle: Ack
-				case SharedProcessWorkerMessages.WorkerAck:
+				case SharedProcessWorkerMessages.Ack:
 					if (nonce) {
-						const messageAwaiter = this.mapMessageNonceToMessageResolve.get(nonce);
+						const messageAwaiter = this.mapMessageNonceToPendingMessageResolve.get(nonce);
 						if (messageAwaiter) {
-							this.mapMessageNonceToMessageResolve.delete(nonce);
+							this.mapMessageNonceToPendingMessageResolve.delete(nonce);
 							messageAwaiter();
 						}
 					}
 					break;
 
+				// Lifecycle: self termination
+				case SharedProcessWorkerMessages.SelfTerminated:
+					if (configuration) {
+						this._onDidProcessSelfTerminate.fire(configuration);
+					}
+					break;
+
 				// Diagostics: trace
-				case SharedProcessWorkerMessages.WorkerTrace:
-					this.logService.trace(`SharedProcess (${this.type}) [worker]:`, message);
+				case SharedProcessWorkerMessages.Trace:
+					this.logService.trace(`SharedProcess (worker, ${this.type}):`, message);
 					break;
 
 				// Diagostics: info
-				case SharedProcessWorkerMessages.WorkerInfo:
+				case SharedProcessWorkerMessages.Info:
 					if (message) {
 						this.logService.info(message); // take as is
 					}
 					break;
 
 				// Diagostics: warn
-				case SharedProcessWorkerMessages.WorkerWarn:
-					this.logService.warn(`SharedProcess (${this.type}) [worker]:`, message);
+				case SharedProcessWorkerMessages.Warn:
+					this.logService.warn(`SharedProcess (worker, ${this.type}):`, message);
 					break;
 
 				// Diagnostics: error
-				case SharedProcessWorkerMessages.WorkerError:
-					this.logService.error(`SharedProcess (${this.type}) [worker]:`, message);
+				case SharedProcessWorkerMessages.Error:
+					this.logService.error(`SharedProcess (worker, ${this.type}):`, message);
 					break;
 
 				// Any other message
@@ -214,7 +233,7 @@ class SharedProcessWebWorker {
 			// Store the awaiter for resolving when message
 			// is received with the given nonce
 			const nonce = generateUuid();
-			this.mapMessageNonceToMessageResolve.set(nonce, resolve);
+			this.mapMessageNonceToPendingMessageResolve.set(nonce, resolve);
 
 			// Post message into worker
 			const workerMessage: ISharedProcessToWorkerMessage = { ...message, nonce };
@@ -223,12 +242,19 @@ class SharedProcessWebWorker {
 			} else {
 				worker.postMessage(workerMessage);
 			}
+
+			// Release on cancellation if still pending
+			token.onCancellationRequested(() => {
+				if (this.mapMessageNonceToPendingMessageResolve.delete(nonce)) {
+					resolve();
+				}
+			});
 		});
 	}
 
 	spawn(configuration: ISharedProcessWorkerConfiguration, port: MessagePort, token: CancellationToken): Promise<void> {
 		const workerMessage: ISharedProcessToWorkerMessage = {
-			id: SharedProcessWorkerMessages.WorkerSpawn,
+			id: SharedProcessWorkerMessages.Spawn,
 			configuration,
 			environment: {
 				bootstrapPath: FileAccess.asFileUri('bootstrap-fork', require).fsPath
@@ -240,7 +266,7 @@ class SharedProcessWebWorker {
 
 	terminate(configuration: ISharedProcessWorkerConfiguration, token: CancellationToken): Promise<void> {
 		const workerMessage: ISharedProcessToWorkerMessage = {
-			id: SharedProcessWorkerMessages.WorkerTerminate,
+			id: SharedProcessWorkerMessages.Terminate,
 			configuration
 		};
 
