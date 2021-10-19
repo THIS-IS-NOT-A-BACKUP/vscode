@@ -752,11 +752,15 @@ export class GettingStartedPage extends EditorPane {
 		});
 
 		const css = colorMap ? generateTokensCSSForColorMap(colorMap) : '';
+
+		const inDev = document.location.protocol === 'http:';
+		const imgSrcCsp = inDev ? 'img-src https: data: http:' : 'img-src https: data:';
+
 		return `<!DOCTYPE html>
 		<html>
 			<head>
 				<meta http-equiv="Content-type" content="text/html;charset=UTF-8">
-				<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https: data:; media-src https:; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}';">
+				<meta http-equiv="Content-Security-Policy" content="default-src 'none'; ${imgSrcCsp}; media-src https:; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}';">
 				<style nonce="${nonce}">
 					${DEFAULT_MARKDOWN_STYLES}
 					${css}
@@ -1075,7 +1079,7 @@ export class GettingStartedPage extends EditorPane {
 			if (category.newEntry) {
 				reset(newBadge, $('.new-category', {}, localize('new', "New")));
 			} else if (category.newItems) {
-				reset(newBadge, $('.new-items', {}, localize('newItems', "New Items")));
+				reset(newBadge, $('.new-items', {}, localize('newItems', "Updated")));
 			}
 
 			const featuredBadge = $('.featured-badge', {});
