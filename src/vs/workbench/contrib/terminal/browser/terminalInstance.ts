@@ -687,6 +687,11 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 		// Init winpty compat and link handler after process creation as they rely on the
 		// underlying process OS
 		this._processManager.onProcessReady((processTraits) => {
+			// If links are ready, do not re-create the manager.
+			if (this._areLinksReady) {
+				return;
+			}
+
 			if (this._processManager.os === OperatingSystem.Windows) {
 				xterm.setOption('windowsMode', processTraits.requiresWindowsMode || false);
 				// Force line data to be sent when the cursor is moved, the main purpose for
@@ -1371,6 +1376,18 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 					break;
 				}
 				this._exitCode = exitCodeOrError.code;
+				const conptyError = exitCodeOrError.message.match(/.*error code:\s*(\d{3,4}).*$/);
+				if (conptyError) {
+					const errorCode = conptyError.length > 1 ? parseInt(conptyError[1]) : undefined;
+					switch (errorCode) {
+						case 267:
+							exitCodeOrError.message = `Invalid starting directory ${this.initialCwd}, review your terminal.integrated.cwd setting`;
+							break;
+						case 1260:
+							exitCodeOrError.message = `Windows cannot open this program because it has been prevented by a software restriction policy. For more information, open Event Viewer or contact your system Administrator`;
+							break;
+					}
+				}
 				exitCodeMessage = nls.localize('launchFailed.errorMessage', "The terminal process failed to launch: {0}.", exitCodeOrError.message);
 				break;
 		}
