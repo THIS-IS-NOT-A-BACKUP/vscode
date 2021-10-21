@@ -3,7 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Stats } from 'fs';
+import * as fs from 'fs';
+import { gracefulify } from 'graceful-fs';
 import { retry } from 'vs/base/common/async';
 import { VSBuffer } from 'vs/base/common/buffer';
 import { CancellationToken } from 'vs/base/common/cancellation';
@@ -23,10 +24,23 @@ import { FileWatcher as NodeJSWatcherService } from 'vs/platform/files/node/watc
 import { FileWatcher as NsfwWatcherService } from 'vs/platform/files/node/watcher/nsfw/watcherService';
 import { FileWatcher as ParcelWatcherService } from 'vs/platform/files/node/watcher/parcel/watcherService';
 import { FileWatcher as UnixWatcherService } from 'vs/platform/files/node/watcher/unix/watcherService';
-import { IDiskFileChange, ILogMessage, IWatchRequest, WatcherService } from 'vs/platform/files/common/watcher';
+import { IDiskFileChange, ILogMessage, WatcherService } from 'vs/platform/files/common/watcher';
 import { ILogService } from 'vs/platform/log/common/log';
 import product from 'vs/platform/product/common/product';
 import { AbstractDiskFileSystemProvider } from 'vs/platform/files/common/diskFileSystemProvider';
+import { toErrorMessage } from 'vs/base/common/errorMessage';
+
+/**
+ * Enable graceful-fs very early from here to have it enabled
+ * in all contexts that leverage the disk file system provider.
+ */
+(() => {
+	try {
+		gracefulify(fs);
+	} catch (error) {
+		console.error(`Error enabling graceful-fs: ${toErrorMessage(error)}`);
+	}
+})();
 
 export interface IWatcherOptions {
 	pollingInterval?: number;
@@ -34,7 +48,6 @@ export interface IWatcherOptions {
 }
 
 export interface IDiskFileSystemProviderOptions {
-	bufferSize?: number;
 	watcher?: IWatcherOptions;
 	legacyWatcher?: string;
 }
@@ -44,8 +57,6 @@ export class DiskFileSystemProvider extends AbstractDiskFileSystemProvider imple
 	IFileSystemProviderWithOpenReadWriteCloseCapability,
 	IFileSystemProviderWithFileReadStreamCapability,
 	IFileSystemProviderWithFileFolderCopyCapability {
-
-	private readonly BUFFER_SIZE = this.options?.bufferSize || 256 * 1024;
 
 	constructor(
 		logService: ILogService,
@@ -121,7 +132,7 @@ export class DiskFileSystemProvider extends AbstractDiskFileSystemProvider imple
 		}
 	}
 
-	private toType(entry: Stats | IDirent, symbolicLink?: { dangling: boolean }): FileType {
+	private toType(entry: fs.Stats | IDirent, symbolicLink?: { dangling: boolean }): FileType {
 
 		// Signal file type by checking for file / directory, except:
 		// - symbolic links pointing to nonexistent files are FileType.Unknown
@@ -164,7 +175,7 @@ export class DiskFileSystemProvider extends AbstractDiskFileSystemProvider imple
 
 		readFileIntoStream(this, resource, stream, data => data.buffer, {
 			...opts,
-			bufferSize: this.BUFFER_SIZE
+			bufferSize: 256 * 1024 // read into chunks of 256kb each to reduce IPC overhead
 		}, token);
 
 		return stream;
@@ -527,14 +538,13 @@ export class DiskFileSystemProvider extends AbstractDiskFileSystemProvider imple
 	//#region File Watching
 
 	protected createRecursiveWatcher(
-		folders: IWatchRequest[],
+		folders: number,
 		onChange: (changes: IDiskFileChange[]) => void,
 		onLogMessage: (msg: ILogMessage) => void,
 		verboseLogging: boolean
 	): WatcherService {
 		let watcherImpl: {
 			new(
-				folders: IWatchRequest[],
 				onChange: (changes: IDiskFileChange[]) => void,
 				onLogMessage: (msg: ILogMessage) => void,
 				verboseLogging: boolean,
@@ -559,7 +569,7 @@ export class DiskFileSystemProvider extends AbstractDiskFileSystemProvider imple
 				if (product.quality === 'stable') {
 					// in stable use legacy for single folder workspaces
 					// TODO@bpasero remove me eventually
-					enableLegacyWatcher = folders.length === 1;
+					enableLegacyWatcher = folders === 1;
 				}
 			}
 
@@ -574,9 +584,7 @@ export class DiskFileSystemProvider extends AbstractDiskFileSystemProvider imple
 			}
 		}
 
-		// Create and start watching
 		return new watcherImpl(
-			folders,
 			changes => onChange(changes),
 			msg => onLogMessage(msg),
 			verboseLogging,
