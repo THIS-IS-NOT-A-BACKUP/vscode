@@ -8422,7 +8422,7 @@ declare module 'vscode' {
 
 		/**
 		 * The detected default shell for the extension host, this is overridden by the
-		 * `terminal.integrated.shell` setting for the extension host's platform. Note that in
+		 * `terminal.integrated.defaultProfile` setting for the extension host's platform. Note that in
 		 * environments that do not support a shell the value is the empty string.
 		 */
 		export const shell: string;
@@ -12734,8 +12734,9 @@ declare module 'vscode' {
 		 * The UI-visible count of {@link SourceControlResourceState resource states} of
 		 * this source control.
 		 *
-		 * Equals to the total number of {@link SourceControlResourceState resource state}
-		 * of this source control, if undefined.
+		 * If undefined, this source control will
+		 * - display its UI-visible count as zero, and
+		 * - contribute the count of its {@link SourceControlResourceState resource states} to the UI-visible aggregated count for all source controls
 		 */
 		count?: number;
 
