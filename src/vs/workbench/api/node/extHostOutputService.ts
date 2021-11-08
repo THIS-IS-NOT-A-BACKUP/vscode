@@ -9,15 +9,16 @@ import { URI } from 'vs/base/common/uri';
 import { join } from 'vs/base/common/path';
 import { toLocalISOString } from 'vs/base/common/date';
 import { Promises, SymlinkSupport } from 'vs/base/node/pfs';
-import { AbstractExtHostOutputChannel, ExtHostPushOutputChannel, ExtHostOutputService, LazyOutputChannel } from 'vs/workbench/api/common/extHostOutput';
+import { AbstractExtHostOutputChannel, ExtHostOutputService as BaseExtHostOutputService } from 'vs/workbench/api/common/extHostOutput';
 import { IExtHostInitDataService } from 'vs/workbench/api/common/extHostInitDataService';
 import { IExtHostRpcService } from 'vs/workbench/api/common/extHostRpcService';
-import { MutableDisposable } from 'vs/base/common/lifecycle';
 import { ILogService } from 'vs/platform/log/common/log';
 import { createRotatingLogger } from 'vs/platform/log/node/spdlogLog';
 import { Logger } from 'spdlog';
 import { ByteSize } from 'vs/platform/files/common/files';
 import { IExtensionDescription } from 'vs/platform/extensions/common/extensions';
+import { OutputChannelUpdateMode } from 'vs/workbench/contrib/output/common/output';
+import { VSBuffer } from 'vs/base/common/buffer';
 
 class OutputAppender {
 
@@ -42,22 +43,38 @@ class OutputAppender {
 
 class ExtHostOutputChannelBackedByFile extends AbstractExtHostOutputChannel {
 
-	private _appender: OutputAppender;
+	private _offset: number;
+	private readonly _appender: OutputAppender;
 
 	constructor(name: string, appender: OutputAppender, extensionId: string, proxy: MainThreadOutputServiceShape) {
 		super(name, false, URI.file(appender.file), extensionId, proxy);
+		this._offset = 0;
 		this._appender = appender;
 	}
 
-	override append(value: string): void {
-		super.append(value);
+	append(value: string): void {
+		this.incrementOffset(value);
 		this._appender.append(value);
-		this._onDidAppend.fire();
+		if (this.visible) {
+			this._appender.flush();
+			this._id.then(id => this._proxy.$update(id, OutputChannelUpdateMode.Append));
+		}
 	}
 
-	override update(): void {
+	clear(): void {
+		const till = this._offset;
 		this._appender.flush();
-		super.update();
+		this._id.then(id => this._proxy.$update(id, OutputChannelUpdateMode.Clear, till));
+	}
+
+	replace(value: string): void {
+		const till = this._offset;
+		this.incrementOffset(value);
+		this._id.then(id => this._proxy.$update(id, OutputChannelUpdateMode.Replace, till));
+		this._appender.append(value);
+		if (this.visible) {
+			this._appender.flush();
+		}
 	}
 
 	override show(columnOrPreserveFocus?: vscode.ViewColumn | boolean, preserveFocus?: boolean): void {
@@ -65,18 +82,16 @@ class ExtHostOutputChannelBackedByFile extends AbstractExtHostOutputChannel {
 		super.show(columnOrPreserveFocus, preserveFocus);
 	}
 
-	override clear(): void {
-		this._appender.flush();
-		super.clear();
+	private incrementOffset(value: string) {
+		this._offset += VSBuffer.fromString(value).byteLength;
 	}
+
 }
 
-export class ExtHostOutputService2 extends ExtHostOutputService {
+export class ExtHostOutputService extends BaseExtHostOutputService {
 
 	private _logsLocation: URI;
 	private _namePool: number = 1;
-	private readonly _channels: Map<string, AbstractExtHostOutputChannel> = new Map<string, AbstractExtHostOutputChannel>();
-	private readonly _visibleChannelDisposable = new MutableDisposable();
 
 	constructor(
 		@IExtHostRpcService extHostRpc: IExtHostRpcService,
@@ -87,26 +102,7 @@ export class ExtHostOutputService2 extends ExtHostOutputService {
 		this._logsLocation = initData.logsLocation;
 	}
 
-	override $setVisibleChannel(channelId: string): void {
-		if (channelId) {
-			const channel = this._channels.get(channelId);
-			if (channel) {
-				this._visibleChannelDisposable.value = channel.onDidAppend(() => channel.update());
-			}
-		}
-	}
-
-	override createOutputChannel(name: string, extension: IExtensionDescription): vscode.OutputChannel {
-		name = name.trim();
-		if (!name) {
-			throw new Error('illegal argument `name`. must not be falsy');
-		}
-		const extHostOutputChannel = this._doCreateOutChannel(name, extension);
-		extHostOutputChannel.then(channel => channel._id.then(id => this._channels.set(id, channel)));
-		return new LazyOutputChannel(name, extHostOutputChannel);
-	}
-
-	private async _doCreateOutChannel(name: string, extension: IExtensionDescription): Promise<AbstractExtHostOutputChannel> {
+	protected override async doCreateOutChannel(name: string, extension: IExtensionDescription): Promise<AbstractExtHostOutputChannel> {
 		try {
 			const outputDirPath = join(this._logsLocation.fsPath, `output_logging_${toLocalISOString(new Date()).replace(/-|:|\.\d+Z$/g, '')}`);
 			const exists = await SymlinkSupport.existsDirectory(outputDirPath);
@@ -120,7 +116,7 @@ export class ExtHostOutputService2 extends ExtHostOutputService {
 		} catch (error) {
 			// Do not crash if logger cannot be created
 			this.logService.error(error);
-			return new ExtHostPushOutputChannel(name, extension.identifier.value, this._proxy);
 		}
+		return super.doCreateOutChannel(name, extension);
 	}
 }
