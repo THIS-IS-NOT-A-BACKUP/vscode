@@ -16,8 +16,7 @@
 
 declare module 'vscode' {
 
-	// eslint-disable-next-line vscode-dts-region-comments
-	//#region @alexdima - resolvers
+	//#region resolvers: @alexdima
 
 	export interface MessageOptions {
 		/**
@@ -184,15 +183,6 @@ declare module 'vscode' {
 		 * Defaults to false.
 		 */
 		forceNewSession?: boolean | { detail: string };
-		/**
-		 * Whether we should show the indication to sign in in the Accounts menu.
-		 *
-		 * If false, the user will be shown a badge on the Accounts menu with an option to sign in for the extension.
-		 * If true, no indication will be shown.
-		 *
-		 * Defaults to false.
-		 */
-		silent?: boolean;
 	}
 
 	export namespace authentication {
@@ -277,7 +267,7 @@ declare module 'vscode' {
 
 	//#endregion
 
-	//#region editor insets: https://github.com/microsoft/vscode/issues/85682
+	//#region editorInsets: https://github.com/microsoft/vscode/issues/85682
 
 	export interface WebviewEditorInset {
 		readonly editor: TextEditor;
@@ -294,7 +284,7 @@ declare module 'vscode' {
 
 	//#endregion
 
-	//#region read/write in chunks: https://github.com/microsoft/vscode/issues/84515
+	//#region fsChunks: https://github.com/microsoft/vscode/issues/84515
 
 	export interface FileSystemProvider {
 		open?(resource: Uri, options: { create: boolean; }): number | Thenable<number>;
@@ -305,7 +295,7 @@ declare module 'vscode' {
 
 	//#endregion
 
-	//#region TextSearchProvider: https://github.com/microsoft/vscode/issues/59921
+	//#region textSearchProvider: https://github.com/microsoft/vscode/issues/59921
 
 	/**
 	 * The parameters of a query for text search.
@@ -562,7 +552,7 @@ declare module 'vscode' {
 
 	//#endregion
 
-	//#region FileSearchProvider: https://github.com/microsoft/vscode/issues/73524
+	//#region fileSearchProvider: https://github.com/microsoft/vscode/issues/73524
 
 	/**
 	 * The parameters of a query for file search.
@@ -728,7 +718,7 @@ declare module 'vscode' {
 
 	//#endregion
 
-	//#region diff command: https://github.com/microsoft/vscode/issues/84899
+	//#region diffCommand: https://github.com/microsoft/vscode/issues/84899
 
 	/**
 	 * The contiguous set of modified lines in a diff.
@@ -785,28 +775,7 @@ declare module 'vscode' {
 	//#endregion
 
 	// eslint-disable-next-line vscode-dts-region-comments
-	//#region @weinand: variables view action contributions
-
-	/**
-	 * A DebugProtocolVariableContainer is an opaque stand-in type for the intersection of the Scope and Variable types defined in the Debug Adapter Protocol.
-	 * See https://microsoft.github.io/debug-adapter-protocol/specification#Types_Scope and https://microsoft.github.io/debug-adapter-protocol/specification#Types_Variable.
-	 */
-	export interface DebugProtocolVariableContainer {
-		// Properties: the intersection of DAP's Scope and Variable types.
-	}
-
-	/**
-	 * A DebugProtocolVariable is an opaque stand-in type for the Variable type defined in the Debug Adapter Protocol.
-	 * See https://microsoft.github.io/debug-adapter-protocol/specification#Types_Variable.
-	 */
-	export interface DebugProtocolVariable {
-		// Properties: see details [here](https://microsoft.github.io/debug-adapter-protocol/specification#Base_Protocol_Variable).
-	}
-
-	//#endregion
-
-	// eslint-disable-next-line vscode-dts-region-comments
-	//#region @joaomoreno: SCM validation
+	// #region scmValidation: @joaomoreno:
 
 	/**
 	 * Represents the validation type of the Source Control input.
@@ -861,8 +830,7 @@ declare module 'vscode' {
 
 	//#endregion
 
-	// eslint-disable-next-line vscode-dts-region-comments
-	//#region @joaomoreno: SCM selected provider
+	//#region scmSelectedProvider: @joaomoreno:
 
 	export interface SourceControl {
 
@@ -879,7 +847,7 @@ declare module 'vscode' {
 
 	//#endregion
 
-	//#region Terminal data write event https://github.com/microsoft/vscode/issues/78502
+	//#region terminalDataWriteEvent: https://github.com/microsoft/vscode/issues/78502
 
 	export interface TerminalDataWriteEvent {
 		/**
@@ -903,7 +871,7 @@ declare module 'vscode' {
 
 	//#endregion
 
-	//#region Terminal dimensions property and change event https://github.com/microsoft/vscode/issues/55718
+	//#region terminalDimensions: https://github.com/microsoft/vscode/issues/55718
 
 	/**
 	 * An {@link Event} which fires when a {@link Terminal}'s dimensions change.
@@ -937,7 +905,7 @@ declare module 'vscode' {
 
 	//#endregion
 
-	//#region Terminal location https://github.com/microsoft/vscode/issues/45407
+	//#region terminalLocation: https://github.com/microsoft/vscode/issues/45407
 
 	export interface TerminalOptions {
 		location?: TerminalLocation | TerminalEditorLocationOptions | TerminalSplitLocationOptions;
@@ -977,7 +945,7 @@ declare module 'vscode' {
 
 	//#endregion
 
-	//#region Terminal name change event https://github.com/microsoft/vscode/issues/114898
+	//#region terminalNameChangeEvent: https://github.com/microsoft/vscode/issues/114898
 
 	export interface Pseudoterminal {
 		/**
@@ -1001,8 +969,7 @@ declare module 'vscode' {
 
 	//#endregion
 
-	// eslint-disable-next-line vscode-dts-region-comments
-	//#region @jrieken -> exclusive document filters
+	//#region exclusiveDocumentFilters: @jrieken
 
 	export interface DocumentFilter {
 		readonly exclusive?: boolean;
@@ -1010,13 +977,13 @@ declare module 'vscode' {
 
 	//#endregion
 
-	//#region Tree View: https://github.com/microsoft/vscode/issues/61313 @alexr00
+	//#region treeViewReveal: https://github.com/microsoft/vscode/issues/61313 @alexr00
 	export interface TreeView<T> extends Disposable {
 		reveal(element: T | undefined, options?: { select?: boolean, focus?: boolean, expand?: boolean | number; }): Thenable<void>;
 	}
 	//#endregion
 
-	//#region Custom Tree View Drag and Drop https://github.com/microsoft/vscode/issues/32592
+	//#region treeViewDragAndDrop: https://github.com/microsoft/vscode/issues/32592
 	/**
 	 * A data provider that provides tree data
 	 */
@@ -1080,7 +1047,7 @@ declare module 'vscode' {
 	}
 	//#endregion
 
-	//#region Task presentation group: https://github.com/microsoft/vscode/issues/47265
+	//#region taskPresentationGroup: https://github.com/microsoft/vscode/issues/47265
 	export interface TaskPresentationOptions {
 		/**
 		 * Controls whether the task is executed in a specific terminal group using split panes.
@@ -1094,7 +1061,7 @@ declare module 'vscode' {
 	}
 	//#endregion
 
-	//#region Custom editor move https://github.com/microsoft/vscode/issues/86146
+	//#region customEditorMove: https://github.com/microsoft/vscode/issues/86146
 
 	// TODO: Also for custom editor
 
@@ -1118,7 +1085,7 @@ declare module 'vscode' {
 
 	//#endregion
 
-	//#region allow QuickPicks to skip sorting: https://github.com/microsoft/vscode/issues/73904
+	//#region quickPickSortByLabel: https://github.com/microsoft/vscode/issues/73904
 
 	export interface QuickPick<T extends QuickPickItem> extends QuickInput {
 		/**
@@ -1129,19 +1096,7 @@ declare module 'vscode' {
 
 	//#endregion
 
-	//#region https://github.com/microsoft/vscode/issues/132068
-
-	export interface QuickPick<T extends QuickPickItem> extends QuickInput {
-
-		/*
-		 * An optional flag to maintain the scroll position of the quick pick when the quick pick items are updated. Defaults to false.
-		 */
-		keepScrollPosition?: boolean;
-	}
-
-	//#endregion
-
-	//#region https://github.com/microsoft/vscode/issues/124970, Cell Execution State
+	//#region notebookCellExecutionState: https://github.com/microsoft/vscode/issues/124970
 
 	/**
 	 * The execution state of a notebook cell.
@@ -1188,7 +1143,7 @@ declare module 'vscode' {
 
 	//#endregion
 
-	//#region https://github.com/microsoft/vscode/issues/106744, Notebook, deprecated & misc
+	//#region notebookDeprecated: https://github.com/microsoft/vscode/issues/106744
 
 	export interface NotebookCellOutput {
 		id: string;
@@ -1196,7 +1151,7 @@ declare module 'vscode' {
 
 	//#endregion
 
-	//#region https://github.com/microsoft/vscode/issues/106744, NotebookEditor
+	//#region notebookEditor: https://github.com/microsoft/vscode/issues/106744
 
 	/**
 	 * Represents a notebook editor that is attached to a {@link NotebookDocument notebook}.
@@ -1361,7 +1316,7 @@ declare module 'vscode' {
 
 	//#endregion
 
-	//#region https://github.com/microsoft/vscode/issues/106744, NotebookEditorEdit
+	//#region notebookEditorEdit: https://github.com/microsoft/vscode/issues/106744
 
 	// todo@API add NotebookEdit-type which handles all these cases?
 	// export class NotebookEdit {
@@ -1409,7 +1364,7 @@ declare module 'vscode' {
 
 	//#endregion
 
-	//#region https://github.com/microsoft/vscode/issues/106744, NotebookEditorDecorationType
+	//#region notebookEditorDecorationType: https://github.com/microsoft/vscode/issues/106744
 
 	export interface NotebookEditor {
 		setDecorations(decorationType: NotebookEditorDecorationType, range: NotebookRange): void;
@@ -1432,7 +1387,7 @@ declare module 'vscode' {
 
 	//#endregion
 
-	//#region https://github.com/microsoft/vscode/issues/106744, NotebookConcatTextDocument
+	//#region notebookConcatTextDocument: https://github.com/microsoft/vscode/issues/106744
 
 	export namespace notebooks {
 		/**
@@ -1467,8 +1422,7 @@ declare module 'vscode' {
 
 	//#endregion
 
-	//#region https://github.com/microsoft/vscode/issues/106744, NotebookContentProvider
-
+	//#region notebookContentProvider: https://github.com/microsoft/vscode/issues/106744
 
 	interface NotebookDocumentBackup {
 		/**
@@ -1528,7 +1482,7 @@ declare module 'vscode' {
 
 	//#endregion
 
-	//#region https://github.com/microsoft/vscode/issues/106744, LiveShare
+	//#region notebookLiveShare: https://github.com/microsoft/vscode/issues/106744
 
 	export interface NotebookRegistrationData {
 		displayName: string;
@@ -1545,7 +1499,7 @@ declare module 'vscode' {
 
 	//#endregion
 
-	//#region @https://github.com/microsoft/vscode/issues/123601, notebook messaging
+	//#region notebookMessaging: https://github.com/microsoft/vscode/issues/123601
 
 	/**
 	 * Represents a script that is loaded into the notebook renderer before rendering output. This allows
@@ -1612,7 +1566,7 @@ declare module 'vscode' {
 
 	//#endregion
 
-	//#region @eamodio - timeline: https://github.com/microsoft/vscode/issues/84297
+	//#region timeline: https://github.com/microsoft/vscode/issues/84297
 
 	export class TimelineItem {
 		/**
@@ -1770,7 +1724,7 @@ declare module 'vscode' {
 
 	//#endregion
 
-	//#region https://github.com/microsoft/vscode/issues/91555
+	//#region tokenInformation: https://github.com/microsoft/vscode/issues/91555
 
 	export enum StandardTokenType {
 		Other = 0,
@@ -1790,7 +1744,7 @@ declare module 'vscode' {
 
 	//#endregion
 
-	//#region https://github.com/microsoft/vscode/issues/16221
+	//#region inlayHints: https://github.com/microsoft/vscode/issues/16221
 
 	// todo@API Split between Inlay- and OverlayHints (InlayHint are for a position, OverlayHints for a non-empty range)
 	// todo@API add "mini-markdown" for links and styles
@@ -1873,7 +1827,7 @@ declare module 'vscode' {
 	}
 	//#endregion
 
-	//#region https://github.com/microsoft/vscode/issues/104436
+	//#region extensionRuntime: https://github.com/microsoft/vscode/issues/104436
 
 	export enum ExtensionRuntime {
 		/**
@@ -1892,7 +1846,7 @@ declare module 'vscode' {
 
 	//#endregion
 
-	//#region https://github.com/microsoft/vscode/issues/102091
+	//#region textDocumentNotebook: https://github.com/microsoft/vscode/issues/102091
 
 	export interface TextDocument {
 
@@ -1904,7 +1858,7 @@ declare module 'vscode' {
 	}
 	//#endregion
 
-	//#region proposed test APIs https://github.com/microsoft/vscode/issues/107467
+	//#region testObserver: https://github.com/microsoft/vscode/issues/107467
 	export namespace tests {
 		/**
 		 * Requests that tests be run by their controller.
@@ -2100,7 +2054,7 @@ declare module 'vscode' {
 
 	//#endregion
 
-	//#region Opener service (https://github.com/microsoft/vscode/issues/109277)
+	//#region externalUriOpener: https://github.com/microsoft/vscode/issues/109277
 
 	/**
 	 * Details if an `ExternalUriOpener` can open a uri.
@@ -2258,7 +2212,7 @@ declare module 'vscode' {
 
 	//#endregion
 
-	//#region https://github.com/Microsoft/vscode/issues/15178
+	//#region tabs: https://github.com/Microsoft/vscode/issues/15178
 
 	/**
 	 * Represents a tab within the window
@@ -2353,7 +2307,7 @@ declare module 'vscode' {
 
 	//#endregion
 
-	//#region https://github.com/microsoft/vscode/issues/120173
+	//#region workspaceTrust: https://github.com/microsoft/vscode/issues/120173
 	/**
 	 * The object describing the properties of the workspace trust request
 	 */
@@ -2377,7 +2331,7 @@ declare module 'vscode' {
 
 	//#endregion
 
-	//#region https://github.com/microsoft/vscode/issues/115616 @alexr00
+	//#region portAttributesProvider: https://github.com/microsoft/vscode/issues/115616 @alexr00
 	export enum PortAutoForwardAction {
 		Notify = 1,
 		OpenBrowser = 2,
@@ -2432,19 +2386,7 @@ declare module 'vscode' {
 	}
 	//#endregion
 
-	//#region https://github.com/microsoft/vscode/issues/119904 @eamodio
-
-	export interface SourceControlInputBox {
-
-		/**
-		 * Sets focus to the input.
-		 */
-		focus(): void;
-	}
-
-	//#endregion
-
-	//#region https://github.com/microsoft/vscode/issues/124024 @hediet @alexdima
+	//#region inlineCompletionProvider: https://github.com/microsoft/vscode/issues/124024 @hediet @alexdima
 
 	export namespace languages {
 		/**
@@ -2566,7 +2508,7 @@ declare module 'vscode' {
 
 	//#endregion
 
-	//#region https://github.com/microsoft/vscode/issues/126280 @mjbvz
+	//#region notebookMime: https://github.com/microsoft/vscode/issues/126280 @mjbvz
 
 	export interface NotebookCellData {
 		/**
@@ -2594,7 +2536,7 @@ declare module 'vscode' {
 
 	//#endregion
 
-	//#region https://github.com/microsoft/vscode/issues/123713 @connor4312
+	//#region testCoverage: https://github.com/microsoft/vscode/issues/123713 @connor4312
 	export interface TestRun {
 		/**
 		 * Test coverage provider for this result. An extension can defer setting
@@ -2785,7 +2727,7 @@ declare module 'vscode' {
 
 	//#endregion
 
-	//#region https://github.com/microsoft/vscode/issues/129037
+	//#region languageStatus: https://github.com/microsoft/vscode/issues/129037
 
 	enum LanguageStatusSeverity {
 		Information = 0,
@@ -2812,21 +2754,7 @@ declare module 'vscode' {
 
 	//#endregion
 
-	//#region https://github.com/microsoft/vscode/issues/88716
-	export interface QuickPickItem {
-		buttons?: QuickInputButton[];
-	}
-	export interface QuickPick<T extends QuickPickItem> extends QuickInput {
-		readonly onDidTriggerItemButton: Event<QuickPickItemButtonEvent<T>>;
-	}
-	export interface QuickPickItemButtonEvent<T extends QuickPickItem> {
-		button: QuickInputButton;
-		item: T;
-	}
-
-	//#endregion
-
-	//#region @eamodio https://github.com/microsoft/vscode/issues/133935
+	//#region scmActionButton: https://github.com/microsoft/vscode/issues/133935
 
 	export interface SourceControl {
 		actionButton?: Command;
