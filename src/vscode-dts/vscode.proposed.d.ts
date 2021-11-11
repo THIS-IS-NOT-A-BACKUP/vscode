@@ -267,22 +267,7 @@ declare module 'vscode' {
 
 	//#endregion
 
-	//#region editorInsets: https://github.com/microsoft/vscode/issues/85682
 
-	export interface WebviewEditorInset {
-		readonly editor: TextEditor;
-		readonly line: number;
-		readonly height: number;
-		readonly webview: Webview;
-		readonly onDidDispose: Event<void>;
-		dispose(): void;
-	}
-
-	export namespace window {
-		export function createWebviewTextEditorInset(editor: TextEditor, line: number, height: number, options?: WebviewOptions): WebviewEditorInset;
-	}
-
-	//#endregion
 
 	//#region fsChunks: https://github.com/microsoft/vscode/issues/84515
 
@@ -752,7 +737,7 @@ declare module 'vscode' {
 	//#endregion
 
 	// eslint-disable-next-line vscode-dts-region-comments
-	//#region @roblourens: new debug session option for simple UI 'managedByParent' (see https://github.com/microsoft/vscode/issues/128588)
+	//#region notebookDebugOptions: @roblourens: new debug session option for simple UI 'managedByParent' (see https://github.com/microsoft/vscode/issues/128588)
 
 	/**
 	 * Options for {@link debug.startDebugging starting a debug session}.
@@ -774,8 +759,7 @@ declare module 'vscode' {
 
 	//#endregion
 
-	// eslint-disable-next-line vscode-dts-region-comments
-	// #region scmValidation: @joaomoreno:
+	// #region scmValidation: @joaomoreno
 
 	/**
 	 * Represents the validation type of the Source Control input.
@@ -830,7 +814,7 @@ declare module 'vscode' {
 
 	//#endregion
 
-	//#region scmSelectedProvider: @joaomoreno:
+	//#region scmSelectedProvider: @joaomoreno
 
 	export interface SourceControl {
 
@@ -2727,32 +2711,7 @@ declare module 'vscode' {
 
 	//#endregion
 
-	//#region languageStatus: https://github.com/microsoft/vscode/issues/129037
 
-	enum LanguageStatusSeverity {
-		Information = 0,
-		Warning = 1,
-		Error = 2
-	}
-
-	interface LanguageStatusItem {
-		readonly id: string;
-		selector: DocumentSelector;
-		// todo@jrieken replace with boolean ala needsAttention
-		severity: LanguageStatusSeverity;
-		name: string | undefined;
-		text: string;
-		detail?: string;
-		command: Command | undefined;
-		accessibilityInformation?: AccessibilityInformation;
-		dispose(): void;
-	}
-
-	namespace languages {
-		export function createLanguageStatusItem(id: string, selector: DocumentSelector): LanguageStatusItem;
-	}
-
-	//#endregion
 
 	//#region scmActionButton: https://github.com/microsoft/vscode/issues/133935
 
