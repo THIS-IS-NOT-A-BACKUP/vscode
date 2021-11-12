@@ -15,12 +15,7 @@ export class DirectMainProcessExtensionHostStarter extends ExtensionHostStarter 
 	) {
 		super(logService);
 
-		// Abnormal shutdown: terminate extension hosts asap
-		lifecycleMainService.onWillKill(() => {
-			this.killAllNow();
-		});
-
-		// Normal shutdown: gracefully await extension host shutdowns
+		// On shutdown: gracefully await extension host shutdowns
 		lifecycleMainService.onWillShutdown((e) => {
 			e.join(this.waitForAllExit(6000));
 		});
