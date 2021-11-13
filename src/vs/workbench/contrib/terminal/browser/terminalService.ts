@@ -17,7 +17,6 @@ import * as nls from 'vs/nls';
 import { IContextKey, IContextKeyService } from 'vs/platform/contextkey/common/contextkey';
 import { IDialogService } from 'vs/platform/dialogs/common/dialogs';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
-import { ILabelService } from 'vs/platform/label/common/label';
 import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
 import { ICreateContributedTerminalProfileOptions, IShellLaunchConfig, ITerminalLaunchError, ITerminalProfile, ITerminalsLayoutInfo, ITerminalsLayoutInfoById, TerminalLocation, TerminalLocationString } from 'vs/platform/terminal/common/terminal';
 import { iconForeground } from 'vs/platform/theme/common/colorRegistry';
@@ -28,14 +27,12 @@ import { VirtualWorkspaceContext } from 'vs/workbench/browser/contextkeys';
 import { IEditableData, IViewsService } from 'vs/workbench/common/views';
 import { ICreateTerminalOptions, IRequestAddInstanceToGroupEvent, ITerminalEditorService, ITerminalExternalLinkProvider, ITerminalFindHost, ITerminalGroup, ITerminalGroupService, ITerminalInstance, ITerminalInstanceHost, ITerminalInstanceService, ITerminalLocationOptions, ITerminalService, ITerminalServiceNativeDelegate, TerminalConnectionState, TerminalEditorLocation } from 'vs/workbench/contrib/terminal/browser/terminal';
 import { TerminalConfigHelper } from 'vs/workbench/contrib/terminal/browser/terminalConfigHelper';
-import { TerminalEditor } from 'vs/workbench/contrib/terminal/browser/terminalEditor';
 import { getColorStyleContent, getUriClasses } from 'vs/workbench/contrib/terminal/browser/terminalIcon';
 import { getInstanceFromResource, getTerminalUri, parseTerminalUri } from 'vs/workbench/contrib/terminal/browser/terminalUri';
 import { TerminalViewPane } from 'vs/workbench/contrib/terminal/browser/terminalView';
 import { IRemoteTerminalAttachTarget, IStartExtensionTerminalRequest, ITerminalConfigHelper, ITerminalBackend, ITerminalProcessExtHostProxy, ITerminalProfileService, TERMINAL_VIEW_ID } from 'vs/workbench/contrib/terminal/common/terminal';
 import { TerminalContextKeys } from 'vs/workbench/contrib/terminal/common/terminalContextKey';
-import { formatMessageForTerminal, terminalStrings } from 'vs/workbench/contrib/terminal/common/terminalStrings';
-import { IEditorResolverService, RegisteredEditorPriority } from 'vs/workbench/services/editor/common/editorResolverService';
+import { formatMessageForTerminal } from 'vs/workbench/contrib/terminal/common/terminalStrings';
 import { IWorkbenchEnvironmentService } from 'vs/workbench/services/environment/common/environmentService';
 import { ILifecycleService, ShutdownReason, WillShutdownEvent } from 'vs/workbench/services/lifecycle/common/lifecycle';
 import { IRemoteAgentService } from 'vs/workbench/services/remote/common/remoteAgentService';
@@ -138,7 +135,6 @@ export class TerminalService implements ITerminalService {
 
 	constructor(
 		@IContextKeyService private _contextKeyService: IContextKeyService,
-		@ILabelService labelService: ILabelService,
 		@ILifecycleService lifecycleService: ILifecycleService,
 		@IDialogService private _dialogService: IDialogService,
 		@IInstantiationService private _instantiationService: IInstantiationService,
@@ -149,7 +145,6 @@ export class TerminalService implements ITerminalService {
 		@ITerminalEditorService private readonly _terminalEditorService: ITerminalEditorService,
 		@ITerminalGroupService private readonly _terminalGroupService: ITerminalGroupService,
 		@ITerminalInstanceService private readonly _terminalInstanceService: ITerminalInstanceService,
-		@IEditorResolverService editorResolverService: IEditorResolverService,
 		@IEditorGroupsService private readonly _editorGroupsService: IEditorGroupsService,
 		@ITerminalProfileService private readonly _terminalProfileService: ITerminalProfileService,
 		@IExtensionService private readonly _extensionService: IExtensionService,
@@ -158,38 +153,6 @@ export class TerminalService implements ITerminalService {
 		this._isShuttingDown = false;
 		this._findState = new FindReplaceState();
 		this._configHelper = _instantiationService.createInstance(TerminalConfigHelper);
-		editorResolverService.registerEditor(
-			`${Schemas.vscodeTerminal}:/**`,
-			{
-				id: TerminalEditor.ID,
-				label: terminalStrings.terminal,
-				priority: RegisteredEditorPriority.exclusive
-			},
-			{
-				canHandleDiff: false,
-				canSupportResource: uri => uri.scheme === Schemas.vscodeTerminal,
-				singlePerResource: true
-			},
-			({ resource, options }) => {
-				let instance = this.getInstanceFromResource(resource);
-				if (instance) {
-					const sourceGroup = this._terminalGroupService.getGroupForInstance(instance);
-					if (sourceGroup) {
-						sourceGroup.removeInstance(instance);
-					}
-				}
-				const resolvedResource = this._terminalEditorService.resolveResource(instance || resource);
-				const editor = this._terminalEditorService.getInputFromResource(resolvedResource) || { editor: resolvedResource };
-				return {
-					editor,
-					options: {
-						...options,
-						pinned: true,
-						forceReload: true,
-						override: TerminalEditor.ID
-					}
-				};
-			});
 		// the below avoids having to poll routinely.
 		// we update detected profiles when an instance is created so that,
 		// for example, we detect if you've installed a pwsh
@@ -222,15 +185,6 @@ export class TerminalService implements ITerminalService {
 
 		lifecycleService.onBeforeShutdown(async e => e.veto(this._onBeforeShutdown(e.reason), 'veto.terminal'));
 		lifecycleService.onWillShutdown(e => this._onWillShutdown(e));
-
-		// Register a resource formatter for terminal URIs
-		labelService.registerFormatter({
-			scheme: Schemas.vscodeTerminal,
-			formatting: {
-				label: '${path}',
-				separator: ''
-			}
-		});
 
 		// Create async as the class depends on `this`
 		timeout(0).then(() => this._instantiationService.createInstance(TerminalEditorStyle, document.head));
