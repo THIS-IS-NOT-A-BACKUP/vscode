@@ -57,6 +57,8 @@ import { CancellationToken, CancellationTokenSource } from 'vs/base/common/cance
 import { Command } from 'vs/editor/common/modes';
 import { isPromiseCanceledError } from 'vs/base/common/errors';
 import { ElementsDragAndDropData } from 'vs/base/browser/ui/list/listView';
+import { CodeDataTransfers, fillEditorsDragData } from 'vs/workbench/browser/dnd';
+import { Schemas } from 'vs/base/common/network';
 
 export class TreeViewPane extends ViewPane {
 
@@ -1215,39 +1217,75 @@ export class TreeView extends AbstractTreeView {
 	}
 }
 
-const TREE_DRAG_SOURCE_INFO_MIME_TYPE = 'tree/internalsourceinfo';
 interface TreeDragSourceInfo {
 	id: string,
 	itemHandles: string[];
 }
 
 export class CustomTreeViewDragAndDrop implements ITreeDragAndDrop<ITreeItem> {
+	private readonly treeMimeType: string;
 	constructor(
 		private readonly treeId: string,
-		@ILabelService private readonly labelService: ILabelService) { }
+		@ILabelService private readonly labelService: ILabelService,
+		@IInstantiationService private readonly instantiationService: IInstantiationService) {
+		this.treeMimeType = `tree/${treeId.toLowerCase()}`;
+	}
 
 	private dndController: ITreeViewDragAndDropController | undefined;
 	set controller(controller: ITreeViewDragAndDropController | undefined) {
 		this.dndController = controller;
 	}
 
+	private addResourceInfoToTransfer(originalEvent: DragEvent, resources: URI[]) {
+		if (resources.length && originalEvent.dataTransfer) {
+			// Apply some datatransfer types to allow for dragging the element outside of the application
+			this.instantiationService.invokeFunction(accessor => fillEditorsDragData(accessor, resources, originalEvent));
+
+			// The only custom data transfer we set from the explorer is a file transfer
+			// to be able to DND between multiple code file explorers across windows
+			const fileResources = resources.filter(s => s.scheme === Schemas.file).map(r => r.fsPath);
+			if (fileResources.length) {
+				originalEvent.dataTransfer.setData(CodeDataTransfers.FILES, JSON.stringify(fileResources));
+			}
+		}
+	}
+
 	onDragStart(data: IDragAndDropData, originalEvent: DragEvent): void {
 		if (originalEvent.dataTransfer) {
 			const treeItemsData = (data as ElementsDragAndDropData<ITreeItem, ITreeItem[]>).getData();
+			const resources: URI[] = [];
 			const sourceInfo: TreeDragSourceInfo = {
 				id: this.treeId,
-				itemHandles: treeItemsData.map(item => item.handle)
+				itemHandles: []
 			};
-			originalEvent.dataTransfer.setData(TREE_DRAG_SOURCE_INFO_MIME_TYPE,
+			treeItemsData.forEach(item => {
+				sourceInfo.itemHandles.push(item.handle);
+				if (item.resourceUri) {
+					resources.push(URI.revive(item.resourceUri));
+				}
+			});
+			this.addResourceInfoToTransfer(originalEvent, resources);
+			originalEvent.dataTransfer.setData(this.treeMimeType,
 				JSON.stringify(sourceInfo));
 		}
 	}
 
 	onDragOver(data: IDragAndDropData, targetElement: ITreeItem, targetIndex: number, originalEvent: DragEvent): boolean | ITreeDragOverReaction {
-		if (!this.dndController) {
+		const dndController = this.dndController;
+		if (!dndController || !originalEvent.dataTransfer || (dndController.supportedMimeTypes.length === 0)) {
 			return false;
 		}
-		return { accept: true, bubble: TreeDragOverBubble.Down, autoExpand: true };
+		const dragContainersSupportedType = originalEvent.dataTransfer.types.some((value, index) => {
+			if (value === this.treeMimeType) {
+				return true;
+			} else {
+				return dndController.supportedMimeTypes.indexOf(value) >= 0;
+			}
+		});
+		if (dragContainersSupportedType) {
+			return { accept: true, bubble: TreeDragOverBubble.Down, autoExpand: true };
+		}
+		return false;
 	}
 
 	getDragURI(element: ITreeItem): string | null {
@@ -1272,9 +1310,7 @@ export class CustomTreeViewDragAndDrop implements ITreeDragAndDrop<ITreeItem> {
 		if (!originalEvent.dataTransfer || !this.dndController || !targetNode) {
 			return;
 		}
-		const treeDataTransfer: ITreeDataTransfer = {
-			items: new Map()
-		};
+		const treeDataTransfer: ITreeDataTransfer = new Map();
 		let stringCount = Array.from(originalEvent.dataTransfer.items).reduce((previous, current) => {
 			if (current.kind === 'string') {
 				return previous + 1;
@@ -1284,25 +1320,34 @@ export class CustomTreeViewDragAndDrop implements ITreeDragAndDrop<ITreeItem> {
 
 		let treeSourceInfo: TreeDragSourceInfo | undefined;
 		await new Promise<void>(resolve => {
-			if (!originalEvent.dataTransfer || !this.dndController || !targetNode) {
+			function decrementStringCount() {
+				stringCount--;
+				if (stringCount === 0) {
+					resolve();
+				}
+			}
+
+			const dndController = this.dndController;
+			if (!originalEvent.dataTransfer || !dndController || !targetNode) {
 				return;
 			}
 			for (const dataItem of originalEvent.dataTransfer.items) {
+				const type = dataItem.type;
 				if (dataItem.kind === 'string') {
-					const type = dataItem.type;
-					dataItem.getAsString(dataValue => {
-						if (type === TREE_DRAG_SOURCE_INFO_MIME_TYPE) {
-							treeSourceInfo = JSON.parse(dataValue);
-						} else {
-							treeDataTransfer.items.set(type, {
-								asString: () => Promise.resolve(dataValue)
-							});
-						}
-						stringCount--;
-						if (stringCount === 0) {
-							resolve();
-						}
-					});
+					if ((type === this.treeMimeType) || (dndController.supportedMimeTypes.indexOf(type) >= 0)) {
+						dataItem.getAsString(dataValue => {
+							if (type === this.treeMimeType) {
+								treeSourceInfo = JSON.parse(dataValue);
+							} else {
+								treeDataTransfer.set(type, {
+									asString: () => Promise.resolve(dataValue)
+								});
+							}
+							decrementStringCount();
+						});
+					} else {
+						decrementStringCount();
+					}
 				}
 			}
 		});
