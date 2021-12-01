@@ -12,7 +12,7 @@ import { InvisibleCharacters } from 'vs/base/common/strings';
 import 'vs/css!./unicodeHighlighter';
 import { IActiveCodeEditor, ICodeEditor } from 'vs/editor/browser/editorBrowser';
 import { EditorAction, registerEditorAction, registerEditorContribution, ServicesAccessor } from 'vs/editor/browser/editorExtensions';
-import { DeriveFromWorkspaceTrust, deriveFromWorkspaceTrust, EditorOption, InternalUnicodeHighlightOptions, unicodeHighlightConfigKeys } from 'vs/editor/common/config/editorOptions';
+import { InUntrustedWorkspace, inUntrustedWorkspace, EditorOption, InternalUnicodeHighlightOptions, unicodeHighlightConfigKeys } from 'vs/editor/common/config/editorOptions';
 import { Range } from 'vs/editor/common/core/range';
 import { IEditorContribution } from 'vs/editor/common/editorCommon';
 import { IModelDecoration, IModelDeltaDecoration, ITextModel, MinimapPosition, OverviewRulerLane, TrackedRangeStickiness } from 'vs/editor/common/model';
@@ -20,6 +20,7 @@ import { ModelDecorationOptions } from 'vs/editor/common/model/textModel';
 import { UnicodeHighlighterOptions, UnicodeHighlighterReason, UnicodeHighlighterReasonKind, UnicodeTextModelHighlighter } from 'vs/editor/common/modes/unicodeTextModelHighlighter';
 import { IEditorWorkerService, IUnicodeHighlightsResult } from 'vs/editor/common/services/editorWorkerService';
 import { IModeService } from 'vs/editor/common/services/modeService';
+import { isModelDecorationVisible } from 'vs/editor/common/viewModel/viewModelDecorations';
 import { HoverAnchor, HoverAnchorType, IEditorHover, IEditorHoverParticipant, IEditorHoverStatusBar, IHoverPart } from 'vs/editor/contrib/hover/hoverTypes';
 import { MarkdownHover, renderMarkdownHovers } from 'vs/editor/contrib/hover/markdownHoverParticipant';
 import { BannerController } from 'vs/editor/contrib/unicodeHighlighter/bannerController';
@@ -181,15 +182,15 @@ export interface UnicodeHighlighterDecorationInfo {
 	reason: UnicodeHighlighterReason;
 }
 
-type RemoveDeriveFromWorkspaceTrust<T> = T extends DeriveFromWorkspaceTrust ? never : T;
-type ResolvedOptions = { [TKey in keyof InternalUnicodeHighlightOptions]: RemoveDeriveFromWorkspaceTrust<InternalUnicodeHighlightOptions[TKey]> };
+type RemoveTrueIfUntrusted<T> = T extends InUntrustedWorkspace ? never : T;
+type ResolvedOptions = { [TKey in keyof InternalUnicodeHighlightOptions]: RemoveTrueIfUntrusted<InternalUnicodeHighlightOptions[TKey]> };
 
 function resolveOptions(trusted: boolean, options: InternalUnicodeHighlightOptions): ResolvedOptions {
 	return {
-		nonBasicASCII: options.nonBasicASCII !== deriveFromWorkspaceTrust ? options.nonBasicASCII : !trusted,
+		nonBasicASCII: options.nonBasicASCII === inUntrustedWorkspace ? !trusted : options.nonBasicASCII,
 		ambiguousCharacters: options.ambiguousCharacters,
 		invisibleCharacters: options.invisibleCharacters,
-		includeComments: options.includeComments !== deriveFromWorkspaceTrust ? options.includeComments : !trusted,
+		includeComments: options.includeComments === inUntrustedWorkspace ? !trusted : options.includeComments,
 		allowedCharacters: options.allowedCharacters ?? [],
 	};
 }
@@ -255,8 +256,21 @@ class DocumentUnicodeHighlighter extends Disposable {
 		if (!this._decorationIds.has(decorationId)) {
 			return null;
 		}
-		const range = this._editor.getModel().getDecorationRange(decorationId)!;
-		const text = this._editor.getModel().getValueInRange(range);
+		const model = this._editor.getModel();
+		const range = model.getDecorationRange(decorationId)!;
+		if (
+			!isModelDecorationVisible(model, {
+				range: range,
+				options: this._options.includeComments
+					? DECORATION
+					: DECORATION_HIDE_IN_COMMENTS,
+				id: decorationId,
+				ownerId: 0,
+			})
+		) {
+			return null;
+		}
+		const text = model.getValueInRange(range);
 		return {
 			reason: computeReason(text, this._options)!,
 		};
@@ -341,8 +355,21 @@ class ViewportUnicodeHighlighter extends Disposable {
 		if (!this._decorationIds.has(decorationId)) {
 			return null;
 		}
-		const range = this._editor.getModel().getDecorationRange(decorationId)!;
-		const text = this._editor.getModel().getValueInRange(range);
+		const model = this._editor.getModel();
+		const range = model.getDecorationRange(decorationId)!;
+		const text = model.getValueInRange(range);
+		if (
+			!isModelDecorationVisible(model, {
+				range: range,
+				options: this._options.includeComments
+					? DECORATION
+					: DECORATION_HIDE_IN_COMMENTS,
+				id: decorationId,
+				ownerId: 0,
+			})
+		) {
+			return null;
+		}
 		return {
 			reason: computeReason(text, this._options)!,
 		};
@@ -603,9 +630,16 @@ export class ShowExcludeOptions extends EditorAction {
 			run(): Promise<void>;
 		}
 
+		function getExcludeCharFromBeingHighlightedLabel(codePoint: number) {
+			if (InvisibleCharacters.isInvisibleCharacter(codePoint)) {
+				return nls.localize('unicodeHighlight.excludeInvisibleCharFromBeingHighlighted', 'Exclude {0} (invisible character) from being highlighted', `U+${codePoint.toString(16)}`);
+			}
+			return nls.localize('unicodeHighlight.excludeCharFromBeingHighlighted', 'Exclude {0} from being highlighted', `U+${codePoint.toString(16)} "${char}"`);
+		}
+
 		const options: ExtendedOptions[] = [
 			{
-				label: nls.localize('unicodeHighlight.excludeCharFromBeingHighlighted', 'Exclude {0} from being highlighted', `U+${codePoint.toString(16)} "${char}"`),
+				label: getExcludeCharFromBeingHighlightedLabel(codePoint),
 				run: async () => {
 					const existingValue = configurationService.getValue(unicodeHighlightConfigKeys.allowedCharacters);
 					let value: string;
