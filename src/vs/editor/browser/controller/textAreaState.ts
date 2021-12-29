@@ -98,10 +98,6 @@ export class TextAreaState {
 		return [anchor, signum * deltaText.length, lineFeedCnt];
 	}
 
-	public static selectedText(text: string): TextAreaState {
-		return new TextAreaState(text, 0, text.length, null, null);
-	}
-
 	public static deduceInput(previousState: TextAreaState, currentState: TextAreaState, couldBeEmojiInput: boolean): ITypeData {
 		if (!previousState) {
 			// This is the EMPTY state
@@ -191,25 +187,6 @@ export class TextAreaState {
 		}
 
 		if (currentSelectionStart === currentSelectionEnd) {
-			// composition accept case (noticed in FF + Japanese)
-			// [blahblah] => blahblah|
-			if (
-				previousValue === currentValue
-				&& previousSelectionStart === 0
-				&& previousSelectionEnd === previousValue.length
-				&& currentSelectionStart === currentValue.length
-				&& currentValue.indexOf('\n') === -1
-			) {
-				if (strings.containsFullWidthCharacter(currentValue)) {
-					return {
-						text: '',
-						replacePrevCharCnt: 0,
-						replaceNextCharCnt: 0,
-						positionDelta: 0
-					};
-				}
-			}
-
 			// no current selection
 			const replacePreviousCharacters = (previousPrefix.length - prefixLength);
 			if (_debugComposition) {
