@@ -13,7 +13,7 @@ import * as model from 'vs/editor/common/model';
 import { PieceTreeTextBuffer } from 'vs/editor/common/model/pieceTreeTextBuffer/pieceTreeTextBuffer';
 import { PieceTreeTextBufferBuilder } from 'vs/editor/common/model/pieceTreeTextBuffer/pieceTreeTextBufferBuilder';
 import { TextModel } from 'vs/editor/common/model/textModel';
-import { PLAINTEXT_LANGUAGE_ID } from 'vs/editor/common/modes/modesRegistry';
+import { PLAINTEXT_LANGUAGE_ID } from 'vs/editor/common/languages/modesRegistry';
 import { ILanguageService } from 'vs/editor/common/services/language';
 import { NotebookCellOutputTextModel } from 'vs/workbench/contrib/notebook/common/model/notebookCellOutputTextModel';
 import { CellInternalMetadataChangedEvent, CellKind, ICell, ICellOutput, IOutputDto, IOutputItemDto, NotebookCellCollapseState, NotebookCellInternalMetadata, NotebookCellMetadata, NotebookCellOutputsSplice, TransientOptions } from 'vs/workbench/contrib/notebook/common/notebookCommon';
@@ -62,7 +62,6 @@ export class NotebookCellTextModel extends Disposable implements ICell {
 	}
 
 	set internalMetadata(newInternalMetadata: NotebookCellInternalMetadata) {
-		const runStateChanged = this._internalMetadata.runState !== newInternalMetadata.runState;
 		const lastRunSuccessChanged = this._internalMetadata.lastRunSuccess !== newInternalMetadata.lastRunSuccess;
 		newInternalMetadata = {
 			...newInternalMetadata,
@@ -70,7 +69,7 @@ export class NotebookCellTextModel extends Disposable implements ICell {
 		};
 		this._internalMetadata = newInternalMetadata;
 		this._hash = null;
-		this._onDidChangeInternalMetadata.fire({ runStateChanged, lastRunSuccessChanged });
+		this._onDidChangeInternalMetadata.fire({ lastRunSuccessChanged });
 	}
 
 	get language() {
