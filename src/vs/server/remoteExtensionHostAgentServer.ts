@@ -925,10 +925,11 @@ function parseConnectionToken(args: ServerParsedArgs): { connectionToken: string
 
 	let connectionToken = args['connection-token'];
 	const connectionTokenFile = args['connection-token-file'];
+	const compatibility = args['compatibility'] === '1.63';
 
 	if (args['without-connection-token']) {
 		if (connectionToken || connectionTokenFile) {
-			console.warn(`Please do not use the argument '--connection-token' and 'connection-token-file' at the same time as '--without-connection-token'.`);
+			console.warn(`Please do not use the argument '--connection-token' or '--connection-token-file' at the same time as '--without-connection-token'.`);
 			process.exit(1);
 		}
 		return { connectionToken: 'without-connection-token' /* to be implemented @alexd */, connectionTokenIsMandatory: false };
@@ -956,12 +957,14 @@ function parseConnectionToken(args: ServerParsedArgs): { connectionToken: string
 		if (connectionToken !== undefined && !connectionTokenRegex.test(connectionToken)) {
 			console.warn(`The connection token '${connectionToken}' does not adhere to the characters 0-9, a-z, A-Z or -.`);
 			process.exit(1);
-		} else {
+		} else if (connectionToken === undefined) {
 			connectionToken = generateUuid();
 			console.log(`Connection token: ${connectionToken}`);
-			console.log(`Connection token or will made mandatory in the next release. To run without connection token, use '--without-connection-token'.`);
+			if (compatibility) {
+				console.log(`Connection token or will made mandatory in the next release. To run without connection token, use '--without-connection-token'.`);
+			}
 		}
-		return { connectionToken, connectionTokenIsMandatory: false };
+		return { connectionToken, connectionTokenIsMandatory: !compatibility };
 	}
 }
 
