@@ -561,9 +561,9 @@ abstract class AbstractExtensionGalleryService implements IExtensionGalleryServi
 	}
 
 	getExtensions(extensionInfos: ReadonlyArray<IExtensionInfo>, token: CancellationToken): Promise<IGalleryExtension[]>;
-	getExtensions(extensionInfos: ReadonlyArray<IExtensionInfo>, options: { targetPlatform: TargetPlatform, compatible?: boolean }, token: CancellationToken): Promise<IGalleryExtension[]>;
+	getExtensions(extensionInfos: ReadonlyArray<IExtensionInfo>, options: { targetPlatform: TargetPlatform, compatible?: boolean, queryAllVersions?: boolean }, token: CancellationToken): Promise<IGalleryExtension[]>;
 	async getExtensions(extensionInfos: ReadonlyArray<IExtensionInfo>, arg1: any, arg2?: any): Promise<IGalleryExtension[]> {
-		const options = CancellationToken.isCancellationToken(arg1) ? { targetPlatform: CURRENT_TARGET_PLATFORM } : arg1 as { targetPlatform: TargetPlatform, compatible?: boolean };
+		const options = CancellationToken.isCancellationToken(arg1) ? { targetPlatform: CURRENT_TARGET_PLATFORM } : arg1 as { targetPlatform: TargetPlatform, compatible?: boolean, queryAllVersions?: boolean };
 		const token = CancellationToken.isCancellationToken(arg1) ? arg1 : arg2 as CancellationToken;
 		const names: string[] = []; const ids: string[] = [], includePreRelease: (IExtensionIdentifier & { includePreRelease: boolean })[] = [], versions: (IExtensionIdentifier & { version: string })[] = [];
 		for (const extensionInfo of extensionInfos) {
@@ -572,9 +572,10 @@ abstract class AbstractExtensionGalleryService implements IExtensionGalleryServi
 			} else {
 				names.push(extensionInfo.id);
 			}
-			includePreRelease.push({ ...extensionInfo, includePreRelease: !!extensionInfo.preRelease });
+			// Set includePreRelease to true if version is set, because the version can be a pre-release version
+			includePreRelease.push({ id: extensionInfo.id, uuid: extensionInfo.uuid, includePreRelease: !!(extensionInfo.version || extensionInfo.preRelease) });
 			if (extensionInfo.version) {
-				versions.push({ ...extensionInfo, version: extensionInfo.version });
+				versions.push({ id: extensionInfo.id, uuid: extensionInfo.uuid, version: extensionInfo.version });
 			}
 		}
 
@@ -588,6 +589,9 @@ abstract class AbstractExtensionGalleryService implements IExtensionGalleryServi
 		}
 		if (names.length) {
 			query = query.withFilter(FilterType.ExtensionName, ...names);
+		}
+		if (options.queryAllVersions) {
+			query = query.withFlags(query.flags, Flags.IncludeVersions);
 		}
 
 		const { extensions } = await this.queryGalleryExtensions(query, { targetPlatform: options.targetPlatform, includePreRelease, versions, compatible: !!options.compatible }, token);
