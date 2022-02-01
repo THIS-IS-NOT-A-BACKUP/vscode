@@ -49,6 +49,7 @@ export const enum TerminalSettingId {
 	MacOptionClickForcesSelection = 'terminal.integrated.macOptionClickForcesSelection',
 	AltClickMovesCursor = 'terminal.integrated.altClickMovesCursor',
 	CopyOnSelection = 'terminal.integrated.copyOnSelection',
+	EnableMultiLinePasteWarning = 'terminal.integrated.enableMultiLinePasteWarning',
 	DrawBoldTextInBrightColors = 'terminal.integrated.drawBoldTextInBrightColors',
 	FontFamily = 'terminal.integrated.fontFamily',
 	FontSize = 'terminal.integrated.fontSize',
@@ -89,7 +90,6 @@ export const enum TerminalSettingId {
 	WordSeparators = 'terminal.integrated.wordSeparators',
 	EnableFileLinks = 'terminal.integrated.enableFileLinks',
 	UnicodeVersion = 'terminal.integrated.unicodeVersion',
-	ExperimentalLinkProvider = 'terminal.integrated.experimentalLinkProvider',
 	LocalEchoLatencyThreshold = 'terminal.integrated.localEchoLatencyThreshold',
 	LocalEchoEnabled = 'terminal.integrated.localEchoEnabled',
 	LocalEchoExcludePrograms = 'terminal.integrated.localEchoExcludePrograms',
@@ -379,9 +379,9 @@ export interface IShellLaunchConfig {
 	name?: string;
 
 	/**
-	 * An string to follow the name of the terminal with, indicating a special kind of terminal
+	 * A string to follow the name of the terminal with, indicating the type of terminal
 	 */
-	description?: string;
+	type?: 'Task' | 'Local';
 
 	/**
 	 * The shell executable (bash, cmd, etc.).
