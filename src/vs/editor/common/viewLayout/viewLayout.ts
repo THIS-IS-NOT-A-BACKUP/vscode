@@ -9,9 +9,8 @@ import { IScrollPosition, ScrollEvent, Scrollable, ScrollbarVisibility, INewScro
 import { ConfigurationChangedEvent, EditorOption } from 'vs/editor/common/config/editorOptions';
 import { ScrollType } from 'vs/editor/common/editorCommon';
 import { IEditorConfiguration } from 'vs/editor/common/config/editorConfiguration';
-import { LinesLayout, IEditorWhitespace, IWhitespaceChangeAccessor } from 'vs/editor/common/viewLayout/linesLayout';
-import { IPartialViewLinesViewportData } from 'vs/editor/common/viewLayout/viewLinesViewportData';
-import { IViewLayout, IViewWhitespaceViewportData, Viewport } from 'vs/editor/common/viewModel';
+import { LinesLayout } from 'vs/editor/common/viewLayout/linesLayout';
+import { IEditorWhitespace, IPartialViewLinesViewportData, IViewLayout, IViewWhitespaceViewportData, IWhitespaceChangeAccessor, Viewport } from 'vs/editor/common/viewModel';
 import { ContentSizeChangedEvent } from 'vs/editor/common/viewModelEventDispatcher';
 
 const SMOOTH_SCROLLING_TIME = 125;
@@ -343,7 +342,7 @@ export class ViewLayout extends Disposable implements IViewLayout {
 
 	// ---- view state
 
-	public saveState(): { scrollTop: number; scrollTopWithoutViewZones: number; scrollLeft: number; } {
+	public saveState(): { scrollTop: number; scrollTopWithoutViewZones: number; scrollLeft: number } {
 		const currentScrollPosition = this._scrollable.getFutureScrollPosition();
 		const scrollTop = currentScrollPosition.scrollTop;
 		const firstLineNumberInViewport = this._linesLayout.getLineNumberAtOrAfterVerticalOffset(scrollTop);

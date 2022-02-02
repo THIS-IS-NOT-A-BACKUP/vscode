@@ -427,7 +427,7 @@ class RenderData {
 			&& this.renderedLayout.endLineNumber === layout.endLineNumber;
 	}
 
-	_get(): { imageData: ImageData; rendLineNumberStart: number; lines: MinimapLine[]; } {
+	_get(): { imageData: ImageData; rendLineNumberStart: number; lines: MinimapLine[] } {
 		const tmp = this._renderedLines._get();
 		return {
 			imageData: this._imageData,
@@ -445,7 +445,7 @@ class RenderData {
 	public onLinesInserted(insertFromLineNumber: number, insertToLineNumber: number): void {
 		this._renderedLines.onLinesInserted(insertFromLineNumber, insertToLineNumber);
 	}
-	public onTokensChanged(ranges: { fromLineNumber: number; toLineNumber: number; }[]): boolean {
+	public onTokensChanged(ranges: { fromLineNumber: number; toLineNumber: number }[]): boolean {
 		return this._renderedLines.onTokensChanged(ranges);
 	}
 }
@@ -859,14 +859,13 @@ export class Minimap extends ViewPart implements IMinimapModel {
 		return this._actual.onScrollChanged();
 	}
 	public override onThemeChanged(e: viewEvents.ViewThemeChangedEvent): boolean {
-		this._context.viewModel.invalidateMinimapColorCache();
 		this._actual.onThemeChanged();
 		this._onOptionsMaybeChanged();
 		return true;
 	}
 	public override onTokensChanged(e: viewEvents.ViewTokensChangedEvent): boolean {
 		if (this._samplingState) {
-			const ranges: { fromLineNumber: number; toLineNumber: number; }[] = [];
+			const ranges: { fromLineNumber: number; toLineNumber: number }[] = [];
 			for (const range of e.ranges) {
 				const minimapLineRange = this._samplingState.modelLineRangeToMinimapLineRange(range.fromLineNumber, range.toLineNumber);
 				if (minimapLineRange) {
@@ -1341,7 +1340,7 @@ class InnerMinimap extends Disposable {
 		this._renderDecorations = true;
 		return true;
 	}
-	public onTokensChanged(ranges: { fromLineNumber: number; toLineNumber: number; }[]): boolean {
+	public onTokensChanged(ranges: { fromLineNumber: number; toLineNumber: number }[]): boolean {
 		if (this._lastRenderData) {
 			return this._lastRenderData.onTokensChanged(ranges);
 		}

@@ -11,9 +11,8 @@ import { Position } from 'vs/editor/common/core/position';
 import { RenderingContext, RestrictedRenderingContext } from 'vs/editor/browser/view/renderingContext';
 import { ViewContext } from 'vs/editor/common/viewModel/viewContext';
 import * as viewEvents from 'vs/editor/common/viewEvents';
-import { IViewWhitespaceViewportData } from 'vs/editor/common/viewModel';
+import { IEditorWhitespace, IViewWhitespaceViewportData, IWhitespaceChangeAccessor } from 'vs/editor/common/viewModel';
 import { EditorOption } from 'vs/editor/common/config/editorOptions';
-import { IWhitespaceChangeAccessor, IEditorWhitespace } from 'vs/editor/common/viewLayout/linesLayout';
 
 export interface IMyViewZone {
 	whitespaceId: string;
@@ -35,7 +34,7 @@ const invalidFunc = () => { throw new Error(`Invalid change accessor`); };
 
 export class ViewZones extends ViewPart {
 
-	private _zones: { [id: string]: IMyViewZone; };
+	private _zones: { [id: string]: IMyViewZone };
 	private _lineHeight: number;
 	private _contentWidth: number;
 	private _contentLeft: number;
@@ -360,7 +359,7 @@ export class ViewZones extends ViewPart {
 
 	public render(ctx: RestrictedRenderingContext): void {
 		const visibleWhitespaces = ctx.viewportData.whitespaceViewportData;
-		const visibleZones: { [id: string]: IViewWhitespaceViewportData; } = {};
+		const visibleZones: { [id: string]: IViewWhitespaceViewportData } = {};
 
 		let hasVisibleZone = false;
 		for (const visibleWhitespace of visibleWhitespaces) {
