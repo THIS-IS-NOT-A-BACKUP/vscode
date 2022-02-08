@@ -706,6 +706,7 @@ declare namespace monaco {
 		 */
 		static lift(range: undefined | null): null;
 		static lift(range: IRange): Range;
+		static lift(range: IRange | undefined | null): Range | null;
 		/**
 		 * Test if `obj` is an `IRange`.
 		 */
@@ -6902,7 +6903,6 @@ declare namespace monaco.languages {
 	}
 
 	export enum InlayHintKind {
-		Other = 0,
 		Type = 1,
 		Parameter = 2
 	}
@@ -6919,7 +6919,7 @@ declare namespace monaco.languages {
 		tooltip?: string | IMarkdownString;
 		command?: Command;
 		position: IPosition;
-		kind: InlayHintKind;
+		kind?: InlayHintKind;
 		paddingLeft?: boolean;
 		paddingRight?: boolean;
 	}

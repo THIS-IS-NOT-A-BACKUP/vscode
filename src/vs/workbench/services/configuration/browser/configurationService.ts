@@ -129,7 +129,7 @@ export class WorkspaceService extends Disposable implements IWorkbenchConfigurat
 			this.initRemoteUserConfigurationBarrier.open();
 		}
 
-		this.workspaceConfiguration = this._register(new WorkspaceConfiguration(configurationCache, fileService));
+		this.workspaceConfiguration = this._register(new WorkspaceConfiguration(configurationCache, fileService, uriIdentityService));
 		this._register(this.workspaceConfiguration.onDidUpdateConfiguration(fromCache => {
 			this.onWorkspaceConfigurationChanged(fromCache).then(() => {
 				this.workspace.initialized = this.workspaceConfiguration.initialized;
@@ -220,7 +220,7 @@ export class WorkspaceService extends Disposable implements IWorkbenchConfigurat
 
 		// Remove first (if any)
 		let currentWorkspaceFolders = this.getWorkspace().folders;
-		let newStoredFolders: IStoredWorkspaceFolder[] = currentWorkspaceFolders.map(f => f.raw).filter((folder, index): folder is IStoredWorkspaceFolder => {
+		let newStoredFolders: IStoredWorkspaceFolder[] = currentWorkspaceFolders.map(f => f.stored).filter((folder, index): folder is IStoredWorkspaceFolder => {
 			if (!isStoredWorkspaceFolder(folder)) {
 				return true; // keep entries which are unrelated
 			}
