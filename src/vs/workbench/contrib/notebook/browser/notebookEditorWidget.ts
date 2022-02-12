@@ -2540,6 +2540,17 @@ export class NotebookEditorWidget extends Disposable implements INotebookEditorD
 			return;
 		}
 
+		if (!this.viewModel) {
+			return;
+		}
+
+		const modelIndex = this.viewModel.getCellIndex(cell);
+		const foldedRanges = this.viewModel.getHiddenRanges();
+		const isVisible = !foldedRanges.some(range => modelIndex >= range.start && modelIndex < range.end);
+		if (!isVisible) {
+			return;
+		}
+
 		const cellTop = this._list.getAbsoluteTopOfElement(cell);
 		await this._webview.showMarkupPreview({
 			mime: cell.mime,
@@ -3069,6 +3080,17 @@ registerThemingParticipant((theme, collector) => {
 		--notebook-focused-cell-border-color: ${focusedCellBorderColor};
 		--notebook-inactive-focused-cell-border-color: ${inactiveFocusedBorderColor};
 		--notebook-selected-cell-border-color: ${selectedCellBorderColor};
+	}
+	`);
+
+	const cellStatusIconSuccessColor = theme.getColor(cellStatusIconSuccess);
+	const cellStatusIconErrorColor = theme.getColor(cellStatusIconError);
+	const cellStatusIconRunningColor = theme.getColor(cellStatusIconRunning);
+	collector.addRule(`
+	:root {
+		--notebook-cell-status-icon-success: ${cellStatusIconSuccessColor};
+		--notebook-cell-status-icon-error: ${cellStatusIconErrorColor};
+		--notebook-cell-status-icon-running: ${cellStatusIconRunningColor};
 	}
 	`);
 
