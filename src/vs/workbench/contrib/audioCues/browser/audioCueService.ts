@@ -62,6 +62,13 @@ export class AudioCueService extends Disposable implements IAudioCueService {
 		}
 	}
 
+	private readonly obsoleteAudioCuesEnabled = observableFromEvent(
+		Event.filter(this.configurationService.onDidChangeConfiguration, (e) =>
+			e.affectsConfiguration('audioCues.enabled')
+		),
+		() => this.configurationService.getValue<'on' | 'off' | 'auto'>('audioCues.enabled')
+	);
+
 	private readonly isEnabledCache = new Cache((cue: AudioCue) => {
 		const settingObservable = observableFromEvent(
 			Event.filter(this.configurationService.onDidChangeConfiguration, (e) =>
@@ -71,11 +78,21 @@ export class AudioCueService extends Disposable implements IAudioCueService {
 		);
 		return new LazyDerived(reader => {
 			const setting = settingObservable.read(reader);
-			if (setting === 'auto') {
-				return this.screenReaderAttached.read(reader);
-			} else if (setting === 'on') {
+			if (
+				setting === 'on' ||
+				(setting === 'auto' && this.screenReaderAttached.read(reader))
+			) {
 				return true;
 			}
+
+			const obsoleteSetting = this.obsoleteAudioCuesEnabled.read(reader);
+			if (
+				obsoleteSetting === 'on' ||
+				(obsoleteSetting === 'auto' && this.screenReaderAttached.read(reader))
+			) {
+				return true;
+			}
+
 			return false;
 		}, 'audio cue enabled');
 	});
@@ -137,39 +154,39 @@ export class AudioCue {
 	}
 
 	public static readonly error = AudioCue.register({
-		name: localize('audioCues.lineHasError.name', 'Line has Error'),
+		name: localize('audioCues.lineHasError.name', 'Error on Line'),
 		sound: Sound.error,
 		settingsKey: 'audioCues.lineHasError',
 	});
 	public static readonly warning = AudioCue.register({
-		name: localize('audioCues.lineHasWarning.name', 'Line has Warning'),
+		name: localize('audioCues.lineHasWarning.name', 'Warning on Line'),
 		sound: Sound.error,
 		settingsKey: 'audioCues.lineHasWarning',
 	});
 	public static readonly foldedArea = AudioCue.register({
-		name: localize('audioCues.lineHasFoldedArea.name', 'Line has Folded Area'),
+		name: localize('audioCues.lineHasFoldedArea.name', 'Folded Area on Line'),
 		sound: Sound.foldedArea,
 		settingsKey: 'audioCues.lineHasFoldedArea',
 	});
 	public static readonly break = AudioCue.register({
-		name: localize('audioCues.lineHasBreakpoint.name', 'Line has Breakpoint'),
+		name: localize('audioCues.lineHasBreakpoint.name', 'Breakpoint on Line'),
 		sound: Sound.break,
 		settingsKey: 'audioCues.lineHasBreakpoint',
 	});
 	public static readonly inlineSuggestion = AudioCue.register({
-		name: localize('audioCues.lineHasInlineSuggestion.name', 'Line has Inline Suggestion Available'),
+		name: localize('audioCues.lineHasInlineSuggestion.name', 'Inline Suggestion on Line'),
 		sound: Sound.quickFixes,
 		settingsKey: 'audioCues.lineHasInlineSuggestion',
 	});
 
 	public static readonly debuggerStoppedOnBreakpoint = AudioCue.register({
-		name: 'Debugger Stopped On Breakpoint',
+		name: localize('audioCues.debuggerStoppedOnBreakpoint.name', 'Debugger Stopped on Breakpoint'),
 		sound: Sound.break,
 		settingsKey: 'audioCues.debuggerStoppedOnBreakpoint',
 	});
 
 	public static readonly noInlayHints = AudioCue.register({
-		name: localize('audioCues.noInlayHints', 'No Inlay Hints available for the current line'),
+		name: localize('audioCues.noInlayHints', 'No Inlay Hints on Line'),
 		sound: Sound.error,
 		settingsKey: 'audioCues.noInlayHints'
 	});

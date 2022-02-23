@@ -96,6 +96,7 @@ export class CommandDetectionCapability implements ICommandDetectionCapability {
 	handleCommandStart(): void {
 		this._currentCommand.commandStartX = this._terminal.buffer.active.cursorX;
 		this._currentCommand.commandStartMarker = this._terminal.registerMarker(0);
+		this._onCommandStarted.fire({ marker: this._currentCommand.commandStartMarker } as ITerminalCommand);
 
 		// On Windows track all cursor movements after the command start sequence
 		if (this._isWindowsPty) {
@@ -109,7 +110,6 @@ export class CommandDetectionCapability implements ICommandDetectionCapability {
 				}
 			});
 		}
-		this._onCommandStarted.fire({ marker: this._currentCommand.commandStartMarker! } as ITerminalCommand);
 		this._logService.debug('CommandDetectionCapability#handleCommandStart', this._currentCommand.commandStartX, this._currentCommand.commandStartMarker?.line);
 	}
 
@@ -169,6 +169,18 @@ export class CommandDetectionCapability implements ICommandDetectionCapability {
 		const command = this._currentCommand.command;
 		this._logService.debug('CommandDetectionCapability#handleCommandFinished', this._terminal.buffer.active.cursorX, this._currentCommand.commandFinishedMarker?.line, this._currentCommand.command, this._currentCommand);
 		this._exitCode = exitCode;
+
+		// HACK: Handle a special case on some versions of bash where identical commands get merged
+		// in the output of `history`, this detects that case and sets the exit code to the the last
+		// command's exit code. This covered the majority of cases but will fail if the same command
+		// runs with a different exit code, that will need a more robust fix where we send the
+		// command ID and exit code over to the capability to adjust there.
+		if (this._exitCode === undefined) {
+			const lastCommand = this.commands.length > 0 ? this.commands[this.commands.length - 1] : undefined;
+			if (command && command.length > 0 && lastCommand?.command === command) {
+				this._exitCode = lastCommand.exitCode;
+			}
+		}
 
 		if (this._currentCommand.commandStartMarker === undefined || !this._terminal.buffer.active) {
 			return;
