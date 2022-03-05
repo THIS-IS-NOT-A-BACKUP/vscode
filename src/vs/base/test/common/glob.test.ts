@@ -725,7 +725,7 @@ suite('Glob', () => {
 		assert.strictEqual(glob.match(expr, 'foo.as'), null);
 	});
 
-	test.skip('expression with non-trivia glob (issue 142781)', function () {
+	test.skip('expression with non-trivia glob (issue 144458)', function () {
 		let pattern = '**/p*';
 
 		assert.strictEqual(glob.match(pattern, 'foo/barp'), false);
@@ -748,12 +748,6 @@ suite('Glob', () => {
 		assert.strictEqual(glob.match(pattern, '/foo/pbar'), true);
 		assert.strictEqual(glob.match(pattern, 'foo/bar/pa'), true);
 		assert.strictEqual(glob.match(pattern, '/p'), true);
-
-		pattern = 'some/**';
-
-		assert.strictEqual(glob.match(pattern, 'something/more'), false);
-		assert.strictEqual(glob.match(pattern, 'some'), false);
-		assert.strictEqual(glob.match(pattern, 'othersome/foo'), false);
 	});
 
 	test('expression with empty glob', function () {
