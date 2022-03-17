@@ -7,12 +7,28 @@ import type * as vscode from 'vscode';
 import assert = require('assert');
 import { URI } from 'vs/base/common/uri';
 import { mock } from 'vs/base/test/common/mock';
-import { IEditorTabDto, MainThreadEditorTabsShape, TabKind } from 'vs/workbench/api/common/extHost.protocol';
+import { IEditorTabDto, MainThreadEditorTabsShape, TabInputKind, TabKind } from 'vs/workbench/api/common/extHost.protocol';
 import { ExtHostEditorTabs } from 'vs/workbench/api/common/extHostEditorTabs';
 import { SingleProxyRPCProtocol } from 'vs/workbench/api/test/common/testRPCProtocol';
 
 suite('ExtHostEditorTabs', function () {
 
+	const defaultTabDto: IEditorTabDto = {
+		id: 'uniquestring',
+		input: { kind: TabInputKind.UnknownInput },
+		resource: URI.parse('file://abc/def.txt'),
+		isActive: true,
+		isDirty: true,
+		isPinned: true,
+		label: 'label1',
+		viewColumn: 0,
+		additionalResourcesAndViewTypes: [],
+		kind: TabKind.Singular
+	};
+
+	function createTabDto(dto?: Partial<IEditorTabDto>): IEditorTabDto {
+		return { ...defaultTabDto, ...dto };
+	}
 
 	test('empty', function () {
 
@@ -34,7 +50,7 @@ suite('ExtHostEditorTabs', function () {
 			})
 		);
 
-		const tab: IEditorTabDto = {
+		const tab: IEditorTabDto = createTabDto({
 			id: 'uniquestring',
 			isActive: true,
 			isDirty: true,
@@ -43,14 +59,13 @@ suite('ExtHostEditorTabs', function () {
 			viewColumn: 0,
 			additionalResourcesAndViewTypes: [],
 			kind: TabKind.Singular
-		};
+		});
 
 		extHostEditorTabs.$acceptEditorTabModel([{
 			isActive: true,
 			viewColumn: 0,
 			groupId: 12,
-			tabs: [tab],
-			activeTab: { ...tab }
+			tabs: [tab]
 		}]);
 		assert.strictEqual(extHostEditorTabs.tabGroups.groups.length, 1);
 		const [first] = extHostEditorTabs.tabGroups.groups;
@@ -62,8 +77,7 @@ suite('ExtHostEditorTabs', function () {
 				isActive: true,
 				viewColumn: 0,
 				groupId: 12,
-				tabs: [tab],
-				activeTab: tab
+				tabs: [tab]
 			}]);
 			assert.strictEqual(extHostEditorTabs.tabGroups.groups.length, 1);
 			const [first] = extHostEditorTabs.tabGroups.groups;
@@ -83,8 +97,7 @@ suite('ExtHostEditorTabs', function () {
 			isActive: true,
 			viewColumn: 0,
 			groupId: 12,
-			tabs: [],
-			activeTab: undefined
+			tabs: []
 		}]);
 		assert.strictEqual(extHostEditorTabs.tabGroups.groups.length, 1);
 		const [first] = extHostEditorTabs.tabGroups.groups;
@@ -110,8 +123,7 @@ suite('ExtHostEditorTabs', function () {
 			isActive: true,
 			viewColumn: 0,
 			groupId: 12,
-			tabs: [],
-			activeTab: undefined
+			tabs: []
 		}]);
 		assert.ok(extHostEditorTabs.tabGroups.activeTabGroup);
 		const activeTabGroup: vscode.TabGroup = extHostEditorTabs.tabGroups.activeTabGroup;
@@ -126,7 +138,7 @@ suite('ExtHostEditorTabs', function () {
 				// override/implement $moveTab or $closeTab
 			})
 		);
-		const tab: IEditorTabDto = {
+		const tab = createTabDto({
 			id: 'uniquestring',
 			isActive: true,
 			isDirty: true,
@@ -137,14 +149,13 @@ suite('ExtHostEditorTabs', function () {
 			viewColumn: 0,
 			additionalResourcesAndViewTypes: [],
 			kind: TabKind.Singular
-		};
+		});
 
 		extHostEditorTabs.$acceptEditorTabModel([{
 			isActive: true,
 			viewColumn: 0,
 			groupId: 12,
-			tabs: [tab],
-			activeTab: { ...tab }
+			tabs: [tab]
 		}]);
 		assert.strictEqual(extHostEditorTabs.tabGroups.groups.length, 1);
 		const [first] = extHostEditorTabs.tabGroups.groups;
@@ -216,25 +227,14 @@ suite('ExtHostEditorTabs', function () {
 		assert.strictEqual(activeTabGroup, activeTabGroupFromEvent);
 	});
 
-	test.skip('Ensure reference stability', function () {
+	test('Ensure reference stability', function () {
 
 		const extHostEditorTabs = new ExtHostEditorTabs(
 			SingleProxyRPCProtocol(new class extends mock<MainThreadEditorTabsShape>() {
 				// override/implement $moveTab or $closeTab
 			})
 		);
-		const tabDto: IEditorTabDto = {
-			id: 'uniquestring',
-			isActive: true,
-			isDirty: true,
-			isPinned: true,
-			label: 'label1',
-			resource: URI.parse('file://abc/def.txt'),
-			editorId: 'default',
-			viewColumn: 0,
-			additionalResourcesAndViewTypes: [],
-			kind: TabKind.Singular
-		};
+		const tabDto = createTabDto();
 
 		// single dirty tab
 
@@ -242,8 +242,7 @@ suite('ExtHostEditorTabs', function () {
 			isActive: true,
 			viewColumn: 0,
 			groupId: 12,
-			tabs: [tabDto],
-			activeTab: undefined // NOT needed
+			tabs: [tabDto]
 		}]);
 		let all = extHostEditorTabs.tabGroups.groups.map(group => group.tabs).flat();
 		assert.strictEqual(all.length, 1);
@@ -255,13 +254,8 @@ suite('ExtHostEditorTabs', function () {
 		// NOT DIRTY anymore
 
 		const tabDto2: IEditorTabDto = { ...tabDto, isDirty: false };
-		extHostEditorTabs.$acceptEditorTabModel([{
-			isActive: true,
-			viewColumn: 0,
-			groupId: 12,
-			tabs: [tabDto2],
-			activeTab: undefined // NOT needed
-		}]);
+		// Accept a simple update
+		extHostEditorTabs.$acceptTabUpdate(12, tabDto2);
 
 		all = extHostEditorTabs.tabGroups.groups.map(group => group.tabs).flat();
 		assert.strictEqual(all.length, 1);
@@ -270,5 +264,129 @@ suite('ExtHostEditorTabs', function () {
 		assert.strictEqual(apiTab2.isDirty, false);
 
 		assert.strictEqual(apiTab1 === apiTab2, true);
+	});
+
+	test('Tab.isActive working', function () {
+
+		const extHostEditorTabs = new ExtHostEditorTabs(
+			SingleProxyRPCProtocol(new class extends mock<MainThreadEditorTabsShape>() {
+				// override/implement $moveTab or $closeTab
+			})
+		);
+		const tabDtoAAA = createTabDto({
+			id: 'AAA',
+			isActive: true,
+			isDirty: true,
+			isPinned: true,
+			label: 'label1',
+			resource: URI.parse('file://abc/AAA.txt'),
+			editorId: 'default',
+			viewColumn: 0,
+			additionalResourcesAndViewTypes: [],
+			kind: TabKind.Singular
+		});
+
+		const tabDtoBBB = createTabDto({
+			id: 'BBB',
+			isActive: false,
+			isDirty: true,
+			isPinned: true,
+			label: 'label1',
+			resource: URI.parse('file://abc/BBB.txt'),
+			editorId: 'default',
+			viewColumn: 0,
+			additionalResourcesAndViewTypes: [],
+			kind: TabKind.Singular
+		});
+
+		// single dirty tab
+
+		extHostEditorTabs.$acceptEditorTabModel([{
+			isActive: true,
+			viewColumn: 0,
+			groupId: 12,
+			tabs: [tabDtoAAA, tabDtoBBB]
+		}]);
+
+		let all = extHostEditorTabs.tabGroups.groups.map(group => group.tabs).flat();
+		assert.strictEqual(all.length, 2);
+
+		const activeTab1 = extHostEditorTabs.tabGroups.activeTabGroup?.activeTab;
+		assert.strictEqual(activeTab1?.resource?.toString(), URI.revive(tabDtoAAA.resource)?.toString());
+		assert.strictEqual(activeTab1?.isActive, true);
+
+		extHostEditorTabs.$acceptTabUpdate(12, { ...tabDtoBBB, isActive: true }); /// BBB is now active
+
+		const activeTab2 = extHostEditorTabs.tabGroups.activeTabGroup?.activeTab;
+		assert.strictEqual(activeTab2?.resource?.toString(), URI.revive(tabDtoBBB.resource)?.toString());
+		assert.strictEqual(activeTab2?.isActive, true);
+		assert.strictEqual(activeTab1?.isActive, false);
+	});
+
+	test('vscode.window.tagGroups is immutable', function () {
+
+		const extHostEditorTabs = new ExtHostEditorTabs(
+			SingleProxyRPCProtocol(new class extends mock<MainThreadEditorTabsShape>() {
+				// override/implement $moveTab or $closeTab
+			})
+		);
+
+		assert.throws(() => {
+			// @ts-expect-error write to readonly prop
+			extHostEditorTabs.tabGroups.activeTabGroup = undefined;
+		});
+		assert.throws(() => {
+			// @ts-expect-error write to readonly prop
+			extHostEditorTabs.tabGroups.groups.length = 0;
+		});
+		assert.throws(() => {
+			// @ts-expect-error write to readonly prop
+			extHostEditorTabs.tabGroups.onDidChangeActiveTabGroup = undefined;
+		});
+		assert.throws(() => {
+			// @ts-expect-error write to readonly prop
+			extHostEditorTabs.tabGroups.onDidChangeTabGroup = undefined;
+		});
+	});
+
+	test('Ensure close is called with all tab ids', function () {
+		let closedTabIds: string[][] = [];
+		const extHostEditorTabs = new ExtHostEditorTabs(
+			SingleProxyRPCProtocol(new class extends mock<MainThreadEditorTabsShape>() {
+				// override/implement $moveTab or $closeTab
+				override async $closeTab(tabIds: string[], preserveFocus?: boolean) {
+					closedTabIds.push(tabIds);
+				}
+			})
+		);
+		const tab: IEditorTabDto = createTabDto({
+			id: 'uniquestring',
+			isActive: true,
+			isDirty: true,
+			isPinned: true,
+			label: 'label1',
+			resource: URI.parse('file://abc/def.txt'),
+			editorId: 'default',
+			viewColumn: 0,
+			additionalResourcesAndViewTypes: [],
+			kind: TabKind.Singular
+		});
+
+		extHostEditorTabs.$acceptEditorTabModel([{
+			isActive: true,
+			viewColumn: 0,
+			groupId: 12,
+			tabs: [tab]
+		}]);
+		assert.strictEqual(extHostEditorTabs.tabGroups.groups.length, 1);
+		const activeTab = extHostEditorTabs.tabGroups.activeTabGroup?.activeTab;
+		assert.ok(activeTab);
+		extHostEditorTabs.tabGroups.close(activeTab, false);
+		assert.strictEqual(closedTabIds.length, 1);
+		assert.deepStrictEqual(closedTabIds[0], ['uniquestring']);
+		// Close with array
+		extHostEditorTabs.tabGroups.close([activeTab], false);
+		assert.strictEqual(closedTabIds.length, 2);
+		assert.deepStrictEqual(closedTabIds[1], ['uniquestring']);
 	});
 });

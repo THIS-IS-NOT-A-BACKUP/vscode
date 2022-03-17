@@ -121,6 +121,7 @@ export type CommentThreadChanges = Partial<{
 	comments: CommentChanges[];
 	collapseState: languages.CommentThreadCollapsibleState;
 	canReply: boolean;
+	state: languages.CommentThreadState;
 }>;
 
 export interface MainThreadCommentsShape extends IDisposable {
@@ -609,10 +610,55 @@ export interface ExtHostEditorInsetsShape {
 
 //#region --- tabs model
 
+export const enum TabInputKind {
+	UnknownInput,
+	TextInput,
+	TextDiffInput,
+	NotebookInput,
+	NotebookDiffInput,
+	CustomEditorInput
+}
+
+export interface UnknownInputDto {
+	kind: TabInputKind.UnknownInput;
+}
+
+export interface TextInputDto {
+	kind: TabInputKind.TextInput;
+	uri: UriComponents;
+}
+
+export interface TextDiffInputDto {
+	kind: TabInputKind.TextDiffInput;
+	original: UriComponents;
+	modified: UriComponents;
+}
+
+export interface NotebookInputDto {
+	kind: TabInputKind.NotebookInput;
+	notebookType: string;
+	uri: UriComponents;
+}
+
+export interface NotebookDiffInputDto {
+	kind: TabInputKind.NotebookDiffInput;
+	notebookType: string;
+	original: UriComponents;
+	modified: UriComponents;
+}
+
+export interface CustomInputDto {
+	kind: TabInputKind.CustomEditorInput;
+	viewType: string;
+	uri: UriComponents;
+}
+
+export type AnyInputDto = UnknownInputDto | TextInputDto | TextDiffInputDto | NotebookInputDto | NotebookDiffInputDto | CustomInputDto;
+
 export interface MainThreadEditorTabsShape extends IDisposable {
 	// manage tabs: move, close, rearrange etc
-	$moveTab(tab: IEditorTabDto, index: number, viewColumn: EditorGroupColumn): void;
-	$closeTab(tab: IEditorTabDto, preserveFocus: boolean): Promise<void>;
+	$moveTab(tabId: string, index: number, viewColumn: EditorGroupColumn): void;
+	$closeTab(tabIds: string[], preserveFocus?: boolean): Promise<void>;
 }
 
 export interface IEditorTabGroupDto {
@@ -620,7 +666,6 @@ export interface IEditorTabGroupDto {
 	viewColumn: EditorGroupColumn;
 	// Decided not to go with simple index here due to opening and closing causing index shifts
 	// This allows us to patch the model without having to do full rebuilds
-	activeTab: IEditorTabDto | undefined;
 	tabs: IEditorTabDto[];
 	groupId: number;
 }
@@ -635,6 +680,7 @@ export interface IEditorTabDto {
 	id: string;
 	viewColumn: EditorGroupColumn;
 	label: string;
+	input: AnyInputDto;
 	resource?: UriComponents;
 	editorId?: string;
 	isActive: boolean;
@@ -645,7 +691,12 @@ export interface IEditorTabDto {
 }
 
 export interface IExtHostEditorTabsShape {
+	// Accepts a whole new model
 	$acceptEditorTabModel(tabGroups: IEditorTabGroupDto[]): void;
+	// Only when group property changes (not the tabs inside)
+	$acceptTabGroupUpdate(groupDto: IEditorTabGroupDto): void;
+	// Only when tab property changes
+	$acceptTabUpdate(groupId: number, tabDto: IEditorTabDto): void;
 }
 
 //#endregion
