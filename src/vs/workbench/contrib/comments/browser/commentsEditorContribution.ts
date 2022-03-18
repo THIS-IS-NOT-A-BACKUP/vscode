@@ -31,7 +31,7 @@ import { registerThemingParticipant } from 'vs/platform/theme/common/themeServic
 import { STATUS_BAR_ITEM_ACTIVE_BACKGROUND, STATUS_BAR_ITEM_HOVER_BACKGROUND } from 'vs/workbench/common/theme';
 import { CommentGlyphWidget, overviewRulerCommentingRangeForeground } from 'vs/workbench/contrib/comments/browser/commentGlyphWidget';
 import { ICommentInfo, ICommentService } from 'vs/workbench/contrib/comments/browser/commentService';
-import { COMMENTEDITOR_DECORATION_KEY, isMouseUpEventMatchMouseDown, parseMouseDownInfoFromEvent, ReviewZoneWidget } from 'vs/workbench/contrib/comments/browser/commentThreadWidget';
+import { isMouseUpEventMatchMouseDown, parseMouseDownInfoFromEvent, ReviewZoneWidget } from 'vs/workbench/contrib/comments/browser/commentThreadZoneWidget';
 import { ctxCommentEditorFocused, SimpleCommentEditor } from 'vs/workbench/contrib/comments/browser/simpleCommentEditor';
 import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
 import { EmbeddedCodeEditorWidget } from 'vs/editor/browser/widget/embeddedCodeEditorWidget';
@@ -40,10 +40,12 @@ import { IViewsService } from 'vs/workbench/common/views';
 import { COMMENTS_VIEW_ID } from 'vs/workbench/contrib/comments/browser/commentsTreeViewer';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
 import { COMMENTS_SECTION, ICommentsConfiguration } from 'vs/workbench/contrib/comments/common/commentsConfiguration';
+import { COMMENTEDITOR_DECORATION_KEY } from 'vs/workbench/contrib/comments/browser/commentReply';
 import { Emitter } from 'vs/base/common/event';
 import { MenuId, MenuRegistry } from 'vs/platform/actions/common/actions';
 import { IContextKey, IContextKeyService, RawContextKey } from 'vs/platform/contextkey/common/contextkey';
 import { Position } from 'vs/editor/common/core/position';
+import { EditorContextKeys } from 'vs/editor/common/editorContextKeys';
 
 export const ID = 'editor.contrib.review';
 
@@ -323,7 +325,7 @@ export class CommentController implements IEditorContribution {
 			const editorURI = this.editor && this.editor.hasModel() && this.editor.getModel().uri;
 
 			if (editorURI) {
-				return this.commentService.getComments(editorURI);
+				return this.commentService.getDocumentComments(editorURI);
 			}
 
 			return Promise.resolve([]);
@@ -346,7 +348,7 @@ export class CommentController implements IEditorContribution {
 				const editorURI = this.editor && this.editor.hasModel() && this.editor.getModel().uri;
 
 				if (editorURI) {
-					return this.commentService.getComments(editorURI);
+					return this.commentService.getDocumentComments(editorURI);
 				}
 
 				return Promise.resolve([]);
@@ -382,12 +384,21 @@ export class CommentController implements IEditorContribution {
 	}
 
 	public nextCommentThread(): void {
+		this._findNearestCommentThread();
+	}
+
+	private _findNearestCommentThread(reverse?: boolean): void {
 		if (!this._commentWidgets.length || !this.editor.hasModel()) {
 			return;
 		}
 
 		const after = this.editor.getSelection().getEndPosition();
 		const sortedWidgets = this._commentWidgets.sort((a, b) => {
+			if (reverse) {
+				const temp = a;
+				a = b;
+				b = temp;
+			}
 			if (a.commentThread.range.startLineNumber < b.commentThread.range.startLineNumber) {
 				return -1;
 			}
@@ -408,27 +419,36 @@ export class CommentController implements IEditorContribution {
 		});
 
 		let idx = findFirstInSorted(sortedWidgets, widget => {
-			if (widget.commentThread.range.startLineNumber > after.lineNumber) {
+			let lineValueOne = reverse ? after.lineNumber : widget.commentThread.range.startLineNumber;
+			let lineValueTwo = reverse ? widget.commentThread.range.startLineNumber : after.lineNumber;
+			let columnValueOne = reverse ? after.column : widget.commentThread.range.startColumn;
+			let columnValueTwo = reverse ? widget.commentThread.range.startColumn : after.column;
+			if (lineValueOne > lineValueTwo) {
 				return true;
 			}
 
-			if (widget.commentThread.range.startLineNumber < after.lineNumber) {
+			if (lineValueOne < lineValueTwo) {
 				return false;
 			}
 
-			if (widget.commentThread.range.startColumn > after.column) {
+			if (columnValueOne > columnValueTwo) {
 				return true;
 			}
 			return false;
 		});
 
+		let nextWidget: ReviewZoneWidget;
 		if (idx === this._commentWidgets.length) {
-			this._commentWidgets[0].reveal();
-			this.editor.setSelection(this._commentWidgets[0].commentThread.range);
+			nextWidget = this._commentWidgets[0];
 		} else {
-			sortedWidgets[idx].reveal();
-			this.editor.setSelection(sortedWidgets[idx].commentThread.range);
+			nextWidget = sortedWidgets[idx];
 		}
+		this.editor.setSelection(nextWidget.commentThread.range);
+		nextWidget.reveal(undefined, true);
+	}
+
+	public previousCommentThread(): void {
+		this._findNearestCommentThread(true);
 	}
 
 	public dispose(): void {
@@ -495,28 +515,32 @@ export class CommentController implements IEditorContribution {
 			});
 
 			changed.forEach(thread => {
-				let matchedZones = this._commentWidgets.filter(zoneWidget => zoneWidget.owner === e.owner && zoneWidget.commentThread.threadId === thread.threadId);
-				if (matchedZones.length) {
-					let matchedZone = matchedZones[0];
-					matchedZone.update(thread);
+				if (thread.isDocumentCommentThread()) {
+					let matchedZones = this._commentWidgets.filter(zoneWidget => zoneWidget.owner === e.owner && zoneWidget.commentThread.threadId === thread.threadId);
+					if (matchedZones.length) {
+						let matchedZone = matchedZones[0];
+						matchedZone.update(thread);
+					}
 				}
 			});
 			added.forEach(thread => {
-				let matchedZones = this._commentWidgets.filter(zoneWidget => zoneWidget.owner === e.owner && zoneWidget.commentThread.threadId === thread.threadId);
-				if (matchedZones.length) {
-					return;
+				if (thread.isDocumentCommentThread()) {
+					let matchedZones = this._commentWidgets.filter(zoneWidget => zoneWidget.owner === e.owner && zoneWidget.commentThread.threadId === thread.threadId);
+					if (matchedZones.length) {
+						return;
+					}
+
+					let matchedNewCommentThreadZones = this._commentWidgets.filter(zoneWidget => zoneWidget.owner === e.owner && (zoneWidget.commentThread as any).commentThreadHandle === -1 && Range.equalsRange(zoneWidget.commentThread.range, thread.range));
+
+					if (matchedNewCommentThreadZones.length) {
+						matchedNewCommentThreadZones[0].update(thread);
+						return;
+					}
+
+					const pendingCommentText = this._pendingCommentCache[e.owner] && this._pendingCommentCache[e.owner][thread.threadId!];
+					this.displayCommentThread(e.owner, thread, pendingCommentText);
+					this._commentInfos.filter(info => info.owner === e.owner)[0].threads.push(thread);
 				}
-
-				let matchedNewCommentThreadZones = this._commentWidgets.filter(zoneWidget => zoneWidget.owner === e.owner && (zoneWidget.commentThread as any).commentThreadHandle === -1 && Range.equalsRange(zoneWidget.commentThread.range, thread.range));
-
-				if (matchedNewCommentThreadZones.length) {
-					matchedNewCommentThreadZones[0].update(thread);
-					return;
-				}
-
-				const pendingCommentText = this._pendingCommentCache[e.owner] && this._pendingCommentCache[e.owner][thread.threadId!];
-				this.displayCommentThread(e.owner, thread, pendingCommentText);
-				this._commentInfos.filter(info => info.owner === e.owner)[0].threads.push(thread);
 			});
 
 		}));
@@ -764,13 +788,17 @@ export class CommentController implements IEditorContribution {
 }
 
 export class NextCommentThreadAction extends EditorAction {
-
 	constructor() {
 		super({
 			id: 'editor.action.nextCommentThreadAction',
 			label: nls.localize('nextCommentThreadAction', "Go to Next Comment Thread"),
 			alias: 'Go to Next Comment Thread',
 			precondition: undefined,
+			kbOpts: {
+				kbExpr: EditorContextKeys.focus,
+				primary: KeyMod.Alt | KeyCode.F9,
+				weight: KeybindingWeight.EditorContrib
+			}
 		});
 	}
 
@@ -782,9 +810,33 @@ export class NextCommentThreadAction extends EditorAction {
 	}
 }
 
+export class PreviousCommentThreadAction extends EditorAction {
+	constructor() {
+		super({
+			id: 'editor.action.previousCommentThreadAction',
+			label: nls.localize('previousCommentThreadAction', "Go to Previous Comment Thread"),
+			alias: 'Go to Previous Comment Thread',
+			precondition: undefined,
+			kbOpts: {
+				kbExpr: EditorContextKeys.focus,
+				primary: KeyMod.Shift | KeyMod.Alt | KeyCode.F9,
+				weight: KeybindingWeight.EditorContrib
+			}
+		});
+	}
+
+	public run(accessor: ServicesAccessor, editor: ICodeEditor): void {
+		let controller = CommentController.get(editor);
+		if (controller) {
+			controller.previousCommentThread();
+		}
+	}
+}
+
 
 registerEditorContribution(ID, CommentController);
 registerEditorAction(NextCommentThreadAction);
+registerEditorAction(PreviousCommentThreadAction);
 
 const ADD_COMMENT_COMMAND = 'workbench.action.addComment';
 CommandsRegistry.registerCommand({
@@ -872,7 +924,7 @@ registerThemingParticipant((theme, collector) => {
 	const monacoEditorBackground = theme.getColor(peekViewTitleBackground);
 	if (monacoEditorBackground) {
 		collector.addRule(
-			`.monaco-editor .review-widget .body .comment-form .review-thread-reply-button {` +
+			`.review-widget .body .comment-form .review-thread-reply-button {` +
 			`	background-color: ${monacoEditorBackground}` +
 			`}`
 		);
@@ -881,10 +933,10 @@ registerThemingParticipant((theme, collector) => {
 	const monacoEditorForeground = theme.getColor(editorForeground);
 	if (monacoEditorForeground) {
 		collector.addRule(
-			`.monaco-editor .review-widget .body .monaco-editor {` +
+			`.review-widget .body .monaco-editor {` +
 			`	color: ${monacoEditorForeground}` +
 			`}` +
-			`.monaco-editor .review-widget .body .comment-form .review-thread-reply-button {` +
+			`.review-widget .body .comment-form .review-thread-reply-button {` +
 			`	color: ${monacoEditorForeground};` +
 			`	font-size: inherit` +
 			`}`
@@ -899,7 +951,7 @@ registerThemingParticipant((theme, collector) => {
 			`	0% { background: ${selectionBackground}; }` +
 			`	100% { background: transparent; }` +
 			`}` +
-			`.monaco-editor .review-widget .body .review-comment.focus {` +
+			`.review-widget .body .review-comment.focus {` +
 			`	animation: monaco-review-widget-focus 3s ease 0s;` +
 			`}`
 		);
@@ -925,11 +977,11 @@ registerThemingParticipant((theme, collector) => {
 
 	const statusBarItemHoverBackground = theme.getColor(STATUS_BAR_ITEM_HOVER_BACKGROUND);
 	if (statusBarItemHoverBackground) {
-		collector.addRule(`.monaco-editor .review-widget .body .review-comment .review-comment-contents .comment-reactions .action-item a.action-label.active:hover { background-color: ${statusBarItemHoverBackground};}`);
+		collector.addRule(`.review-widget .body .review-comment .review-comment-contents .comment-reactions .action-item a.action-label.active:hover { background-color: ${statusBarItemHoverBackground};}`);
 	}
 
 	const statusBarItemActiveBackground = theme.getColor(STATUS_BAR_ITEM_ACTIVE_BACKGROUND);
 	if (statusBarItemActiveBackground) {
-		collector.addRule(`.monaco-editor .review-widget .body .review-comment .review-comment-contents .comment-reactions .action-item a.action-label:active { background-color: ${statusBarItemActiveBackground}; border: 1px solid transparent;}`);
+		collector.addRule(`.review-widget .body .review-comment .review-comment-contents .comment-reactions .action-item a.action-label:active { background-color: ${statusBarItemActiveBackground}; border: 1px solid transparent;}`);
 	}
 });

@@ -114,8 +114,8 @@ export interface CommentChanges {
 	readonly timestamp?: string;
 }
 
-export type CommentThreadChanges = Partial<{
-	range: IRange;
+export type CommentThreadChanges<T = IRange> = Partial<{
+	range: T;
 	label: string;
 	contextValue: string | null;
 	comments: CommentChanges[];
@@ -128,11 +128,11 @@ export interface MainThreadCommentsShape extends IDisposable {
 	$registerCommentController(handle: number, id: string, label: string): void;
 	$unregisterCommentController(handle: number): void;
 	$updateCommentControllerFeatures(handle: number, features: CommentProviderFeatures): void;
-	$createCommentThread(handle: number, commentThreadHandle: number, threadId: string, resource: UriComponents, range: IRange, extensionId: ExtensionIdentifier): languages.CommentThread | undefined;
+	$createCommentThread(handle: number, commentThreadHandle: number, threadId: string, resource: UriComponents, range: IRange | ICellRange, extensionId: ExtensionIdentifier): languages.CommentThread<IRange | ICellRange> | undefined;
 	$updateCommentThread(handle: number, commentThreadHandle: number, threadId: string, resource: UriComponents, changes: CommentThreadChanges): void;
 	$deleteCommentThread(handle: number, commentThreadHandle: number): void;
 	$updateCommentingRanges(handle: number): void;
-	$onDidCommentThreadsChange(handle: number, event: languages.CommentThreadChangedEvent): void;
+	$onDidCommentThreadsChange(handle: number, event: languages.CommentThreadChangedEvent<IRange | ICellRange>): void;
 }
 
 export interface MainThreadAuthenticationShape extends IDisposable {
@@ -657,7 +657,7 @@ export type AnyInputDto = UnknownInputDto | TextInputDto | TextDiffInputDto | No
 
 export interface MainThreadEditorTabsShape extends IDisposable {
 	// manage tabs: move, close, rearrange etc
-	$moveTab(tabId: string, index: number, viewColumn: EditorGroupColumn): void;
+	$moveTab(tabId: string, index: number, viewColumn: EditorGroupColumn, preserveFocus?: boolean): void;
 	$closeTab(tabIds: string[], preserveFocus?: boolean): Promise<void>;
 }
 
@@ -670,24 +670,15 @@ export interface IEditorTabGroupDto {
 	groupId: number;
 }
 
-export enum TabKind {
-	Singular = 0,
-	Diff = 1,
-	SidebySide = 2
-}
-
 export interface IEditorTabDto {
 	id: string;
 	viewColumn: EditorGroupColumn;
 	label: string;
 	input: AnyInputDto;
-	resource?: UriComponents;
 	editorId?: string;
 	isActive: boolean;
 	isPinned: boolean;
 	isDirty: boolean;
-	kind: TabKind;
-	additionalResourcesAndViewTypes: { resource?: UriComponents; viewId?: string }[];
 }
 
 export interface IExtHostEditorTabsShape {
@@ -1731,7 +1722,7 @@ export interface ExtHostQuickOpenShape {
 }
 
 export interface ExtHostTelemetryShape {
-	$initializeTelemetryLevel(level: TelemetryLevel): void;
+	$initializeTelemetryLevel(level: TelemetryLevel, productConfig?: { usage: boolean; error: boolean }): void;
 	$onDidChangeTelemetryLevel(level: TelemetryLevel): void;
 }
 
