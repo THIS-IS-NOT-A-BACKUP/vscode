@@ -277,6 +277,18 @@ const registry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Con
 				'description': localize('localHistoryMaxFileEntries', "Controls the maximum number of local file history entries per file. When the number of local file history entries exceeds this number for a file, the oldest entries will be discarded."),
 				'scope': ConfigurationScope.RESOURCE
 			},
+			'workbench.localHistory.exclude': {
+				'type': 'object',
+				'markdownDescription': localize('exclude', "Configure [glob patterns](https://code.visualstudio.com/docs/editor/codebasics#_advanced-search-options) for excluding files from being added to local history."),
+				'scope': ConfigurationScope.RESOURCE
+			},
+			'workbench.localHistory.mergePeriod': {
+				'type': 'number',
+				'default': 10,
+				'minimum': 1,
+				'markdownDescription': localize('mergePeriod', "Configure an interval in seconds during which the last entry in local history is replaced with the entry that is being added. This helps reduce the overall number of entries that are added, for example when auto save is enabled. This setting is only applied to entries that have the same source of origin."),
+				'scope': ConfigurationScope.RESOURCE
+			},
 			'workbench.commandPalette.history': {
 				'type': 'number',
 				'description': localize('commandHistory', "Controls the number of recently used commands to keep in history for the command palette. Set to 0 to disable command history."),
@@ -422,6 +434,12 @@ const registry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Con
 				'tags': ['experimental'],
 				'default': 'both',
 				'description': localize('layoutControlType', "Controls whether the layout control in the custom title bar is displayed as a single menu button or with multiple UI toggles."),
+			},
+			'workbench.experimental.editor.dragAndDropIntoEditor.enabled': {
+				'type': 'boolean',
+				'tags': ['experimental'],
+				'default': false,
+				'description': localize('dragAndDropIntoEditor', "Controls whether you can drag and drop a file into an editor by holding down shift (instead of opening the file in an editor)."),
 			}
 		}
 	});

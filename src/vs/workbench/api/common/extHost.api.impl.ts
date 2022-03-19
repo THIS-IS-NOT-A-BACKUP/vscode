@@ -619,6 +619,10 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 				return extHostQuickOpen.showWorkspaceFolderPick(options);
 			},
 			showInputBox(options?: vscode.InputBoxOptions, token?: vscode.CancellationToken) {
+				if (options?.validateInput2) {
+					checkProposedApiEnabled(extension, 'inputBoxSeverity');
+					options.validateInput = options.validateInput2 as any;
+				}
 				return extHostQuickOpen.showInput(options, token);
 			},
 			showOpenDialog(options) {
@@ -702,7 +706,7 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 				return extHostQuickOpen.createQuickPick(extension);
 			},
 			createInputBox(): vscode.InputBox {
-				return extHostQuickOpen.createInputBox(extension.identifier);
+				return extHostQuickOpen.createInputBox(extension);
 			},
 			get activeColorTheme(): vscode.ColorTheme {
 				return extHostTheming.activeColorTheme;
@@ -756,7 +760,7 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 			getInlineCompletionItemController<T extends vscode.InlineCompletionItem>(provider: vscode.InlineCompletionItemProvider<T>): vscode.InlineCompletionController<T> {
 				checkProposedApiEnabled(extension, 'inlineCompletions');
 				return InlineCompletionController.get(provider);
-			}
+			},
 		};
 
 		// namespace: workspace
@@ -867,6 +871,10 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 			},
 			onWillSaveTextDocument: (listener, thisArgs?, disposables?) => {
 				return extHostDocumentSaveParticipant.getOnWillSaveTextDocumentEvent(extension)(listener, thisArgs, disposables);
+			},
+			onWillDropOnTextEditor: (listener, thisArgs?, disposables?) => {
+				checkProposedApiEnabled(extension, 'textEditorDrop');
+				return extHostEditors.onWillDropOnTextEditor(listener, thisArgs, disposables);
 			},
 			get notebookDocuments(): vscode.NotebookDocument[] {
 				return extHostNotebook.notebookDocuments.map(d => d.apiNotebook);
@@ -1324,6 +1332,7 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 			WorkspaceTrustState: extHostTypes.WorkspaceTrustState,
 			LanguageStatusSeverity: extHostTypes.LanguageStatusSeverity,
 			QuickPickItemKind: extHostTypes.QuickPickItemKind,
+			InputBoxValidationSeverity: extHostTypes.InputBoxValidationSeverity,
 			TextTabInput: extHostTypes.TextTabInput,
 			TextDiffTabInput: extHostTypes.TextDiffTabInput,
 			CustomEditorTabInput: extHostTypes.CustomEditorTabInput,

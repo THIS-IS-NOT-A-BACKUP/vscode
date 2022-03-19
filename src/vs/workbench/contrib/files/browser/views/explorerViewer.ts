@@ -418,7 +418,7 @@ export class FilesRenderer implements ICompressibleTreeRenderer<ExplorerItem, Fu
 
 		elementDisposables.add(this.themeService.onDidFileIconThemeChange(() => setResourceData()));
 		elementDisposables.add(this.configurationService.onDidChangeConfiguration((e) =>
-			e.affectsConfiguration('explorer.experimental.fileNesting.hideIconsToMatchFolders') && setResourceData()));
+			e.affectsConfiguration('explorer.fileNesting.hideIconsToMatchFolders') && setResourceData()));
 
 		setResourceData();
 
@@ -439,7 +439,18 @@ export class FilesRenderer implements ICompressibleTreeRenderer<ExplorerItem, Fu
 		const label = this.labels.create(container);
 		const extraClasses = ['explorer-item', 'explorer-item-edited'];
 		const fileKind = stat.isRoot ? FileKind.ROOT_FOLDER : stat.isDirectory ? FileKind.FOLDER : FileKind.FILE;
-		const labelOptions: IFileLabelOptions = { hidePath: true, hideLabel: true, fileKind, extraClasses };
+
+		const theme = this.themeService.getFileIconTheme();
+		const themeIsUnhappyWithNesting = theme.hasFileIcons && (theme.hidesExplorerArrows || !theme.hasFolderIcons);
+		const realignNestedChildren = stat.nestedParent && themeIsUnhappyWithNesting;
+
+		const labelOptions: IFileLabelOptions = {
+			hidePath: true,
+			hideLabel: true,
+			fileKind,
+			extraClasses: realignNestedChildren ? [...extraClasses, 'align-nest-icon-with-parent-icon'] : extraClasses,
+		};
+
 
 		const parent = stat.name ? dirname(stat.resource) : stat.resource;
 		const value = stat.name || '';
@@ -1074,7 +1085,7 @@ export class FileDragAndDrop implements ITreeDragAndDrop<ExplorerItem> {
 		const elementsData = FileDragAndDrop.getStatsFromDragAndDropData(data);
 		const items = distinctParents(elementsData, s => s.resource);
 
-		if (this.configurationService.getValue<IFilesConfiguration>().explorer.experimental.fileNesting.operateAsGroup) {
+		if (this.configurationService.getValue<IFilesConfiguration>().explorer.fileNesting.operateAsGroup) {
 			for (const item of items) {
 				const nestedChildren = item.nestedChildren;
 				if (nestedChildren) {
