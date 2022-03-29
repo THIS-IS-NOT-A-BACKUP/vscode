@@ -177,7 +177,7 @@ export class ExtHostEditorTabs implements IExtHostEditorTabs {
 	readonly _serviceBrand: undefined;
 
 	private readonly _proxy: MainThreadEditorTabsShape;
-	private readonly _onDidChangeTab = new Emitter<vscode.Tab>();
+	private readonly _onDidChangeTab = new Emitter<vscode.Tab[]>();
 	private readonly _onDidChangeTabGroup = new Emitter<void>();
 	private readonly _onDidChangeActiveTabGroup = new Emitter<vscode.TabGroup>();
 
@@ -199,7 +199,7 @@ export class ExtHostEditorTabs implements IExtHostEditorTabs {
 				// never changes -> simple value
 				onDidChangeTabGroup: that._onDidChangeTabGroup.event,
 				onDidChangeActiveTabGroup: that._onDidChangeActiveTabGroup.event,
-				onDidChangeTab: that._onDidChangeTab.event,
+				onDidChangeTabs: that._onDidChangeTab.event,
 				// dynamic -> getters
 				get groups() {
 					return Object.freeze(that._extHostTabGroups.map(group => group.apiObject));
@@ -219,8 +219,7 @@ export class ExtHostEditorTabs implements IExtHostEditorTabs {
 						}
 						extHostTabIds.push(extHostTab.tabId);
 					}
-					this._proxy.$closeTab(extHostTabIds, preserveFocus);
-					return;
+					return this._proxy.$closeTab(extHostTabIds, preserveFocus);
 				},
 				move: async (tab: vscode.Tab, viewColumn: ViewColumn, index: number, preservceFocus?: boolean) => {
 					const extHostTab = this._findExtHostTabFromApi(tab);
@@ -285,6 +284,6 @@ export class ExtHostEditorTabs implements IExtHostEditorTabs {
 			throw new Error('Update Tabs IPC call received before group creation.');
 		}
 		const tab = group.acceptTabDtoUpdate(tabDto);
-		this._onDidChangeTab.fire(tab.apiObject);
+		this._onDidChangeTab.fire([tab.apiObject]);
 	}
 }
