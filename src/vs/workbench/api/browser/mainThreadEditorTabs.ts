@@ -19,6 +19,8 @@ import { URI } from 'vs/base/common/uri';
 import { WebviewInput } from 'vs/workbench/contrib/webviewPanel/browser/webviewEditorInput';
 import { TerminalEditorInput } from 'vs/workbench/contrib/terminal/browser/terminalEditorInput';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
+import { SideBySideEditorInput } from 'vs/workbench/common/editor/sideBySideEditorInput';
+import { isEqual } from 'vs/base/common/resources';
 
 
 interface TabInfo {
@@ -93,6 +95,24 @@ export class MainThreadEditorTabs implements MainThreadEditorTabsShape {
 				kind: TabInputKind.TextInput,
 				uri: editor.resource
 			};
+		}
+
+		if (editor instanceof SideBySideEditorInput && !(editor instanceof DiffEditorInput)) {
+			const primaryResource = editor.primary.resource;
+			const secondaryResource = editor.secondary.resource;
+			// If side by side editor with same resource on both sides treat it as a singular tab kind
+			if (editor.primary instanceof AbstractTextResourceEditorInput
+				&& editor.secondary instanceof AbstractTextResourceEditorInput
+				&& isEqual(primaryResource, secondaryResource)
+				&& primaryResource
+				&& secondaryResource
+			) {
+				return {
+					kind: TabInputKind.TextInput,
+					uri: primaryResource
+				};
+			}
+			return { kind: TabInputKind.UnknownInput };
 		}
 
 		if (editor instanceof NotebookEditorInput) {
