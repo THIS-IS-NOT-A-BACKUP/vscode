@@ -9,23 +9,52 @@ declare module 'vscode' {
 
 	// TODO@API name alternatives for TabKind: TabInput, TabOptions,
 
+
+	/**
+	 * The tab represents a single text based resource
+	 */
 	export class TabKindText {
+		/**
+		 * The uri represented by the tab.
+		 */
 		readonly uri: Uri;
 		constructor(uri: Uri);
 	}
 
+	/**
+	 * The tab represents two text based resources
+	 * being rendered as a diff.
+	 */
 	export class TabKindTextDiff {
+		/**
+		 * The uri of the original text resource.
+		 */
 		readonly original: Uri;
+		/**
+		 * The uri of the modified text resource.
+		 */
 		readonly modified: Uri;
 		constructor(original: Uri, modified: Uri);
 	}
 
+	/**
+	 * The tab represents a custom editor.
+	 */
 	export class TabKindCustom {
+		/**
+		 * The uri which the tab is representing.
+		 */
 		readonly uri: Uri;
+		/**
+		 * The type of custom editor.
+		 */
 		readonly viewType: string;
 		constructor(uri: Uri, viewType: string);
 	}
 
+	/**
+	 * The tab represents a webview.
+	 */
 	export class TabKindWebview {
 		/**
 		 * The type of webview. Maps to {@linkcode WebviewPanel.viewType WebviewPanel's viewType}
@@ -34,27 +63,48 @@ declare module 'vscode' {
 		constructor(viewType: string);
 	}
 
+	/**
+	 * The tab represents a notebook.
+	 */
 	export class TabKindNotebook {
+		/**
+		 * The uri which the tab is representing.
+		 */
 		readonly uri: Uri;
+		/**
+		 * The type of notebook. Maps to {@linkcode NotebookDocument.notebookType NotebookDocuments's notebookType}
+		 */
 		readonly notebookType: string;
 		constructor(uri: Uri, notebookType: string);
 	}
 
+	/**
+	 * The tabs represents two notebooks in a diff configuration.
+	 */
 	export class TabKindNotebookDiff {
+		/**
+		 * The uri of the original notebook.
+		 */
 		readonly original: Uri;
+		/**
+		 * The uri of the modified notebook.
+		 */
 		readonly modified: Uri;
 		readonly notebookType: string;
 		constructor(original: Uri, modified: Uri, notebookType: string);
 	}
 
+	/**
+	 * The tab represents a terminal in the editor area.
+	 */
 	export class TabKindTerminal {
 		constructor();
 	}
 
 	/**
 	 * Represents a tab within a {@link TabGroup group of tabs}.
-	 *
-	 * TODO@API explain the tab is a button, not editor concept
+	 * Tabs are merely the graphical representation within the editor area.
+	 * A backing editor is not a guarantee.
 	 */
 	export interface Tab {
 
@@ -131,6 +181,7 @@ declare module 'vscode' {
 		/**
 		 * All the groups within the group container
 		 */
+		// TODO@API name, back to `all`, keep xyzTabGroup
 		readonly groups: readonly TabGroup[];
 
 		/**
@@ -149,6 +200,7 @@ declare module 'vscode' {
 		 * An {@link Event event} which fires when a {@link Tab tabs} have changed.
 		 */
 		readonly onDidChangeTabs: Event<readonly Tab[]>;
+		// readonly onDidChangeTabs: Event<{ opened: readonly Tab[], closed: readonly Tab[], changed: readonly Tab[] }>;
 
 		/**
 		 * Closes the tab. This makes the tab object invalid and the tab
@@ -159,9 +211,16 @@ declare module 'vscode' {
 		 * @param preserveFocus When `true` focus will remain in its current position. If `false` it will jump to the next tab.
 		 * @returns A promise that resolves to `true` when all tabs have been closed
 		 */
-		close(tab: Tab | Tab[], preserveFocus?: boolean): Thenable<boolean>;
-		// TODO@API support to close "all"
-		// close(tab: TabGroup | TabGroup[], preserveFocus?: boolean): Thenable<boolean>;
+		close(tab: Tab | readonly Tab[], preserveFocus?: boolean): Thenable<boolean>;
+
+		/**
+		 * Closes the tab group. This makes the tab group object invalid and the tab group
+		 * should no longer be used for furhter actions.
+		 * @param tabGroup The tab group to close.
+		 * @param preserveFocus When `true` focus will remain in its current position.
+		 * @returns A promise that resolves to `true` when all tab groups have been closed
+		 */
+		close(tabGroup: TabGroup | readonly TabGroup[], preserveFocus?: boolean): Thenable<boolean>;
 
 		/**
 		 * Moves a tab to the given index within the column.
