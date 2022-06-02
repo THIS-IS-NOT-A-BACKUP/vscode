@@ -1913,8 +1913,22 @@
           "type": "array",
           "markdownDescription": "%config.branchRandomNameDictionary%",
           "items": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "adjectives",
+              "animals",
+              "colors",
+              "numbers"
+            ],
+            "enumDescriptions": [
+              "%config.branchRandomNameDictionary.adjectives%",
+              "%config.branchRandomNameDictionary.animals%",
+              "%config.branchRandomNameDictionary.colors%",
+              "%config.branchRandomNameDictionary.numbers%"
+            ]
           },
+          "minItems": 1,
+          "maxItems": 5,
           "default": [
             "adjectives",
             "animals"
@@ -2450,7 +2464,10 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "%config.experimental.mergeEditor%",
-          "scope": "window"
+          "scope": "window",
+          "tags": [
+            "experimental"
+          ]
         }
       }
     },
