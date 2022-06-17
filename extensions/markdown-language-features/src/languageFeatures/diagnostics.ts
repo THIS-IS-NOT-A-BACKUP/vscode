@@ -17,7 +17,7 @@ import { Limiter } from '../util/limiter';
 import { ResourceMap } from '../util/resourceMap';
 import { MdTableOfContentsWatcher } from '../test/tableOfContentsWatcher';
 import { MdWorkspaceContents, SkinnyTextDocument } from '../workspaceContents';
-import { InternalHref, LinkDefinitionSet, MdLink, MdLinkComputer, MdLinkSource } from './documentLinkProvider';
+import { InternalHref, MdLink, MdLinkSource, MdLinkProvider, LinkDefinitionSet } from './documentLinkProvider';
 import { MdReferencesProvider, tryFindMdDocumentForLink } from './references';
 
 const localize = nls.loadMessageBundle();
@@ -231,7 +231,7 @@ class LinkDoesNotExistDiagnostic extends vscode.Diagnostic {
 }
 
 export abstract class DiagnosticReporter extends Disposable {
-	private readonly pending = new ResourceMap<Promise<any>>();
+	private readonly pending = new Set<Promise<any>>();
 
 	public clear(): void {
 		this.pending.clear();
@@ -239,20 +239,15 @@ export abstract class DiagnosticReporter extends Disposable {
 
 	public abstract set(uri: vscode.Uri, diagnostics: readonly vscode.Diagnostic[]): void;
 
-	public delete(uri: vscode.Uri): void {
-		this.pending.delete(uri);
+	public abstract delete(uri: vscode.Uri): void;
+
+	public addWorkItem(promise: Promise<any>): Promise<any> {
+		this.pending.add(promise);
+		promise.finally(() => this.pending.delete(promise));
+		return promise;
 	}
 
-	public signalTriggered(uri: vscode.Uri, recompute: Promise<any>): void {
-		this.pending.set(uri, recompute);
-		recompute.finally(() => {
-			if (this.pending.get(uri) === recompute) {
-				this.pending.delete(uri);
-			}
-		});
-	}
-
-	public async waitAllPending(): Promise<void> {
+	public async waitPendingWork(): Promise<void> {
 		await Promise.all([...this.pending.values()]);
 	}
 }
@@ -276,8 +271,7 @@ export class DiagnosticCollectionReporter extends DiagnosticReporter {
 		this.collection.set(uri, tabs.has(uri) ? diagnostics : []);
 	}
 
-	public override delete(uri: vscode.Uri): void {
-		super.delete(uri);
+	public delete(uri: vscode.Uri): void {
 		this.collection.delete(uri);
 	}
 
@@ -367,7 +361,7 @@ export class DiagnosticManager extends Disposable {
 		this.pendingDiagnostics.clear();
 	}
 
-	public async recomputeDiagnosticState(doc: SkinnyTextDocument, token: vscode.CancellationToken): Promise<{ diagnostics: readonly vscode.Diagnostic[]; links: readonly MdLink[]; config: DiagnosticOptions }> {
+	private async recomputeDiagnosticState(doc: SkinnyTextDocument, token: vscode.CancellationToken): Promise<{ diagnostics: readonly vscode.Diagnostic[]; links: readonly MdLink[]; config: DiagnosticOptions }> {
 		const config = this.configuration.getOptions(doc.uri);
 		if (!config.enabled) {
 			return { diagnostics: [], links: [], config };
@@ -391,21 +385,26 @@ export class DiagnosticManager extends Disposable {
 		}));
 	}
 
-	private async rebuild() {
+	private rebuild(): Promise<void> {
 		this.reporter.clear();
 		this.pendingDiagnostics.clear();
 		this.inFlightDiagnostics.clear();
 
-		for (const doc of await this.workspaceContents.getAllMarkdownDocuments()) {
-			this.triggerDiagnostics(doc.uri);
-		}
+		return this.reporter.addWorkItem(
+			(async () => {
+				const allDocs = await this.workspaceContents.getAllMarkdownDocuments();
+				await Promise.all(Array.from(allDocs, doc => this.triggerDiagnostics(doc.uri)));
+			})()
+		);
 	}
 
-	private triggerDiagnostics(uri: vscode.Uri) {
+	private async triggerDiagnostics(uri: vscode.Uri): Promise<void> {
 		this.inFlightDiagnostics.cancel(uri);
 
 		this.pendingDiagnostics.add(uri);
-		this.reporter.signalTriggered(uri, this.diagnosticDelayer.trigger(() => this.recomputePendingDiagnostics()));
+		return this.reporter.addWorkItem(
+			this.diagnosticDelayer.trigger(() => this.recomputePendingDiagnostics())
+		);
 	}
 }
 
@@ -451,12 +450,12 @@ export class DiagnosticComputer {
 	constructor(
 		private readonly engine: MarkdownEngine,
 		private readonly workspaceContents: MdWorkspaceContents,
-		private readonly linkComputer: MdLinkComputer,
+		private readonly linkProvider: MdLinkProvider,
 	) { }
 
-	public async getDiagnostics(doc: SkinnyTextDocument, options: DiagnosticOptions, token: vscode.CancellationToken): Promise<{ readonly diagnostics: vscode.Diagnostic[]; readonly links: MdLink[] }> {
-		const links = await this.linkComputer.getAllLinks(doc, token);
-		if (token.isCancellationRequested) {
+	public async getDiagnostics(doc: SkinnyTextDocument, options: DiagnosticOptions, token: vscode.CancellationToken): Promise<{ readonly diagnostics: vscode.Diagnostic[]; readonly links: readonly MdLink[] }> {
+		const { links, definitions } = await this.linkProvider.getLinks(doc);
+		if (token.isCancellationRequested || !options.enabled) {
 			return { links, diagnostics: [] };
 		}
 
@@ -464,7 +463,7 @@ export class DiagnosticComputer {
 			links,
 			diagnostics: (await Promise.all([
 				this.validateFileLinks(options, links, token),
-				Array.from(this.validateReferenceLinks(options, links)),
+				Array.from(this.validateReferenceLinks(options, links, definitions)),
 				this.validateFragmentLinks(doc, options, links, token),
 			])).flat()
 		};
@@ -502,15 +501,14 @@ export class DiagnosticComputer {
 		return diagnostics;
 	}
 
-	private *validateReferenceLinks(options: DiagnosticOptions, links: readonly MdLink[]): Iterable<vscode.Diagnostic> {
+	private *validateReferenceLinks(options: DiagnosticOptions, links: readonly MdLink[], definitions: LinkDefinitionSet): Iterable<vscode.Diagnostic> {
 		const severity = toSeverity(options.validateReferences);
 		if (typeof severity === 'undefined') {
 			return [];
 		}
 
-		const definitionSet = new LinkDefinitionSet(links);
 		for (const link of links) {
-			if (link.href.kind === 'reference' && !definitionSet.lookup(link.href.ref)) {
+			if (link.href.kind === 'reference' && !definitions.lookup(link.href.ref)) {
 				yield new vscode.Diagnostic(
 					link.source.hrefRange,
 					localize('invalidReferenceLink', 'No link definition found: \'{0}\'', link.href.ref),
@@ -621,22 +619,22 @@ class AddToIgnoreLinksQuickFixProvider implements vscode.CodeActionProvider {
 	}
 }
 
-export function register(
+export function registerDiagnosticSupport(
 	selector: vscode.DocumentSelector,
 	engine: MarkdownEngine,
 	workspaceContents: MdWorkspaceContents,
-	linkComputer: MdLinkComputer,
+	linkProvider: MdLinkProvider,
 	commandManager: CommandManager,
-	referenceProvider: MdReferencesProvider,
+	referenceComputer: MdReferencesProvider,
 ): vscode.Disposable {
 	const configuration = new VSCodeDiagnosticConfiguration();
 	const manager = new DiagnosticManager(
 		engine,
 		workspaceContents,
-		new DiagnosticComputer(engine, workspaceContents, linkComputer),
+		new DiagnosticComputer(engine, workspaceContents, linkProvider),
 		configuration,
 		new DiagnosticCollectionReporter(),
-		referenceProvider);
+		referenceComputer);
 	return vscode.Disposable.from(
 		configuration,
 		manager,
