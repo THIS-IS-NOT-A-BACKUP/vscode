@@ -7,7 +7,6 @@ import * as picomatch from 'picomatch';
 import * as vscode from 'vscode';
 import * as nls from 'vscode-nls';
 import { CommandManager } from '../commandManager';
-import { MarkdownEngine } from '../markdownEngine';
 import { MdTableOfContentsProvider } from '../tableOfContents';
 import { MdTableOfContentsWatcher } from '../test/tableOfContentsWatcher';
 import { Delayer } from '../util/async';
@@ -241,6 +240,8 @@ export abstract class DiagnosticReporter extends Disposable {
 
 	public abstract delete(uri: vscode.Uri): void;
 
+	public abstract areDiagnosticsEnabled(uri: vscode.Uri): boolean;
+
 	public addWorkItem(promise: Promise<any>): Promise<any> {
 		this.pending.add(promise);
 		promise.finally(() => this.pending.delete(promise));
@@ -253,7 +254,6 @@ export abstract class DiagnosticReporter extends Disposable {
 }
 
 export class DiagnosticCollectionReporter extends DiagnosticReporter {
-
 	private readonly collection: vscode.DiagnosticCollection;
 
 	constructor() {
@@ -267,8 +267,12 @@ export class DiagnosticCollectionReporter extends DiagnosticReporter {
 	}
 
 	public set(uri: vscode.Uri, diagnostics: readonly vscode.Diagnostic[]): void {
+		this.collection.set(uri, this.areDiagnosticsEnabled(uri) ? diagnostics : []);
+	}
+
+	public areDiagnosticsEnabled(uri: vscode.Uri): boolean {
 		const tabs = this.getAllTabResources();
-		this.collection.set(uri, tabs.has(uri) ? diagnostics : []);
+		return tabs.has(uri);
 	}
 
 	public delete(uri: vscode.Uri): void {
@@ -300,12 +304,12 @@ export class DiagnosticManager extends Disposable {
 	public readonly ready: Promise<void>;
 
 	constructor(
-		engine: MarkdownEngine,
 		private readonly workspaceContents: MdWorkspaceContents,
 		private readonly computer: DiagnosticComputer,
 		private readonly configuration: DiagnosticConfiguration,
 		private readonly reporter: DiagnosticReporter,
 		private readonly referencesProvider: MdReferencesProvider,
+		tocProvider: MdTableOfContentsProvider,
 		delay = 300,
 	) {
 		super();
@@ -331,6 +335,7 @@ export class DiagnosticManager extends Disposable {
 			this.reporter.delete(uri);
 		}));
 
+
 		this._register(this.linkWatcher.onDidChangeLinkedToFile(changedDocuments => {
 			for (const resource of changedDocuments) {
 				const doc = vscode.workspace.textDocuments.find(doc => doc.uri.toString() === resource.toString());
@@ -340,7 +345,7 @@ export class DiagnosticManager extends Disposable {
 			}
 		}));
 
-		this.tableOfContentsWatcher = this._register(new MdTableOfContentsWatcher(engine, workspaceContents));
+		this.tableOfContentsWatcher = this._register(new MdTableOfContentsWatcher(workspaceContents, tocProvider));
 		this._register(this.tableOfContentsWatcher.onTocChanged(async e => {
 			// When the toc of a document changes, revalidate every file that linked to it too
 			const triggered = new ResourceMap<void>();
@@ -377,9 +382,14 @@ export class DiagnosticManager extends Disposable {
 			const doc = await this.workspaceContents.getOrLoadMarkdownDocument(resource);
 			if (doc) {
 				await this.inFlightDiagnostics.trigger(doc.uri, async (token) => {
-					const state = await this.recomputeDiagnosticState(doc, token);
-					this.linkWatcher.updateLinksForDocument(doc.uri, state.config.enabled && state.config.validateFileLinks ? state.links : []);
-					this.reporter.set(doc.uri, state.diagnostics);
+					if (this.reporter.areDiagnosticsEnabled(doc.uri)) {
+						const state = await this.recomputeDiagnosticState(doc, token);
+						this.linkWatcher.updateLinksForDocument(doc.uri, state.config.enabled && state.config.validateFileLinks ? state.links : []);
+						this.reporter.set(doc.uri, state.diagnostics);
+					} else {
+						this.linkWatcher.deleteDocument(doc.uri);
+						this.reporter.delete(doc.uri);
+					}
 				});
 			}
 		}));
@@ -392,6 +402,8 @@ export class DiagnosticManager extends Disposable {
 
 		return this.reporter.addWorkItem(
 			(async () => {
+				// TODO: This pulls in all md files in the workspace. Instead we only care about opened text documents.
+				// Need a new way to handle that.
 				const allDocs = await this.workspaceContents.getAllMarkdownDocuments();
 				await Promise.all(Array.from(allDocs, doc => this.triggerDiagnostics(doc.uri)));
 			})()
@@ -625,7 +637,6 @@ class AddToIgnoreLinksQuickFixProvider implements vscode.CodeActionProvider {
 
 export function registerDiagnosticSupport(
 	selector: vscode.DocumentSelector,
-	engine: MarkdownEngine,
 	workspaceContents: MdWorkspaceContents,
 	linkProvider: MdLinkProvider,
 	commandManager: CommandManager,
@@ -634,12 +645,12 @@ export function registerDiagnosticSupport(
 ): vscode.Disposable {
 	const configuration = new VSCodeDiagnosticConfiguration();
 	const manager = new DiagnosticManager(
-		engine,
 		workspaceContents,
 		new DiagnosticComputer(workspaceContents, linkProvider, tocProvider),
 		configuration,
 		new DiagnosticCollectionReporter(),
-		referenceProvider);
+		referenceProvider,
+		tocProvider);
 	return vscode.Disposable.from(
 		configuration,
 		manager,
