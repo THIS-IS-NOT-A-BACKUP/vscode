@@ -3,16 +3,10 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-declare module 'vscode' {
-	// https://github.com/microsoft/vscode/issues/133935
+import { ILogger } from '../logging';
 
-	export interface SourceControlActionButton {
-		command: Command;
-		description?: string;
-		enabled: boolean;
+export const nulLogger = new class implements ILogger {
+	verbose(): void {
+		// noop
 	}
-
-	export interface SourceControl {
-		actionButton?: SourceControlActionButton;
-	}
-}
+};
