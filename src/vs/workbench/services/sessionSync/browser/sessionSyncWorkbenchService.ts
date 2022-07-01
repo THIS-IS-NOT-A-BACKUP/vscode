@@ -19,7 +19,7 @@ import { IAuthenticationProvider } from 'vs/platform/userDataSync/common/userDat
 import { UserDataSyncStoreClient } from 'vs/platform/userDataSync/common/userDataSyncStoreService';
 import { AuthenticationSession, AuthenticationSessionsChangeEvent, IAuthenticationService } from 'vs/workbench/services/authentication/common/authentication';
 import { IExtensionService } from 'vs/workbench/services/extensions/common/extensions';
-import { EDIT_SESSIONS_SIGNED_IN, EditSession, EDIT_SESSION_SYNC_TITLE, ISessionSyncWorkbenchService, EDIT_SESSIONS_SIGNED_IN_KEY } from 'vs/workbench/services/sessionSync/common/sessionSync';
+import { EDIT_SESSIONS_SIGNED_IN, EditSession, EDIT_SESSION_SYNC_CATEGORY, ISessionSyncWorkbenchService, EDIT_SESSIONS_SIGNED_IN_KEY } from 'vs/workbench/services/sessionSync/common/sessionSync';
 
 type ExistingSession = IQuickPickItem & { session: AuthenticationSession & { providerId: string } };
 type AuthenticationProviderOption = IQuickPickItem & { provider: IAuthenticationProvider };
@@ -294,7 +294,7 @@ export class SessionSyncWorkbenchService extends Disposable implements ISessionS
 		if (sessionId === undefined) {
 			this.storageService.remove(SessionSyncWorkbenchService.CACHED_SESSION_STORAGE_KEY, StorageScope.APPLICATION);
 		} else {
-			this.storageService.store(SessionSyncWorkbenchService.CACHED_SESSION_STORAGE_KEY, sessionId, StorageScope.APPLICATION, StorageTarget.USER);
+			this.storageService.store(SessionSyncWorkbenchService.CACHED_SESSION_STORAGE_KEY, sessionId, StorageScope.APPLICATION, StorageTarget.MACHINE);
 		}
 	}
 
@@ -306,10 +306,15 @@ export class SessionSyncWorkbenchService extends Disposable implements ISessionS
 	private async onDidChangeStorage(e: IStorageValueChangeEvent): Promise<void> {
 		if (e.key === SessionSyncWorkbenchService.CACHED_SESSION_STORAGE_KEY
 			&& e.scope === StorageScope.APPLICATION
-			&& this.#authenticationInfo?.sessionId !== this.existingSessionId
 		) {
-			this.#authenticationInfo = undefined;
-			this.initialized = false;
+			const newSessionId = this.existingSessionId;
+			const previousSessionId = this.#authenticationInfo?.sessionId;
+
+			if (previousSessionId !== newSessionId) {
+				this.logService.trace(`Edit Sessions: resetting authentication state because authentication session ID preference changed from ${previousSessionId} to ${newSessionId}.`);
+				this.#authenticationInfo = undefined;
+				this.initialized = false;
+			}
 		}
 	}
 
@@ -332,7 +337,8 @@ export class SessionSyncWorkbenchService extends Disposable implements ISessionS
 			constructor() {
 				super({
 					id: 'workbench.sessionSync.actions.resetAuth',
-					title: localize('reset auth', '{0}: Sign Out', EDIT_SESSION_SYNC_TITLE),
+					title: localize('reset auth', 'Sign Out'),
+					category: EDIT_SESSION_SYNC_CATEGORY,
 					precondition: ContextKeyExpr.equals(EDIT_SESSIONS_SIGNED_IN_KEY, true),
 					menu: [{
 						id: MenuId.CommandPalette,
