@@ -1,7 +1,7 @@
 {
   "name": "code-oss-dev",
   "version": "1.71.0",
-  "distro": "7dc7a14b0f0031128c799f96c856bd3290c3ebee",
+  "distro": "eb23fca20abeeed869f14d2581658864b99ba1e2",
   "author": {
     "name": "Microsoft Corporation"
   },
@@ -170,11 +170,11 @@
     "husky": "^0.13.1",
     "innosetup": "6.0.5",
     "is": "^3.1.0",
-    "istanbul-lib-coverage": "^3.0.0",
-    "istanbul-lib-instrument": "^4.0.0",
+    "istanbul-lib-coverage": "^3.2.0",
+    "istanbul-lib-instrument": "^5.2.0",
     "istanbul-lib-report": "^3.0.0",
-    "istanbul-lib-source-maps": "^4.0.0",
-    "istanbul-reports": "^3.0.0",
+    "istanbul-lib-source-maps": "^4.0.1",
+    "istanbul-reports": "^3.1.5",
     "lazy.js": "^0.4.2",
     "merge-options": "^1.0.1",
     "mime": "^1.4.1",
