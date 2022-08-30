@@ -9,7 +9,7 @@ import * as path from 'path';
 import minimatch from 'minimatch';
 import { createImportRuleListener } from './utils';
 
-const REPO_ROOT = path.normalize(path.join(__dirname, '../../../'));
+const REPO_ROOT = path.normalize(path.join(__dirname, '../'));
 
 interface ConditionalPattern {
 	when?: 'hasBrowser' | 'hasNode' | 'test';

@@ -9,7 +9,7 @@
 		"@typescript-eslint",
 		"jsdoc",
 		"header",
-		"@vscode"
+		"local"
 	],
 	"rules": {
 		"constructor-super": "warn",
@@ -62,17 +62,17 @@
 				]
 			}
 		],
-		"@vscode/code-no-unused-expressions": [
+		"local/code-no-unused-expressions": [
 			"warn",
 			{
 				"allowTernary": true
 			}
 		],
-		"@vscode/code-translation-remind": "warn",
-		"@vscode/code-no-nls-in-standalone-editor": "warn",
-		"@vscode/code-no-standalone-editor": "warn",
-		"@vscode/code-no-unexternalized-strings": "warn",
-		"@vscode/code-layering": [
+		"local/code-translation-remind": "warn",
+		"local/code-no-nls-in-standalone-editor": "warn",
+		"local/code-no-standalone-editor": "warn",
+		"local/code-no-unexternalized-strings": "warn",
+		"local/code-layering": [
 			"warn",
 			{
 				"common": [],
@@ -123,8 +123,8 @@
 				"**/*.test.ts"
 			],
 			"rules": {
-				"@vscode/code-no-test-only": "error",
-				"@vscode/code-no-unexternalized-strings": "off"
+				"local/code-no-test-only": "error",
+				"local/code-no-unexternalized-strings": "off"
 			}
 		},
 		{
@@ -133,14 +133,14 @@
 				"**/vscode.proposed.*.d.ts"
 			],
 			"rules": {
-				"@vscode/vscode-dts-create-func": "warn",
-				"@vscode/vscode-dts-literal-or-types": "warn",
-				"@vscode/vscode-dts-interface-naming": "warn",
-				"@vscode/vscode-dts-cancellation": "warn",
-				"@vscode/vscode-dts-use-thenable": "warn",
-				"@vscode/vscode-dts-region-comments": "warn",
-				"@vscode/vscode-dts-vscode-in-comments": "warn",
-				"@vscode/vscode-dts-provider-naming": [
+				"local/vscode-dts-create-func": "warn",
+				"local/vscode-dts-literal-or-types": "warn",
+				"local/vscode-dts-interface-naming": "warn",
+				"local/vscode-dts-cancellation": "warn",
+				"local/vscode-dts-use-thenable": "warn",
+				"local/vscode-dts-region-comments": "warn",
+				"local/vscode-dts-vscode-in-comments": "warn",
+				"local/vscode-dts-provider-naming": [
 					"warn",
 					{
 						"allowed": [
@@ -155,7 +155,7 @@
 						]
 					}
 				],
-				"@vscode/vscode-dts-event-naming": [
+				"local/vscode-dts-event-naming": [
 					"warn",
 					{
 						"allowed": [
@@ -201,8 +201,8 @@
 				"src/**/*.ts"
 			],
 			"rules": {
-				"@vscode/code-no-look-behind-regex": "warn",
-				"@vscode/code-import-patterns": [
+				"local/code-no-look-behind-regex": "warn",
+				"local/code-import-patterns": [
 					"warn",
 					{
 						// imports that are allowed in all files of layers:
@@ -577,7 +577,7 @@
 				"test/**/*.ts"
 			],
 			"rules": {
-				"@vscode/code-import-patterns": [
+				"local/code-import-patterns": [
 					"warn",
 					{
 						"target": "test/smoke/**",

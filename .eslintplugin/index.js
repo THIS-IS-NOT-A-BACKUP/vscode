@@ -9,4 +9,4 @@ glob.sync(`${__dirname}/*.ts`).forEach((file) => {
 	rules[path.basename(file, '.ts')] = require(file);
 });
 
-module.exports = { rules };
+exports.rules = rules;
