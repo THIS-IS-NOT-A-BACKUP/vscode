@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { strictEqual } from 'assert';
+import { isWindows } from 'vs/base/common/platform';
 import { OpenerService } from 'vs/editor/browser/services/openerService';
 import { ContextMenuService } from 'vs/platform/contextview/browser/contextMenuService';
 import { IContextMenuService } from 'vs/platform/contextview/browser/contextView';
@@ -83,10 +84,11 @@ suite('ContextualActionAddon', () => {
 				});
 			});
 		});
-		suite('freePort', () => {
-			const expected = new Map();
-			const portCommand = `yarn start dev`;
-			const output = `yarn run v1.22.17
+		if (!isWindows) {
+			suite('freePort', () => {
+				const expected = new Map();
+				const portCommand = `yarn start dev`;
+				const output = `yarn run v1.22.17
 			warning ../../package.json: No license field
 			Error: listen EADDRINUSE: address already in use 0.0.0.0:3000
 				at Server.setupListenHandle [as _listen2] (node:net:1315:16)
@@ -100,34 +102,36 @@ suite('ContextualActionAddon', () => {
 			}
 			error Command failed with exit code 1.
 			info Visit https://yarnpkg.com/en/docs/cli/run for documentation about this command.`;
-			const actionOptions = [{
-				id: 'terminal.freePort',
-				label: 'Free port 3000',
-				run: true,
-				tooltip: 'Free port 3000',
-				enabled: true
-			}];
-			setup(() => {
-				const command = freePort(terminalInstance);
-				expected.set(command.commandLineMatcher.toString(), [command]);
-				contextualActionAddon.registerCommandFinishedListener(command);
-			});
-			suite('returns undefined when', () => {
-				test('output does not match', () => {
-					strictEqual(getMatchActions(createCommand(portCommand, `invalid output`, FreePortOutputRegex), expected), undefined);
+				const actionOptions = [{
+					id: 'terminal.freePort',
+					label: 'Free port 3000',
+					run: true,
+					tooltip: 'Free port 3000',
+					enabled: true
+				}];
+				setup(() => {
+					const command = freePort(terminalInstance);
+					expected.set(command.commandLineMatcher.toString(), [command]);
+					contextualActionAddon.registerCommandFinishedListener(command);
+				});
+				suite('returns undefined when', () => {
+					test('output does not match', () => {
+						strictEqual(getMatchActions(createCommand(portCommand, `invalid output`, FreePortOutputRegex), expected), undefined);
+					});
+				});
+				test('returns actions', () => {
+					assertMatchOptions(getMatchActions(createCommand(portCommand, output, FreePortOutputRegex), expected), actionOptions);
 				});
 			});
-			test.skip('returns actions', () => {
-				assertMatchOptions(getMatchActions(createCommand(portCommand, output, FreePortOutputRegex), expected), actionOptions);
-			});
-		});
+		}
+
 		suite('gitPushSetUpstream', () => {
 			const expectedMap = new Map();
 			const command = `git push`;
 			const output = `fatal: The current branch test22 has no upstream branch.
 			To push the current branch and set the remote as upstream, use
 
-				git push --set-upstream origin test22 `;
+				git push --set-upstream origin test22`;
 			const exitCode = 128;
 			const actions = [
 				{
@@ -151,7 +155,7 @@ suite('ContextualActionAddon', () => {
 					strictEqual(getMatchActions(createCommand(`git status`, output, GitPushOutputRegex, exitCode), expectedMap), undefined);
 				});
 			});
-			suite('returns undefined when', () => {
+			suite('returns actions when', () => {
 				test('expected unix exit code', () => {
 					assertMatchOptions(getMatchActions(createCommand(command, output, GitPushOutputRegex, exitCode), expectedMap), actions);
 				});
@@ -201,6 +205,47 @@ suite('ContextualActionAddon', () => {
 				test('expected unix exit code', () => {
 					assertMatchOptions(getMatchActions(createCommand(command, output, GitCreatePrOutputRegex, exitCode), expectedMap), actions);
 				});
+			});
+		});
+	});
+	suite('gitPush - multiple providers', () => {
+		const expectedMap = new Map();
+		const command = `git push`;
+		const output = `fatal: The current branch test22 has no upstream branch.
+		To push the current branch and set the remote as upstream, use
+
+			git push --set-upstream origin test22`;
+		const exitCode = 128;
+		const actions = [
+			{
+				id: 'terminal.gitPush',
+				label: 'Git push test22',
+				run: true,
+				tooltip: 'Git push test22',
+				enabled: true
+			}
+		];
+		setup(() => {
+			const pushCommand = gitPushSetUpstream();
+			const prCommand = gitCreatePr(openerService);
+			contextualActionAddon.registerCommandFinishedListener(pushCommand);
+			contextualActionAddon.registerCommandFinishedListener(prCommand);
+			expectedMap.set(pushCommand.commandLineMatcher.toString(), [pushCommand, prCommand]);
+		});
+		suite('returns undefined when', () => {
+			test('output does not match', () => {
+				strictEqual(getMatchActions(createCommand(command, `invalid output`, GitPushOutputRegex, exitCode), expectedMap), undefined);
+			});
+			test('command does not match', () => {
+				strictEqual(getMatchActions(createCommand(`git status`, output, GitPushOutputRegex, exitCode), expectedMap), undefined);
+			});
+		});
+		suite('returns actions when', () => {
+			test('expected unix exit code', () => {
+				assertMatchOptions(getMatchActions(createCommand(command, output, GitPushOutputRegex, exitCode), expectedMap), actions);
+			});
+			test('matching exit status', () => {
+				assertMatchOptions(getMatchActions(createCommand(command, output, GitPushOutputRegex, 2), expectedMap), actions);
 			});
 		});
 	});
