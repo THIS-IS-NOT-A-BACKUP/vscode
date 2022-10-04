@@ -15,7 +15,7 @@ import { ITerminalCommand, ITerminalOutputMatcher, TerminalCapability } from 'vs
 import { CommandDetectionCapability } from 'vs/platform/terminal/common/capabilities/commandDetectionCapability';
 import { TerminalCapabilityStore } from 'vs/platform/terminal/common/capabilities/terminalCapabilityStore';
 import { ITerminalQuickFixAction, ITerminalInstance } from 'vs/workbench/contrib/terminal/browser/terminal';
-import { freePort, FreePortOutputRegex, gitCreatePr, GitCreatePrOutputRegex, GitPushOutputRegex, gitPushSetUpstream, gitSimilarCommand, GitSimilarOutputRegex } from 'vs/workbench/contrib/terminal/browser/terminalQuickFixBuiltinActions';
+import { freePort, FreePortOutputRegex, gitCreatePr, GitCreatePrOutputRegex, GitPushOutputRegex, gitPushSetUpstream, gitSimilarCommand, GitSimilarOutputRegex, gitTwoDashes, GitTwoDashesRegex } from 'vs/workbench/contrib/terminal/browser/terminalQuickFixBuiltinActions';
 import { TerminalQuickFixAddon, getQuickFixes } from 'vs/workbench/contrib/terminal/browser/xterm/quickFixAddon';
 import { Terminal } from 'xterm';
 
@@ -48,7 +48,7 @@ suite('QuickFixAddon', () => {
 		suite('gitSimilarCommand', async () => {
 			const expectedMap = new Map();
 			const command = `git sttatus`;
-			const output = `git: 'sttatus' is not a git command. See 'git --help'.
+			let output = `git: 'sttatus' is not a git command. See 'git --help'.
 
 			The most similar command is
 			status`;
@@ -81,6 +81,72 @@ suite('QuickFixAddon', () => {
 				});
 				test('matching exit status', () => {
 					assertMatchOptions(getQuickFixes(createCommand(command, output, GitSimilarOutputRegex, 2), expectedMap), actions);
+				});
+			});
+			suite('returns match', () => {
+				test('returns match', () => {
+					assertMatchOptions(getQuickFixes(createCommand(command, output, GitSimilarOutputRegex), expectedMap), actions);
+				});
+
+				test('returns multiple match', () => {
+					output = `git: 'pu' is not a git command. See 'git --help'.
+
+				The most similar commands are
+						pull
+						push`;
+					const actions = [
+						{
+							id: 'terminal.gitSimilarCommand',
+							label: 'Run: git pull',
+							run: true,
+							tooltip: 'Run: git pull',
+							enabled: true
+						},
+						{
+							id: 'terminal.gitSimilarCommand',
+							label: 'Run: git push',
+							run: true,
+							tooltip: 'Run: git push',
+							enabled: true
+						}
+					];
+					assertMatchOptions(getQuickFixes(createCommand('git pu', output, GitSimilarOutputRegex), expectedMap), actions);
+				});
+			});
+		});
+		suite('gitTwoDashes', async () => {
+			const expectedMap = new Map();
+			const command = `git add . -all`;
+			const output = 'error: did you mean `--all` (with two dashes)?';
+			const exitCode = 1;
+			const actions = [
+				{
+					id: 'terminal.gitTwoDashes',
+					label: 'Run: git add . --all',
+					run: true,
+					tooltip: 'Run: git add . --all',
+					enabled: true
+				}
+			];
+			setup(() => {
+				const command = gitTwoDashes();
+				expectedMap.set(command.commandLineMatcher.toString(), [command]);
+				quickFixAddon.registerCommandFinishedListener(command);
+			});
+			suite('returns undefined when', () => {
+				test('output does not match', () => {
+					strictEqual(getQuickFixes(createCommand(command, `invalid output`, GitTwoDashesRegex, exitCode), expectedMap), undefined);
+				});
+				test('command does not match', () => {
+					strictEqual(getQuickFixes(createCommand(`gt sttatus`, output, GitTwoDashesRegex, exitCode), expectedMap), undefined);
+				});
+			});
+			suite('returns undefined when', () => {
+				test('expected unix exit code', () => {
+					assertMatchOptions(getQuickFixes(createCommand(command, output, GitTwoDashesRegex, exitCode), expectedMap), actions);
+				});
+				test('matching exit status', () => {
+					assertMatchOptions(getQuickFixes(createCommand(command, output, GitTwoDashesRegex, 2), expectedMap), actions);
 				});
 			});
 		});
