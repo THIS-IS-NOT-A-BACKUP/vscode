@@ -1791,7 +1791,7 @@ suite('Editor Controller', () => {
 
 			CoreEditingCommands.Undo.runEditorCommand(null, editor, null);
 			assert.strictEqual(model.getLineContent(1), 'Hello world ');
-			assertCursor(viewModel, new Selection(1, 12, 1, 13));
+			assertCursor(viewModel, new Selection(1, 13, 1, 13));
 
 			CoreEditingCommands.Undo.runEditorCommand(null, editor, null);
 			assert.strictEqual(model.getLineContent(1), 'Hello world');
@@ -6109,6 +6109,26 @@ suite('Editor Controller', () => {
 		});
 	});
 
+	test('issue #112039: shift-continuing a double/triple-click and drag selection does not remember its starting mode', () => {
+		const model = createTextModel(
+			[
+				'just some text',
+				'and another line',
+				'and another one',
+			].join('\n')
+		);
+
+		withTestCodeEditor(model, {}, (editor, viewModel) => {
+			CoreNavigationCommands.WordSelect.runEditorCommand(null, editor, {
+				position: new Position(2, 6)
+			});
+			CoreNavigationCommands.MoveToSelect.runEditorCommand(null, editor, {
+				position: new Position(1, 8),
+			});
+			assertCursor(viewModel, new Selection(2, 12, 1, 6));
+		});
+	});
+
 	test('issue #158236: Shift click selection does not work on line number indicator', () => {
 		const model = createTextModel(
 			[
@@ -6126,6 +6146,30 @@ suite('Editor Controller', () => {
 				position: new Position(2, 1)
 			});
 			assertCursor(viewModel, new Selection(3, 5, 2, 1));
+		});
+	});
+
+	test('issue #111513: Text gets automatically selected when typing at the same location in another editor', () => {
+		const model = createTextModel(
+			[
+				'just',
+				'',
+				'some text',
+			].join('\n')
+		);
+
+		withTestCodeEditor(model, {}, (editor1, viewModel1) => {
+			editor1.setSelections([
+				new Selection(2, 1, 2, 1)
+			]);
+			withTestCodeEditor(model, {}, (editor2, viewModel2) => {
+				editor2.setSelections([
+					new Selection(2, 1, 2, 1)
+				]);
+				viewModel2.type('e', 'keyboard');
+				assertCursor(viewModel2, new Position(2, 2));
+				assertCursor(viewModel1, new Position(2, 2));
+			});
 		});
 	});
 });
