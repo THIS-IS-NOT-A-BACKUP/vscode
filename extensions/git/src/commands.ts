@@ -1141,6 +1141,7 @@ export class CommandCenter {
 			.filter(d => !!d) as LineChange[];
 
 		if (!selectedChanges.length) {
+			window.showInformationMessage(l10n.t('The selection range does not contain any changes.'));
 			return;
 		}
 
@@ -1299,6 +1300,7 @@ export class CommandCenter {
 		});
 
 		if (selectedChanges.length === changes.length) {
+			window.showInformationMessage(l10n.t('The selection range does not contain any changes.'));
 			return;
 		}
 
@@ -1388,6 +1390,7 @@ export class CommandCenter {
 			.filter(d => !!d) as LineChange[];
 
 		if (!selectedDiffs.length) {
+			window.showInformationMessage(l10n.t('The selection range does not contain any changes.'));
 			return;
 		}
 
@@ -2697,16 +2700,16 @@ export class CommandCenter {
 			return;
 		}
 
-		const picks = remotes.map(r => r.name);
+		const picks: RemoteItem[] = repository.remotes.map(r => new RemoteItem(repository, r));
 		const placeHolder = l10n.t('Pick a remote to remove');
 
-		const remoteName = await window.showQuickPick(picks, { placeHolder });
+		const remote = await window.showQuickPick(picks, { placeHolder });
 
-		if (!remoteName) {
+		if (!remote) {
 			return;
 		}
 
-		await repository.removeRemote(remoteName);
+		await repository.removeRemote(remote.remoteName);
 	}
 
 	private async _sync(repository: Repository, rebase: boolean): Promise<void> {
