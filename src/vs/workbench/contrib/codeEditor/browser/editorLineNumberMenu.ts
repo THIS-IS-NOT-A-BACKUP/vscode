@@ -5,6 +5,7 @@
 
 import { IAction, Separator } from 'vs/base/common/actions';
 import { Disposable, IDisposable } from 'vs/base/common/lifecycle';
+import { isMacintosh } from 'vs/base/common/platform';
 import { ICodeEditor, IEditorMouseEvent, MouseTargetType } from 'vs/editor/browser/editorBrowser';
 import { registerEditorContribution, EditorContributionInstantiation } from 'vs/editor/browser/editorExtensions';
 import { IEditorContribution } from 'vs/editor/common/editorCommon';
@@ -56,20 +57,26 @@ export class EditorLineNumberContextMenu extends Disposable implements IEditorCo
 	) {
 		super();
 
-		this._register(this.editor.onContextMenu((e: IEditorMouseEvent) => this.show(e)));
+		this._register(this.editor.onMouseDown((e: IEditorMouseEvent) => this.show(e)));
 
 	}
 
 	public show(e: IEditorMouseEvent) {
-		const menu = this.menuService.createMenu(MenuId.EditorLineNumberContext, this.contextKeyService);
-
 		const model = this.editor.getModel();
-		if (!e.target.position || !model || e.target.type !== MouseTargetType.GUTTER_LINE_NUMBERS && e.target.type !== MouseTargetType.GUTTER_GLYPH_MARGIN) {
+
+		// on macOS ctrl+click is interpreted as right click
+		if (!e.event.rightButton && !(isMacintosh && e.event.leftButton && e.event.ctrlKey)
+			|| e.target.type !== MouseTargetType.GUTTER_LINE_NUMBERS && e.target.type !== MouseTargetType.GUTTER_GLYPH_MARGIN
+			|| !e.target.position || !model
+		) {
 			return;
 		}
 
 		const anchor = { x: e.event.posx, y: e.event.posy };
 		const lineNumber = e.target.position.lineNumber;
+
+		const contextKeyService = this.contextKeyService.createOverlay([['editorLineNumber', lineNumber]]);
+		const menu = this.menuService.createMenu(MenuId.EditorLineNumberContext, contextKeyService);
 
 		const actions: IAction[][] = [];
 
