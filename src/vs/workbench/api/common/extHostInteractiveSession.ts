@@ -3,8 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as typeConvert from 'vs/workbench/api/common/extHostTypeConverters';
 import { CancellationToken } from 'vs/base/common/cancellation';
+import { Emitter } from 'vs/base/common/event';
 import { toDisposable } from 'vs/base/common/lifecycle';
 import { StopWatch } from 'vs/base/common/stopwatch';
 import { withNullAsUndefined } from 'vs/base/common/types';
@@ -12,7 +12,8 @@ import { localize } from 'vs/nls';
 import { IRelaxedExtensionDescription } from 'vs/platform/extensions/common/extensions';
 import { ILogService } from 'vs/platform/log/common/log';
 import { ExtHostInteractiveSessionShape, IInteractiveRequestDto, IInteractiveResponseDto, IInteractiveSessionDto, IMainContext, MainContext, MainThreadInteractiveSessionShape } from 'vs/workbench/api/common/extHost.protocol';
-import { IInteractiveSlashCommand } from 'vs/workbench/contrib/interactiveSession/common/interactiveSessionService';
+import * as typeConvert from 'vs/workbench/api/common/extHostTypeConverters';
+import { IInteractiveSessionUserActionEvent, IInteractiveSlashCommand } from 'vs/workbench/contrib/interactiveSession/common/interactiveSessionService';
 import type * as vscode from 'vscode';
 
 class InteractiveSessionProviderWrapper {
@@ -32,6 +33,10 @@ export class ExtHostInteractiveSession implements ExtHostInteractiveSessionShape
 
 	private readonly _interactiveSessionProvider = new Map<number, InteractiveSessionProviderWrapper>();
 	private readonly _interactiveSessions = new Map<number, vscode.InteractiveSession>();
+	// private readonly _providerResponsesByRequestId = new Map<number, { response: vscode.ProviderResult<vscode.InteractiveResponse | vscode.InteractiveResponseForProgress>; sessionId: number }>();
+
+	private readonly _onDidPerformUserAction = new Emitter<vscode.InteractiveSessionUserActionEvent>();
+	public readonly onDidPerformUserAction = this._onDidPerformUserAction.event;
 
 	private readonly _proxy: MainThreadInteractiveSessionShape;
 
@@ -81,7 +86,7 @@ export class ExtHostInteractiveSession implements ExtHostInteractiveSessionShape
 		};
 	}
 
-	async $resolveInteractiveRequest(handle: number, sessionId: number, context: any, token: CancellationToken): Promise<IInteractiveRequestDto | undefined> {
+	async $resolveInteractiveRequest(handle: number, sessionId: number, context: any, token: CancellationToken): Promise<Omit<IInteractiveRequestDto, 'id'> | undefined> {
 		const entry = this._interactiveSessionProvider.get(handle);
 		if (!entry) {
 			return undefined;
@@ -134,57 +139,39 @@ export class ExtHostInteractiveSession implements ExtHostInteractiveSessionShape
 			message: request.message,
 		};
 
-		if (entry.provider.provideResponse) {
-			const res = await entry.provider.provideResponse(requestObj, token);
+		const stopWatch = StopWatch.create(false);
+		let firstProgress: number | undefined;
+		const progressObj: vscode.Progress<vscode.InteractiveProgress> = {
+			report: (progress: vscode.InteractiveProgress) => {
+				if (typeof firstProgress === 'undefined') {
+					firstProgress = stopWatch.elapsed();
+				}
+
+				this._proxy.$acceptInteractiveResponseProgress(handle, sessionId, progress);
+			}
+		};
+		let result: vscode.InteractiveResponseForProgress | undefined | null;
+		try {
+			result = await entry.provider.provideResponseWithProgress(requestObj, progressObj, token);
+			if (!result) {
+				result = { errorDetails: { message: localize('emptyResponse', "Provider returned null response") } };
+			}
+		} catch (err) {
+			result = { errorDetails: { message: localize('errorResponse', "Error from provider: {0}", err.message), responseIsIncomplete: true } };
+			this.logService.error(err);
+		}
+
+		try {
 			if (realSession.saveState) {
 				const newState = realSession.saveState();
 				this._proxy.$acceptInteractiveSessionState(sessionId, newState);
 			}
-
-			if (!res) {
-				return;
-			}
-
-			// TODO clean up this API
-			this._proxy.$acceptInteractiveResponseProgress(handle, sessionId, { responsePart: res.content });
-			return { followups: res.followups, timings: { firstProgress: 0, totalElapsed: 0 } };
-		} else if (entry.provider.provideResponseWithProgress) {
-			const stopWatch = StopWatch.create(false);
-			let firstProgress: number | undefined;
-			const progressObj: vscode.Progress<vscode.InteractiveProgress> = {
-				report: (progress: vscode.InteractiveProgress) => {
-					if (typeof firstProgress === 'undefined') {
-						firstProgress = stopWatch.elapsed();
-					}
-
-					this._proxy.$acceptInteractiveResponseProgress(handle, sessionId, { responsePart: progress.content });
-				}
-			};
-			let result: vscode.InteractiveResponseForProgress | undefined | null;
-			try {
-				result = await entry.provider.provideResponseWithProgress(requestObj, progressObj, token);
-				if (!result) {
-					result = { errorDetails: { message: localize('emptyResponse', "Provider returned null response") } };
-				}
-			} catch (err) {
-				result = { errorDetails: { message: localize('errorResponse', "Error from provider: {0}", err.message), responseIsIncomplete: true } };
-				this.logService.error(err);
-			}
-
-			try {
-				if (realSession.saveState) {
-					const newState = realSession.saveState();
-					this._proxy.$acceptInteractiveSessionState(sessionId, newState);
-				}
-			} catch (err) {
-				this.logService.warn(err);
-			}
-
-			const timings = { firstProgress: firstProgress ?? 0, totalElapsed: stopWatch.elapsed() };
-			return { followups: result.followups, commandFollowups: result.commands, errorDetails: result.errorDetails, timings };
+		} catch (err) {
+			this.logService.warn(err);
 		}
 
-		throw new Error('Provider must implement either provideResponse or provideResponseWithProgress');
+		const timings = { firstProgress: firstProgress ?? 0, totalElapsed: stopWatch.elapsed() };
+		return { followups: result.followups, commandFollowups: result.commands, errorDetails: result.errorDetails, timings };
 	}
 
 	async $provideSlashCommands(handle: number, sessionId: number, token: CancellationToken): Promise<IInteractiveSlashCommand[] | undefined> {
@@ -211,6 +198,10 @@ export class ExtHostInteractiveSession implements ExtHostInteractiveSessionShape
 
 	$releaseSession(sessionId: number) {
 		this._interactiveSessions.delete(sessionId);
+	}
+
+	async $onDidPerformUserAction(event: IInteractiveSessionUserActionEvent): Promise<void> {
+		this._onDidPerformUserAction.fire(event);
 	}
 
 	//#endregion

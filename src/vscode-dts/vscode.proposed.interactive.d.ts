@@ -48,7 +48,7 @@ declare module 'vscode' {
 		name: string;
 
 		/**
-		 * Either a full URI or a relative path to the icon of the participant.
+		 * A full URI for the icon of the participant.
 		 */
 		icon?: Uri;
 	}
@@ -71,11 +71,6 @@ declare module 'vscode' {
 		message: string;
 	}
 
-	export interface InteractiveResponse {
-		content: string;
-		followups?: string[];
-	}
-
 	export interface InteractiveResponseErrorDetails {
 		message: string;
 		responseIsIncomplete?: boolean;
@@ -87,9 +82,15 @@ declare module 'vscode' {
 		errorDetails?: InteractiveResponseErrorDetails;
 	}
 
-	export interface InteractiveProgress {
+	export interface InteractiveProgressContent {
 		content: string;
 	}
+
+	export interface InteractiveProgressId {
+		responseId: string;
+	}
+
+	export type InteractiveProgress = InteractiveProgressContent | InteractiveProgressId;
 
 	export interface InteractiveResponseCommand {
 		commandId: string;
@@ -109,17 +110,48 @@ declare module 'vscode' {
 
 		prepareSession(initialState: InteractiveSessionState | undefined, token: CancellationToken): ProviderResult<InteractiveSession>;
 		resolveRequest(session: InteractiveSession, context: InteractiveSessionRequestArgs | string, token: CancellationToken): ProviderResult<InteractiveRequest>;
-		provideResponse?(request: InteractiveRequest, token: CancellationToken): ProviderResult<InteractiveResponse>;
-		provideResponseWithProgress?(request: InteractiveRequest, progress: Progress<InteractiveProgress>, token: CancellationToken): ProviderResult<InteractiveResponseForProgress>;
+		provideResponseWithProgress(request: InteractiveRequest, progress: Progress<InteractiveProgress>, token: CancellationToken): ProviderResult<InteractiveResponseForProgress>;
+	}
+
+	export enum InteractiveSessionVoteDirection {
+		Up = 1,
+		Down = 2
+	}
+
+	export interface InteractiveSessionVoteAction {
+		kind: 'vote';
+		responseId: string;
+		direction: InteractiveSessionVoteDirection;
+	}
+
+	export interface InteractiveSessionCopyAction {
+		kind: 'copy';
+		responseId: string;
+		codeBlockIndex: number;
+	}
+
+	export interface InteractiveSessionInsertAction {
+		kind: 'insert';
+		responseId: string;
+		codeBlockIndex: number;
+	}
+
+	export type InteractiveSessionUserAction = InteractiveSessionVoteAction | InteractiveSessionCopyAction | InteractiveSessionInsertAction;
+
+	export interface InteractiveSessionUserActionEvent {
+		action: InteractiveSessionUserAction;
+		providerId: string;
 	}
 
 	export namespace interactive {
 		// current version of the proposal.
-		export const _version: 1 | number;
+		export const _version: 2 | number;
 
 		export function registerInteractiveSessionProvider(id: string, provider: InteractiveSessionProvider): Disposable;
 		export function addInteractiveRequest(context: InteractiveSessionRequestArgs): void;
 
 		export function registerInteractiveEditorSessionProvider(provider: InteractiveEditorSessionProvider): Disposable;
+
+		export const onDidPerformUserAction: Event<InteractiveSessionUserActionEvent>;
 	}
 }
