@@ -43,7 +43,8 @@ export interface IInteractiveProvider {
 	readonly progressiveRenderingEnabled?: boolean;
 	readonly iconUrl?: string;
 	prepareSession(initialState: IPersistedInteractiveState | undefined, token: CancellationToken): ProviderResult<IInteractiveSession | undefined>;
-	resolveRequest?(session: IInteractiveSession, context: any, token: CancellationToken): ProviderResult<Omit<IInteractiveRequest, 'id'>>;
+	resolveRequest?(session: IInteractiveSession, context: any, token: CancellationToken): ProviderResult<IInteractiveRequest>;
+	provideWelcomeMessage?(token: CancellationToken): ProviderResult<(string | IInteractiveSessionReplyFollowup[])[] | undefined>;
 	provideSuggestions?(token: CancellationToken): ProviderResult<string[] | undefined>;
 	provideFollowups?(session: IInteractiveSession, token: CancellationToken): ProviderResult<IInteractiveSessionFollowup[] | undefined>;
 	provideReply(request: IInteractiveRequest, progress: (progress: IInteractiveProgress) => void, token: CancellationToken): ProviderResult<IInteractiveResponse>;
@@ -118,7 +119,6 @@ export interface IInteractiveSessionService {
 	acceptNewSessionState(sessionId: number, state: any): void;
 	addInteractiveRequest(context: any): void;
 	provideSuggestions(providerId: string, token: CancellationToken): Promise<string[] | undefined>;
-	// provideFollowups(sessionId: number, token: CancellationToken): Promise<IInteractiveSessionFollowup[] | undefined>;
 
 	onDidPerformUserAction: Event<IInteractiveSessionUserActionEvent>;
 	notifyUserAction(event: IInteractiveSessionUserActionEvent): void;

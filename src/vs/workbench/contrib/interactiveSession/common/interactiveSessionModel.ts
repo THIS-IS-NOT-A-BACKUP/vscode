@@ -8,7 +8,7 @@ import { IMarkdownString, MarkdownString } from 'vs/base/common/htmlContent';
 import { Disposable } from 'vs/base/common/lifecycle';
 import { URI } from 'vs/base/common/uri';
 import { ILogService } from 'vs/platform/log/common/log';
-import { IInteractiveProgress, IInteractiveResponse, IInteractiveSession, IInteractiveSessionFollowup } from 'vs/workbench/contrib/interactiveSession/common/interactiveSessionService';
+import { IInteractiveProgress, IInteractiveResponse, IInteractiveSession, IInteractiveSessionFollowup, IInteractiveSessionReplyFollowup } from 'vs/workbench/contrib/interactiveSession/common/interactiveSessionService';
 
 export interface IInteractiveRequestModel {
 	readonly id: string;
@@ -131,6 +131,7 @@ export interface IInteractiveSessionModel {
 	readonly onDidChange: Event<IInteractiveSessionChangeEvent>;
 	readonly sessionId: number;
 	readonly providerId: string;
+	readonly welcomeMessage: IInteractiveSessionWelcomeMessageModel | undefined;
 	getRequests(): IInteractiveRequestModel[];
 }
 
@@ -143,6 +144,7 @@ export interface ISerializableInteractiveSessionRequestData {
 	message: string;
 	response: string | undefined;
 	responseErrorDetails: IInteractiveResponseErrorDetails | undefined;
+	followups: IInteractiveSessionFollowup[] | undefined;
 }
 
 export interface ISerializableInteractiveSessionData {
@@ -184,6 +186,7 @@ export class InteractiveSessionModel extends Disposable implements IInteractiveS
 	constructor(
 		public readonly session: IInteractiveSession,
 		public readonly providerId: string,
+		public readonly welcomeMessage: InteractiveWelcomeMessageModel | undefined,
 		initialData: ISerializableInteractiveSessionData | undefined,
 		@ILogService private readonly logService: ILogService
 	) {
@@ -202,7 +205,7 @@ export class InteractiveSessionModel extends Disposable implements IInteractiveS
 		return requests.map((raw: ISerializableInteractiveSessionRequestData) => {
 			const request = new InteractiveRequestModel(raw.message, this.session.requesterUsername, this.session.requesterAvatarIconUri);
 			if (raw.response || raw.responseErrorDetails) {
-				request.response = new InteractiveResponseModel(new MarkdownString(raw.response), this.session.responderUsername, this.providerId, this.session.responderAvatarIconUri, true, raw.providerResponseId, raw.responseErrorDetails);
+				request.response = new InteractiveResponseModel(new MarkdownString(raw.response), this.session.responderUsername, this.providerId, this.session.responderAvatarIconUri, true, raw.providerResponseId, raw.responseErrorDetails, raw.followups);
 			}
 			return request;
 		});
@@ -275,7 +278,8 @@ export class InteractiveSessionModel extends Disposable implements IInteractiveS
 					providerResponseId: r.response?.providerResponseId,
 					message: r.message,
 					response: r.response ? r.response.response.value : undefined,
-					responseErrorDetails: r.response?.errorDetails
+					responseErrorDetails: r.response?.errorDetails,
+					followups: r.response?.followups
 				};
 			}),
 			providerId: this.providerId,
@@ -287,5 +291,28 @@ export class InteractiveSessionModel extends Disposable implements IInteractiveS
 		this._requests.forEach(r => r.response?.dispose());
 		this._onDidDispose.fire();
 		super.dispose();
+	}
+}
+
+export type IInteractiveWelcomeMessageContent = IMarkdownString | IInteractiveSessionReplyFollowup[];
+
+export interface IInteractiveSessionWelcomeMessageModel {
+	readonly id: string;
+	readonly content: IInteractiveWelcomeMessageContent[];
+	readonly username: string;
+	readonly avatarIconUri?: URI;
+
+}
+
+export class InteractiveWelcomeMessageModel implements IInteractiveSessionWelcomeMessageModel {
+	private static nextId = 0;
+
+	private _id: string;
+	public get id(): string {
+		return this._id;
+	}
+
+	constructor(public readonly content: IInteractiveWelcomeMessageContent[], public readonly username: string, public readonly avatarIconUri?: URI) {
+		this._id = 'welcome_' + InteractiveWelcomeMessageModel.nextId++;
 	}
 }
