@@ -9,7 +9,7 @@ import { DisposableStore, combinedDisposable, toDisposable } from 'vs/base/commo
 import { IActiveCodeEditor, ICodeEditor } from 'vs/editor/browser/editorBrowser';
 import { EditorLayoutInfo, EditorOption } from 'vs/editor/common/config/editorOptions';
 import { Range } from 'vs/editor/common/core/range';
-import { IEditorContribution, IEditorDecorationsCollection } from 'vs/editor/common/editorCommon';
+import { IEditorContribution, IEditorDecorationsCollection, ScrollType } from 'vs/editor/common/editorCommon';
 import { localize } from 'vs/nls';
 import { IContextKey, IContextKeyService } from 'vs/platform/contextkey/common/contextkey';
 import { IInstantiationService, ServicesAccessor } from 'vs/platform/instantiation/common/instantiation';
@@ -56,8 +56,6 @@ import { Command, CompletionContext, CompletionItem, CompletionItemInsertTextRul
 import { LanguageSelector } from 'vs/editor/common/languageSelector';
 import { DEFAULT_FONT_FAMILY } from 'vs/workbench/browser/style';
 import { ICommandService } from 'vs/platform/commands/common/commands';
-import { isFalsyOrEmpty } from 'vs/base/common/arrays';
-
 
 class InteractiveEditorWidget {
 
@@ -482,7 +480,18 @@ export class InteractiveEditorZoneWidget extends ZoneWidget {
 	}
 
 	updatePosition(where: IPosition) {
+		// todo@jrieken
+		// UGYLY: we need to restore focus because showing the zone removes and adds it and that
+		// means we loose focus for a bit
+		const hasFocusNow = this.widget.inputEditor.hasWidgetFocus();
 		super.show(where, this._computeHeightInLines());
+		if (hasFocusNow) {
+			this.widget.inputEditor.focus();
+		}
+	}
+
+	protected override revealRange(_range: Range, _isLastLine: boolean) {
+		// disabled
 	}
 
 	override hide(): void {
@@ -497,7 +506,7 @@ class CommandAction extends Action {
 
 	constructor(command: Command, @ICommandService commandService: ICommandService) {
 		const icon = ThemeIcon.fromString(command.title);
-		super(command.id, icon ? command.tooltip : command.title, icon ? ThemeIcon.asClassName(icon) : undefined, true, () => commandService.executeCommand(command.id));
+		super(command.id, icon ? command.tooltip : command.title, icon ? ThemeIcon.asClassName(icon) : undefined, true, () => commandService.executeCommand(command.id, ...(command.arguments ?? [])));
 	}
 }
 
@@ -831,8 +840,8 @@ export class InteractiveEditorController implements IEditorContribution {
 			this._ctsRequest = new CancellationTokenSource(this._ctsSession.token);
 
 			this._historyOffset = -1;
-			const fullPlaceholder = isFalsyOrEmpty(session.slashCommands) ? placeholder : localize('placeholder', "{0}, type '/' for topics", placeholder);
-			const input = await this._zone.getInput(wholeRange.getEndPosition(), fullPlaceholder, value, this._ctsRequest.token);
+			this._editor.revealRange(wholeRange, ScrollType.Smooth);
+			const input = await this._zone.getInput(wholeRange.getEndPosition(), placeholder, value, this._ctsRequest.token);
 			roundStore.clear();
 
 			if (!input || !input.value) {
@@ -842,6 +851,7 @@ export class InteractiveEditorController implements IEditorContribution {
 			const refer = session.slashCommands?.some(value => value.refer && input.value.startsWith(`/${value.command}`));
 			if (refer) {
 				this._logService.info('[IE] seeing refer command, continuing outside editor', provider.debugName);
+				this._editor.setSelection(wholeRange);
 				this._instaService.invokeFunction(showMessageResponse, input.value);
 				continue;
 			}
