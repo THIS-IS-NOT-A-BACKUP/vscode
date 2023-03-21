@@ -73,9 +73,9 @@ declare module 'vscode' {
 	}
 
 	export interface InteractiveSession {
-		// TODO Will be required
-		requester?: InteractiveSessionParticipantInformation;
-		responder?: InteractiveSessionParticipantInformation;
+		requester: InteractiveSessionParticipantInformation;
+		responder: InteractiveSessionParticipantInformation;
+		inputPlaceholder?: string;
 
 		saveState?(): InteractiveSessionState;
 	}
@@ -167,6 +167,9 @@ declare module 'vscode' {
 		responseId: string;
 		codeBlockIndex: number;
 		copyType: InteractiveSessionCopyKind;
+		copiedCharacters: number;
+		totalCharacters: number;
+		copiedText: string;
 	}
 
 	export interface InteractiveSessionInsertAction {
