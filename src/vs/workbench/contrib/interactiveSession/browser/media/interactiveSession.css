@@ -7,10 +7,6 @@
 	border-top: 1px solid var(--vscode-interactive-responseBorder);
 }
 
-.interactive-list .monaco-list-row:last-of-type .interactive-item-container {
-	border-bottom: 1px solid var(--vscode-interactive-responseBorder);
-}
-
 .interactive-list .monaco-list-row .monaco-tl-twistie {
 	/* Hide twisties */
 	display: none !important;
@@ -21,6 +17,9 @@
 	display: flex;
 	flex-direction: column;
 	gap: 6px;
+
+	user-select: text;
+	-webkit-user-select: text;
 }
 
 .interactive-list .interactive-item-container .header {
@@ -49,6 +48,8 @@
 	height: 24px;
 	border-radius: 50%;
 	background: var(--vscode-badge-background);
+	pointer-events: none;
+	user-select: none;
 }
 
 .interactive-list .interactive-item-container .header .avatar .icon {
@@ -100,13 +101,8 @@
 	overflow: hidden;
 }
 
-.interactive-list .monaco-list-row .interactive-request,
-.interactive-list .monaco-list-row .interactive-response {
-	user-select: text;
-	-webkit-user-select: text;
-}
-
-.interactive-list .monaco-list-row .interactive-response {
+.interactive-list .monaco-list-row .interactive-response,
+.interactive-list .monaco-list-row .interactive-welcome {
 	background-color: var(--vscode-interactive-responseBackground);
 }
 
@@ -133,6 +129,8 @@
 .interactive-list .monaco-list-row .monaco-tokenized-source,
 .interactive-list .monaco-list-row code {
 	font-family: var(--monaco-monospace-font);
+	word-break: break-all;
+	word-wrap: break-word;
 }
 
 .interactive-session .interactive-input-and-toolbar {
@@ -164,7 +162,7 @@
 .interactive-session .interactive-input-part .interactive-execute-toolbar {
 	position: absolute;
 	height: 22px;
-	
+
 	right: 3px;
 	bottom: 6px;
 }
@@ -235,11 +233,12 @@
 
 .interactive-session .interactive-response .interactive-response-error-details {
 	display: flex;
-	align-items: center;
+	align-items: start;
 	gap: 6px;
 }
 
 .interactive-session .interactive-response .interactive-response-error-details .codicon {
+	margin-top: 1px;
 	color: var(--vscode-errorForeground) !important; /* Have to override default styles which apply to all lists */
 }
 
@@ -251,6 +250,7 @@
 	padding: 12px 0px;
 	display: flex;
 	flex-direction: column;
+	border-top: solid 1px var(--vscode-interactive-responseBorder);
 }
 
 .interactive-session .interactive-session-followups {
@@ -261,15 +261,19 @@
 }
 
 .interactive-session .interactive-session-followups .monaco-button {
-	width: initial;
-
-	color: var(--vscode-textLink-foreground);
-	justify-content: left;
+	display: block;
 	text-align: left;
+	width: initial;
+	color: var(--vscode-textLink-foreground);
+}
+
+.interactive-session .interactive-session-followups .monaco-button .codicon-sparkle {
+	float: left;
 }
 
 .interactive-session .interactive-session-followups .monaco-button .codicon {
 	margin-left: 0;
+	margin-top: 1px;
 }
 
 .interactive-session .interactive-response-followups .monaco-button {
