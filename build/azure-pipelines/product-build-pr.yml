@@ -24,7 +24,7 @@ jobs:
   - ${{ if ne(variables['VSCODE_CIBUILD'], true) }}:
     - job: Compile
       displayName: Compile & Hygiene
-      pool: vscode-1es-vscode-linux-20.04
+      pool: 1es-oss-ubuntu-20.04-x64
       timeoutInMinutes: 30
       variables:
         VSCODE_ARCH: x64
@@ -35,7 +35,7 @@ jobs:
 
     - job: Linuxx64UnitTest
       displayName: Linux (Unit Tests)
-      pool: vscode-1es-vscode-linux-20.04
+      pool: 1es-oss-ubuntu-20.04-x64
       timeoutInMinutes: 30
       variables:
         VSCODE_ARCH: x64
@@ -46,13 +46,14 @@ jobs:
           parameters:
             VSCODE_ARCH: x64
             VSCODE_QUALITY: ${{ variables.VSCODE_QUALITY }}
+            VSCODE_CIBUILD: ${{ variables.VSCODE_CIBUILD }}
             VSCODE_RUN_UNIT_TESTS: true
             VSCODE_RUN_INTEGRATION_TESTS: false
             VSCODE_RUN_SMOKE_TESTS: false
 
     - job: Linuxx64IntegrationTest
       displayName: Linux (Integration Tests)
-      pool: vscode-1es-vscode-linux-20.04
+      pool: 1es-oss-ubuntu-20.04-x64
       timeoutInMinutes: 30
       variables:
         VSCODE_ARCH: x64
@@ -63,13 +64,14 @@ jobs:
           parameters:
             VSCODE_ARCH: x64
             VSCODE_QUALITY: ${{ variables.VSCODE_QUALITY }}
+            VSCODE_CIBUILD: ${{ variables.VSCODE_CIBUILD }}
             VSCODE_RUN_UNIT_TESTS: false
             VSCODE_RUN_INTEGRATION_TESTS: true
             VSCODE_RUN_SMOKE_TESTS: false
 
     - job: Linuxx64SmokeTest
       displayName: Linux (Smoke Tests)
-      pool: vscode-1es-vscode-linux-20.04
+      pool: 1es-oss-ubuntu-20.04-x64
       timeoutInMinutes: 30
       variables:
         VSCODE_ARCH: x64
@@ -80,20 +82,21 @@ jobs:
           parameters:
             VSCODE_ARCH: x64
             VSCODE_QUALITY: ${{ variables.VSCODE_QUALITY }}
+            VSCODE_CIBUILD: ${{ variables.VSCODE_CIBUILD }}
             VSCODE_RUN_UNIT_TESTS: false
             VSCODE_RUN_INTEGRATION_TESTS: false
             VSCODE_RUN_SMOKE_TESTS: true
 
     - job: LinuxCLI
       displayName: Linux (CLI)
-      pool: vscode-1es-vscode-linux-20.04
+      pool: 1es-oss-ubuntu-20.04-x64
       timeoutInMinutes: 30
       steps:
         - template: cli/test.yml
 
     - job: Windowsx64UnitTests
       displayName: Windows (Unit Tests)
-      pool: vscode-1es-vscode-windows-2019
+      pool: 1es-oss-windows-2022-x64
       timeoutInMinutes: 30
       variables:
         VSCODE_ARCH: x64
@@ -102,13 +105,14 @@ jobs:
         - template: win32/product-build-win32.yml
           parameters:
             VSCODE_QUALITY: ${{ variables.VSCODE_QUALITY }}
+            VSCODE_CIBUILD: ${{ variables.VSCODE_CIBUILD }}
             VSCODE_RUN_UNIT_TESTS: true
             VSCODE_RUN_INTEGRATION_TESTS: false
             VSCODE_RUN_SMOKE_TESTS: false
 
     - job: Windowsx64IntegrationTests
       displayName: Windows (Integration Tests)
-      pool: vscode-1es-vscode-windows-2019
+      pool: 1es-oss-windows-2022-x64
       timeoutInMinutes: 30
       variables:
         VSCODE_ARCH: x64
@@ -117,13 +121,14 @@ jobs:
         - template: win32/product-build-win32.yml
           parameters:
             VSCODE_QUALITY: ${{ variables.VSCODE_QUALITY }}
+            VSCODE_CIBUILD: ${{ variables.VSCODE_CIBUILD }}
             VSCODE_RUN_UNIT_TESTS: false
             VSCODE_RUN_INTEGRATION_TESTS: true
             VSCODE_RUN_SMOKE_TESTS: false
 
     # - job: Windowsx64SmokeTests
     #   displayName: Windows (Smoke Tests)
-    #   pool: vscode-1es-vscode-windows-2019
+    #   pool: 1es-oss-windows-2022-x64
     #   timeoutInMinutes: 30
     #   variables:
     #     VSCODE_ARCH: x64
@@ -139,7 +144,7 @@ jobs:
   - ${{ if eq(variables['VSCODE_CIBUILD'], true) }}:
     - job: Linuxx64MaintainNodeModulesCache
       displayName: Linux (Maintain node_modules cache)
-      pool: vscode-1es-vscode-linux-20.04
+      pool: 1es-oss-ubuntu-20.04-x64
       timeoutInMinutes: 30
       variables:
         VSCODE_ARCH: x64
@@ -148,7 +153,7 @@ jobs:
 
     - job: Windowsx64MaintainNodeModulesCache
       displayName: Windows (Maintain node_modules cache)
-      pool: vscode-1es-vscode-windows-2019
+      pool: 1es-oss-windows-2022-x64
       timeoutInMinutes: 30
       variables:
         VSCODE_ARCH: x64
