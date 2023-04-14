@@ -42,7 +42,9 @@ import { InteractiveEditorZoneWidget } from 'vs/workbench/contrib/interactiveEdi
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
 import { URI } from 'vs/base/common/uri';
 import { isEqual } from 'vs/base/common/resources';
-import { decodeBase64 } from 'vs/base/common/buffer';
+import { InteractiveEditorDiffWidget } from 'vs/workbench/contrib/interactiveEditor/browser/interactiveEditorDiffWidget';
+import { IModelService } from 'vs/editor/common/services/model';
+import { Event } from 'vs/base/common/event';
 
 
 type Exchange = { req: IInteractiveEditorRequest; res: IInteractiveEditorResponse };
@@ -157,7 +159,7 @@ class InlineDiffDecorations {
 export class EditResponse {
 
 	readonly localEdits: TextEdit[] = [];
-	readonly singleCreateFileEdit: { uri: URI; edits: TextEdit[] } | undefined;
+	readonly singleCreateFileEdit: { uri: URI; edits: Promise<TextEdit>[] } | undefined;
 	readonly workspaceEdits: ResourceEdit[] | undefined;
 	readonly workspaceEditsIncludeLocalEdits: boolean = false;
 
@@ -184,9 +186,8 @@ export class EditResponse {
 							this.singleCreateFileEdit = undefined;
 						} else {
 							this.singleCreateFileEdit = { uri: edit.newResource, edits: [] };
-							if (edit.options.contentsBase64) {
-								const newText = decodeBase64(edit.options.contentsBase64).toString();
-								this.singleCreateFileEdit.edits.push({ range: new Range(1, 1, 1, 1), text: newText });
+							if (edit.options.contents) {
+								this.singleCreateFileEdit.edits.push(edit.options.contents.then(x => ({ range: new Range(1, 1, 1, 1), text: x.toString() })));
 							}
 						}
 					}
@@ -197,7 +198,7 @@ export class EditResponse {
 						this.workspaceEditsIncludeLocalEdits = true;
 
 					} else if (isEqual(this.singleCreateFileEdit?.uri, edit.resource)) {
-						this.singleCreateFileEdit!.edits.push(edit.textEdit);
+						this.singleCreateFileEdit!.edits.push(Promise.resolve(edit.textEdit));
 					} else {
 						isComplexEdit = true;
 					}
@@ -222,7 +223,7 @@ class LastEditorState {
 	) { }
 }
 
-type EditMode = 'preview' | 'direct';
+type EditMode = 'live' | 'livePreview' | 'preview';
 
 export class InteractiveEditorController implements IEditorContribution {
 
@@ -258,6 +259,7 @@ export class InteractiveEditorController implements IEditorContribution {
 	private readonly _ctxLastFeedbackKind: IContextKey<'helpful' | 'unhelpful' | ''>;
 
 	private _lastEditState?: LastEditorState;
+	private _strategy?: EditModeStrategy;
 	private _lastInlineDecorations?: InlineDiffDecorations;
 	private _inlineDiffEnabled: boolean = false;
 
@@ -268,12 +270,12 @@ export class InteractiveEditorController implements IEditorContribution {
 		private readonly _editor: ICodeEditor,
 		@IInstantiationService private readonly _instaService: IInstantiationService,
 		@IInteractiveEditorService private readonly _interactiveEditorService: IInteractiveEditorService,
-		@IBulkEditService private readonly _bulkEditService: IBulkEditService,
 		@IEditorWorkerService private readonly _editorWorkerService: IEditorWorkerService,
 		@ILogService private readonly _logService: ILogService,
 		@ITelemetryService private readonly _telemetryService: ITelemetryService,
 		@IStorageService private readonly _storageService: IStorageService,
 		@IConfigurationService private readonly _configurationService: IConfigurationService,
+		@IModelService private readonly _modelService: IModelService,
 		@IContextKeyService contextKeyService: IContextKeyService,
 
 	) {
@@ -295,9 +297,13 @@ export class InteractiveEditorController implements IEditorContribution {
 		return InteractiveEditorController.ID;
 	}
 
+	private _getMode(): EditMode {
+		return this._configurationService.getValue('interactiveEditor.editMode');
+	}
+
 	async run(initialRange?: Range): Promise<void> {
 
-		const editMode: EditMode = this._configurationService.getValue('interactiveEditor.editMode');
+		const editMode = this._getMode();
 
 		this._ctsSession.dispose(true);
 
@@ -331,6 +337,11 @@ export class InteractiveEditorController implements IEditorContribution {
 			rounds: '',
 			undos: ''
 		};
+
+		this._strategy = this._instaService.createInstance(
+			editMode === 'preview' ? PreviewStrategy : editMode === 'livePreview' ? LivePreviewStrategy : LiveStrategy,
+			textModel, textModel.getAlternativeVersionId()
+		);
 
 		this._inlineDiffEnabled = this._storageService.getBoolean(InteractiveEditorController._inlineDiffStorageKey, StorageScope.PROFILE, false);
 		const inlineDiffDecorations = new InlineDiffDecorations(this._editor, this._inlineDiffEnabled);
@@ -367,7 +378,7 @@ export class InteractiveEditorController implements IEditorContribution {
 		this._zone.widget.updateMessage(session.message ?? localize('welcome.1', "AI-generated code may be incorrect."));
 
 		// CANCEL when input changes
-		this._editor.onDidChangeModel(this._ctsSession.cancel, this._ctsSession, store);
+		this._editor.onDidChangeModel(this.cancelSession, this, store);
 
 		// REposition the zone widget whenever the block decoration changes
 		let lastPost: Position | undefined;
@@ -412,6 +423,10 @@ export class InteractiveEditorController implements IEditorContribution {
 		const roundStore = new DisposableStore();
 		store.add(roundStore);
 
+		const diffBaseModel = this._modelService.createModel(textModel.getValue(), { languageId: textModel.getLanguageId(), onDidChange: Event.None }, undefined, true);
+		store.add(diffBaseModel);
+		const diffZone = this._instaService.createInstance(InteractiveEditorDiffWidget, this._editor, diffBaseModel);
+
 		do {
 
 			round += 1;
@@ -421,6 +436,14 @@ export class InteractiveEditorController implements IEditorContribution {
 				// nuked whole file contents?
 				this._logService.trace('[IE] ABORT wholeRange seems gone/collapsed');
 				break;
+			}
+
+			if (round > 1 && editMode === 'livePreview') {
+				if (!textModel.equalsTextBuffer(diffBaseModel.getTextBuffer())) {
+					diffZone.show(wholeRangeDecoration.getRange(0)!);
+				} else {
+					diffZone.hide();
+				}
 			}
 
 			// visuals: add block decoration
@@ -513,9 +536,8 @@ export class InteractiveEditorController implements IEditorContribution {
 
 			const editResponse = new EditResponse(textModel.uri, reply);
 
-			if (editResponse.workspaceEdits && (!editResponse.singleCreateFileEdit || editMode === 'direct')) {
-				this._bulkEditService.apply(editResponse.workspaceEdits, { editor: this._editor, label: localize('ie', "{0}", input), showPreview: true });
-				// todo@jrieken keep interactive editor?
+			const canContinue = this._strategy.update(editResponse);
+			if (!canContinue) {
 				break;
 			}
 
@@ -571,7 +593,9 @@ export class InteractiveEditorController implements IEditorContribution {
 					ignoreModelChanges = false;
 				}
 
-				inlineDiffDecorations.update();
+				if (editMode === 'live') {
+					inlineDiffDecorations.update();
+				}
 
 				// line count
 				const lineSet = new Set<number>();
@@ -604,7 +628,7 @@ export class InteractiveEditorController implements IEditorContribution {
 			this._zone.widget.updateToolbar(true);
 
 			if (editResponse.singleCreateFileEdit) {
-				this._zone.widget.showCreatePreview(editResponse.singleCreateFileEdit.uri, editResponse.singleCreateFileEdit.edits);
+				this._zone.widget.showCreatePreview(editResponse.singleCreateFileEdit.uri, await Promise.all(editResponse.singleCreateFileEdit.edits));
 			} else {
 				this._zone.widget.hideCreatePreview();
 			}
@@ -617,6 +641,9 @@ export class InteractiveEditorController implements IEditorContribution {
 
 		this._inlineDiffEnabled = inlineDiffDecorations.visible;
 		this._storageService.store(InteractiveEditorController._inlineDiffStorageKey, this._inlineDiffEnabled, StorageScope.PROFILE, StorageTarget.USER);
+
+		diffZone.hide();
+		diffZone.dispose();
 
 		// done, cleanup
 		wholeRangeDecoration.clear();
@@ -647,10 +674,6 @@ export class InteractiveEditorController implements IEditorContribution {
 
 	cancelCurrentRequest(): void {
 		this._ctsRequest?.cancel();
-	}
-
-	cancelSession() {
-		this._ctsSession.cancel();
 	}
 
 	arrowOut(up: boolean): void {
@@ -715,22 +738,120 @@ export class InteractiveEditorController implements IEditorContribution {
 		if (!this._lastEditState) {
 			return undefined;
 		}
+		const { response } = this._lastEditState;
+		await this._strategy?.apply();
+		this._ctsSession.cancel();
+		return response;
+	}
 
-		const { model, modelVersionId, response } = this._lastEditState;
+	cancelSession() {
+		this._ctsSession.cancel();
+		this._strategy?.cancel();
+	}
+}
+
+abstract class EditModeStrategy {
+
+	abstract update(response: EditResponse): boolean;
+
+	abstract apply(): Promise<void>;
+
+	abstract cancel(): void;
+}
+
+class PreviewStrategy extends EditModeStrategy {
+
+	private _lastResponse?: EditResponse;
+
+	constructor(
+		private readonly _model: ITextModel,
+		private readonly _versionId: number,
+		@IBulkEditService private readonly _bulkEditService: IBulkEditService,
+	) {
+		super();
+	}
+
+	update(response: EditResponse): boolean {
+		this._lastResponse = response;
+		if (!response.workspaceEdits || response.singleCreateFileEdit) {
+			// preview stategy can handle simple workspace edit (single file create)
+			return true;
+		}
+		this._bulkEditService.apply(response.workspaceEdits, { showPreview: true });
+		return false;
+	}
+
+	async apply() {
+
+		const response = this._lastResponse;
+		if (!response) {
+			return;
+		}
 
 		if (response.workspaceEdits) {
 			await this._bulkEditService.apply(response.workspaceEdits);
 
 		} else if (!response.workspaceEditsIncludeLocalEdits) {
-			if (model.getAlternativeVersionId() === modelVersionId) {
-				model.pushStackElement();
+			if (this._model.getAlternativeVersionId() === this._versionId) {
+				this._model.pushStackElement();
 				const edits = response.localEdits.map(edit => EditOperation.replace(Range.lift(edit.range), edit.text));
-				model.pushEditOperations(null, edits, () => null);
-				model.pushStackElement();
+				this._model.pushEditOperations(null, edits, () => null);
+				this._model.pushStackElement();
 			}
 		}
+	}
 
-		return response;
+	cancel(): void {
+		// nothing to do
+	}
+}
+
+class LiveStrategy extends EditModeStrategy {
+
+	constructor(
+		protected readonly _model: ITextModel,
+		protected readonly _versionId: number,
+		@IBulkEditService protected readonly _bulkEditService: IBulkEditService,
+	) {
+		super();
+	}
+
+	update(response: EditResponse): boolean {
+		if (response.workspaceEdits) {
+			this._bulkEditService.apply(response.workspaceEdits, { showPreview: true });
+			return false;
+		}
+		return true;
+	}
+
+	async apply() {
+		// nothing to do
+	}
+
+	cancel(): void {
+		while (this._model.getAlternativeVersionId() !== this._versionId) {
+			this._model.undo();
+		}
+	}
+}
+
+class LivePreviewStrategy extends LiveStrategy {
+
+	private _lastResponse?: EditResponse;
+
+	override update(response: EditResponse): boolean {
+		this._lastResponse = response;
+		if (response.singleCreateFileEdit) {
+			// preview stategy can handle simple workspace edit (single file create)
+			return true;
+		}
+		return super.update(response);
+	}
+
+	override async apply() {
+		if (this._lastResponse?.workspaceEdits) {
+			await this._bulkEditService.apply(this._lastResponse.workspaceEdits);
+		}
 	}
 }
 
