@@ -144,13 +144,9 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 
 	private readonly _scopedInstantiationService: IInstantiationService;
 
-	readonly _processManager: ITerminalProcessManager;
+	private readonly _processManager: ITerminalProcessManager;
 	private readonly _contributions: Map<string, ITerminalContribution> = new Map();
 	private readonly _resource: URI;
-	// Enables disposal of the xterm onKey
-	// event when the CwdDetection capability
-	// is added
-	private _xtermOnKey: IDisposable | undefined;
 	private _xtermReadyPromise: Promise<XtermTerminal>;
 	private _xtermTypeAheadAddon: TypeAheadAddon | undefined;
 	private _pressAnyKeyToCloseListener: IDisposable | undefined;
@@ -204,7 +200,6 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 	private _userHome?: string;
 	private _hasScrollBar?: boolean;
 	private _target?: TerminalLocation | undefined;
-	private _disableShellIntegrationReporting: boolean | undefined;
 	private _usedShellIntegrationInjection: boolean = false;
 	get usedShellIntegrationInjection(): boolean { return this._usedShellIntegrationInjection; }
 	private _lineDataEventAddon: LineDataEventAddon | undefined;
@@ -225,12 +220,6 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 	get target(): TerminalLocation | undefined { return this._target; }
 	set target(value: TerminalLocation | undefined) { this._target = value; }
 
-	get disableShellIntegrationReporting(): boolean {
-		if (this._disableShellIntegrationReporting === undefined) {
-			this._disableShellIntegrationReporting = (this.shellLaunchConfig.hideFromUser || this.shellLaunchConfig.executable === undefined || this.shellType === undefined) || !shellIntegrationSupportedShellTypes.includes(this.shellType);
-		}
-		return this._disableShellIntegrationReporting;
-	}
 	get instanceId(): number { return this._instanceId; }
 	get resource(): URI { return this._resource; }
 	get cols(): number {
@@ -305,6 +294,7 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 		return undefined;
 	}
 	get userHome(): string | undefined { return this._userHome; }
+	get shellIntegrationNonce(): string { return this._processManager.shellIntegrationNonce; }
 	get injectedArgs(): string[] | undefined { return this._injectedArgs; }
 
 	// The onExit event is special in that it fires and is disposed after the terminal instance
@@ -448,7 +438,6 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 			if (e === TerminalCapability.CwdDetection) {
 				this.capabilities.get(TerminalCapability.CwdDetection)?.onDidChangeCwd(e => {
 					this._cwd = e;
-					this._xtermOnKey?.dispose();
 					this._setTitle(this.title, TitleEventSource.Config);
 					this._scopedInstantiationService.invokeFunction(getDirectoryHistory)?.add(e, { remoteAuthority: this.remoteAuthority });
 				});
@@ -728,6 +717,7 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 			throw new ErrorNoTelemetry('Terminal disposed of during xterm.js creation');
 		}
 
+		const disableShellIntegrationReporting = (this.shellLaunchConfig.hideFromUser || this.shellLaunchConfig.executable === undefined || this.shellType === undefined) || !shellIntegrationSupportedShellTypes.includes(this.shellType);
 		const xterm = this._scopedInstantiationService.createInstance(
 			XtermTerminal,
 			Terminal,
@@ -751,8 +741,9 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 				}
 			},
 			this.capabilities,
+			this._processManager.shellIntegrationNonce,
 			this._terminalSuggestWidgetVisibleContextKey,
-			this.disableShellIntegrationReporting
+			disableShellIntegrationReporting
 		);
 		this.xterm = xterm;
 		this.updateAccessibilitySupport();
@@ -786,7 +777,6 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 				}
 			});
 		}, 1000);
-		this._xtermOnKey = xterm.raw.onKey(e => this._onKey(e.key, e.domEvent));
 		xterm.raw.onSelectionChange(async () => this._onSelectionChange());
 		xterm.raw.buffer.onBufferChange(() => this._refreshAltBufferContextKey());
 
@@ -820,6 +810,23 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 				xterm.refresh();
 			}
 		}));
+
+		// Set up updating of the process cwd on key press, this is only needed when the cwd
+		// detection capability has not been registered
+		if (!this.capabilities.has(TerminalCapability.CwdDetection)) {
+			let onKeyListener: IDisposable | undefined = xterm.raw.onKey(e => {
+				const event = new StandardKeyboardEvent(e.domEvent);
+				if (event.equals(KeyCode.Enter)) {
+					this._updateProcessCwd();
+				}
+			});
+			this._register(this.capabilities.onDidAddCapability(e => {
+				if (e === TerminalCapability.CwdDetection) {
+					onKeyListener?.dispose();
+					onKeyListener = undefined;
+				}
+			}));
+		}
 
 		this._pathService.userHome().then(userHome => {
 			this._userHome = userHome.fsPath;
@@ -1379,7 +1386,14 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 		if (this.shellLaunchConfig.attachPersistentProcess?.environmentVariableCollections) {
 			deserializedCollections = deserializeEnvironmentVariableCollections(this.shellLaunchConfig.attachPersistentProcess.environmentVariableCollections);
 		}
-		const processManager = this._scopedInstantiationService.createInstance(TerminalProcessManager, this._instanceId, this._configHelper, this.shellLaunchConfig?.cwd, deserializedCollections);
+		const processManager = this._scopedInstantiationService.createInstance(
+			TerminalProcessManager,
+			this._instanceId,
+			this._configHelper,
+			this.shellLaunchConfig?.cwd,
+			deserializedCollections,
+			this.shellLaunchConfig.attachPersistentProcess?.shellIntegrationNonce
+		);
 		this.capabilities.add(processManager.capabilities);
 		processManager.onProcessReady(async (e) => {
 			this._onProcessIdReady.fire(this);
@@ -1501,7 +1515,7 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 			}
 		});
 		if (this.xterm?.shellIntegration) {
-			this.capabilities.add(this.xterm?.shellIntegration.capabilities);
+			this.capabilities.add(this.xterm.shellIntegration.capabilities);
 		}
 		if (originalIcon !== this.shellLaunchConfig.icon || this.shellLaunchConfig.color) {
 			this._icon = this._shellLaunchConfig.attachPersistentProcess?.icon || this._shellLaunchConfig.icon;
@@ -1775,14 +1789,6 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 			{
 				message: nls.localize('terminal.requestTrust', "Creating a terminal process requires executing code")
 			})) === true;
-	}
-
-	private _onKey(key: string, ev: KeyboardEvent): void {
-		const event = new StandardKeyboardEvent(ev);
-
-		if (event.equals(KeyCode.Enter)) {
-			this._updateProcessCwd();
-		}
 	}
 
 	private async _onSelectionChange(): Promise<void> {
