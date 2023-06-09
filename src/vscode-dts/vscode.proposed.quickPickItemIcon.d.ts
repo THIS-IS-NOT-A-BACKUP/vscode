@@ -3,12 +3,15 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-.monaco-editor .accessibilityHelpWidget {
-	padding: 10px;
-	vertical-align: middle;
-	overflow: scroll;
-	color: var(--vscode-editorWidget-foreground);
-	background-color: var(--vscode-editorWidget-background);
-	box-shadow: 0 2px 8px var(--vscode-widget-shadow);
-	border: 2px solid var(--vscode-contrastBorder);
+declare module 'vscode' {
+	/**
+	 * Represents an item that can be selected from
+	 * a list of items.
+	 */
+	export interface QuickPickItem {
+		/**
+		 * The icon path or {@link ThemeIcon} for the QuickPickItem.
+		 */
+		iconPath?: Uri | { light: Uri; dark: Uri } | ThemeIcon;
+	}
 }
