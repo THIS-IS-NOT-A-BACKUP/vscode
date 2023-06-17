@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as dom from 'vs/base/browser/dom';
-import { alert } from 'vs/base/browser/ui/aria/aria';
+import { status } from 'vs/base/browser/ui/aria/aria';
 import { ITreeContextMenuEvent, ITreeElement } from 'vs/base/browser/ui/tree/tree';
 import { CancellationToken } from 'vs/base/common/cancellation';
 import { Emitter } from 'vs/base/common/event';
@@ -430,7 +430,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 	}
 
 	layout(height: number, width: number): void {
-		width = Math.min(width, 600);
+		width = Math.min(width, 850);
 		this.bodyDimension = new dom.Dimension(width, height);
 
 		const inputPartHeight = this.inputPart.layout(height, width);
@@ -529,7 +529,7 @@ export class ChatAccessibilityService extends Disposable implements IChatAccessi
 			return;
 		}
 		const errorDetails = response.errorDetails ? ` ${response.errorDetails.message}` : '';
-		alert(response.response.value + errorDetails);
+		status(response.response.value + errorDetails);
 	}
 }
 
