@@ -46,7 +46,13 @@ export function traceRpc(_target: any, key: string, descriptor: any) {
 		if (this.traceRpcArgs.simulatedLatency) {
 			await timeout(this.traceRpcArgs.simulatedLatency);
 		}
-		const result = await fn.apply(this, args);
+		let result: any;
+		try {
+			result = await fn.apply(this, args);
+		} catch (e) {
+			this.traceRpcArgs.logService.error(`[RPC Response] PtyService#${fn.name}`, e);
+			throw e;
+		}
 		if (this.traceRpcArgs.logService.getLevel() === LogLevel.Trace) {
 			this.traceRpcArgs.logService.trace(`[RPC Response] PtyService#${fn.name}`, result);
 		}
@@ -270,7 +276,6 @@ export class PtyService extends Disposable implements IPtyService {
 		}
 		const id = ++this._lastPtyId;
 		const process = new TerminalProcess(shellLaunchConfig, cwd, cols, rows, env, executableEnv, options, this._logService, this._productService);
-		process.onProcessData(event => this._onProcessData.fire({ id, event }));
 		const processLaunchOptions: IPersistentTerminalProcessLaunchConfig = {
 			env,
 			executableEnv,
@@ -282,6 +287,7 @@ export class PtyService extends Disposable implements IPtyService {
 			this._ptys.delete(id);
 			this._onProcessExit.fire({ id, event });
 		});
+		persistentProcess.onProcessData(event => this._onProcessData.fire({ id, event }));
 		persistentProcess.onProcessReplay(event => this._onProcessReplay.fire({ id, event }));
 		persistentProcess.onProcessReady(event => this._onProcessReady.fire({ id, event }));
 		persistentProcess.onProcessOrphanQuestion(() => this._onProcessOrphanQuestion.fire({ id }));
