@@ -27,6 +27,7 @@ import { getNotificationFromContext } from 'vs/workbench/browser/parts/notificat
 import { IListService, WorkbenchList } from 'vs/platform/list/browser/listService';
 import { NotificationFocusedContext } from 'vs/workbench/common/contextkeys';
 import { IAccessibleViewService, AccessibleViewService, IAccessibleContentProvider, IAccessibleViewOptions, AccessibleViewType, accessibleViewIsShown } from 'vs/workbench/contrib/accessibility/browser/accessibleView';
+import { IHoverService } from 'vs/workbench/services/hover/browser/hover';
 
 registerAccessibilityConfiguration();
 registerSingleton(IAccessibleViewService, AccessibleViewService, InstantiationType.Delayed);
@@ -35,7 +36,7 @@ class AccessibilityHelpProvider implements IAccessibleContentProvider {
 	onClose() {
 		this._editor.focus();
 	}
-	options: IAccessibleViewOptions = { type: AccessibleViewType.HelpMenu, ariaLabel: localize('editor-help', "editor accessibility help"), readMoreUrl: 'https://go.microsoft.com/fwlink/?linkid=851010' };
+	options: IAccessibleViewOptions = { type: AccessibleViewType.Help, ariaLabel: localize('editor-help', "editor accessibility help"), readMoreUrl: 'https://go.microsoft.com/fwlink/?linkid=851010' };
 	verbositySettingKey = AccessibilityVerbositySettingId.Editor;
 	constructor(
 		private readonly _editor: ICodeEditor,
@@ -114,14 +115,16 @@ class HoverAccessibleViewContribution extends Disposable {
 			const codeEditorService = accessor.get(ICodeEditorService);
 			const editor = codeEditorService.getActiveCodeEditor() || codeEditorService.getFocusedCodeEditor();
 			const editorHoverContent = editor ? ModesHoverController.get(editor)?.getWidgetContent() ?? undefined : undefined;
-			if (!editorHoverContent) {
+			if (!editor || !editorHoverContent) {
 				return false;
 			}
 			this._options.language = editor?.getModel()?.getLanguageId() ?? undefined;
 			accessibleViewService.show({
 				verbositySettingKey: AccessibilityVerbositySettingId.Hover,
 				provideContent() { return editorHoverContent; },
-				onClose() { },
+				onClose() {
+					ModesHoverController.get(editor)?.focus();
+				},
 				options: this._options
 			});
 			return true;
@@ -131,6 +134,8 @@ class HoverAccessibleViewContribution extends Disposable {
 			const contextViewService = accessor.get(IContextViewService);
 			const contextViewElement = contextViewService.getContextViewElement();
 			const extensionHoverContent = contextViewElement?.textContent ?? undefined;
+			const hoverService = accessor.get(IHoverService);
+
 			if (contextViewElement.classList.contains('accessible-view-container') || !extensionHoverContent) {
 				// The accessible view, itself, uses the context view service to display the text. We don't want to read that.
 				return false;
@@ -138,7 +143,9 @@ class HoverAccessibleViewContribution extends Disposable {
 			accessibleViewService.show({
 				verbositySettingKey: AccessibilityVerbositySettingId.Hover,
 				provideContent() { return extensionHoverContent; },
-				onClose() { },
+				onClose() {
+					hoverService.showAndFocusLastHover();
+				},
 				options: this._options
 			});
 			return true;
