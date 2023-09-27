@@ -971,7 +971,7 @@ configurationRegistry.registerConfiguration({
 				enum: ['explicit', 'never'],
 				// enum: ['explicit', 'always', 'never'], -- autosave support needs to be built first
 				// nls.localize('always', 'Always triggers Code Actions on save, including autosave, focus, and window change events.'),
-				enumDescriptions: [nls.localize('never', 'Never triggers Code Actions on save.'), nls.localize('explicit', 'Triggers Code Actions only when explicitly saved.')],
+				enumDescriptions: [nls.localize('explicit', 'Triggers Code Actions only when explicitly saved.', nls.localize('never', 'Never triggers Code Actions on save.'))],
 			},
 			default: {}
 		},
@@ -1031,11 +1031,13 @@ configurationRegistry.registerConfiguration({
 			default: 'fullCell'
 		},
 		[NotebookSetting.anchorToFocusedCell]: {
-			markdownDescription: nls.localize('notebook.scrolling.anchorToFocusedCell.description', "Keep the focused cell steady while surrounding cells change size"),
+			markdownDescription: nls.localize('notebook.scrolling.anchorToFocusedCell.description', "Keep the focused cell steady while surrounding cells change size."),
 			type: 'string',
-			enum: ['auto', 'true', 'false'],
+			enum: ['auto', 'on', 'off'],
 			markdownEnumDescriptions: [
-				nls.localize('notebook.scrolling.anchorToFocusedCell.auto.description', "Anchor to the focused cell when the resized cell is partially visible unless {0} is set to {1}", 'notebook.scrolling.revealCellBehavior', 'none')
+				nls.localize('notebook.scrolling.anchorToFocusedCell.auto.description', "Anchor the viewport to the focused cell depending on context unless {0} is set to {1}.", 'notebook.scrolling.revealCellBehavior', 'none'),
+				nls.localize('notebook.scrolling.anchorToFocusedCell.on.description', "Always anchor the viewport to the focused cell."),
+				nls.localize('notebook.scrolling.anchorToFocusedCell.off.description', "The focused cell may shift around as cells resize.")
 			],
 			default: 'auto'
 		}
