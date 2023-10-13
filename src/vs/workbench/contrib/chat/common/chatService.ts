@@ -215,6 +215,8 @@ export type ChatUserAction = IChatVoteAction | IChatCopyAction | IChatInsertActi
 export interface IChatUserActionEvent {
 	action: ChatUserAction;
 	providerId: string;
+	agentId: string | undefined;
+	sessionId: string;
 }
 
 export interface IChatDynamicRequest {
@@ -280,6 +282,7 @@ export interface IChatService {
 
 	onDidPerformUserAction: Event<IChatUserActionEvent>;
 	notifyUserAction(event: IChatUserActionEvent): void;
+	onDidDisposeSession: Event<{ sessionId: string }>;
 
 	transferChatSession(transferredSessionData: IChatTransferredSessionData, toWorkspace: URI): void;
 }
