@@ -15,7 +15,7 @@ import { NativeHostService } from 'vs/platform/native/electron-sandbox/nativeHos
 import { INativeWorkbenchEnvironmentService } from 'vs/workbench/services/environment/electron-sandbox/environmentService';
 import { IMainProcessService } from 'vs/platform/ipc/common/mainProcessService';
 import { isAuxiliaryWindow } from 'vs/workbench/services/auxiliaryWindow/browser/auxiliaryWindowService';
-import { getActiveDocument, getWindowsCount, onDidRegisterWindow, trackFocus } from 'vs/base/browser/dom';
+import { getActiveDocument, getWindowsCount, onDidRegisterWindow, scheduleAtNextAnimationFrame, trackFocus } from 'vs/base/browser/dom';
 import { DomEmitter } from 'vs/base/browser/event';
 import { memoize } from 'vs/base/common/decorators';
 
@@ -62,11 +62,11 @@ class WorkbenchHostService extends Disposable implements IHostService {
 
 			// Workaround: the window does not immediately seem to have focus when
 			// opening, so we schedule a check for focus on the next animation frame
-			window.requestAnimationFrame(() => {
+			scheduleAtNextAnimationFrame(() => {
 				if (window.document.hasFocus()) {
 					emitter.fire(true);
 				}
-			});
+			}, window);
 		}));
 
 		return emitter.event;
@@ -141,12 +141,12 @@ class WorkbenchHostService extends Disposable implements IHostService {
 		return this.nativeHostService.toggleFullScreen();
 	}
 
-	async moveTop(window: Window): Promise<void> {
+	async moveTop(targetWindow: Window): Promise<void> {
 		if (getWindowsCount() <= 1) {
 			return; // does not apply when only one window is opened
 		}
 
-		return this.nativeHostService.moveWindowTop(isAuxiliaryWindow(window) ? { targetWindowId: window.vscodeWindowId } : undefined);
+		return this.nativeHostService.moveWindowTop(isAuxiliaryWindow(targetWindow) ? { targetWindowId: targetWindow.vscodeWindowId } : undefined);
 	}
 
 	//#endregion
@@ -154,10 +154,10 @@ class WorkbenchHostService extends Disposable implements IHostService {
 
 	//#region Lifecycle
 
-	focus(window: Window, options?: { force: boolean }): Promise<void> {
+	focus(targetWindow: Window, options?: { force: boolean }): Promise<void> {
 		return this.nativeHostService.focusWindow({
 			force: options?.force,
-			targetWindowId: isAuxiliaryWindow(window) ? window.vscodeWindowId : this.nativeHostService.windowId
+			targetWindowId: isAuxiliaryWindow(targetWindow) ? targetWindow.vscodeWindowId : this.nativeHostService.windowId
 		});
 	}
 
