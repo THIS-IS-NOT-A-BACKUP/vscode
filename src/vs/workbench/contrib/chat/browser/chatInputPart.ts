@@ -31,7 +31,7 @@ import { IKeybindingService } from 'vs/platform/keybinding/common/keybinding';
 import { DEFAULT_FONT_FAMILY } from 'vs/workbench/browser/style';
 import { AccessibilityVerbositySettingId } from 'vs/workbench/contrib/accessibility/browser/accessibilityConfiguration';
 import { AccessibilityCommandId } from 'vs/workbench/contrib/accessibility/common/accessibilityCommands';
-import { IChatExecuteActionContext, SubmitAction, SubmitSecondaryAgentAction } from 'vs/workbench/contrib/chat/browser/actions/chatExecuteActions';
+import { IChatExecuteActionContext, SubmitAction } from 'vs/workbench/contrib/chat/browser/actions/chatExecuteActions';
 import { IChatWidget } from 'vs/workbench/contrib/chat/browser/chat';
 import { ChatFollowups } from 'vs/workbench/contrib/chat/browser/chatFollowups';
 import { IChatAgentService } from 'vs/workbench/contrib/chat/common/chatAgents';
@@ -41,6 +41,8 @@ import { IChatReplyFollowup } from 'vs/workbench/contrib/chat/common/chatService
 import { IChatResponseViewModel } from 'vs/workbench/contrib/chat/common/chatViewModel';
 import { IChatWidgetHistoryService } from 'vs/workbench/contrib/chat/common/chatWidgetHistoryService';
 import { getSimpleCodeEditorWidgetOptions, getSimpleEditorOptions } from 'vs/workbench/contrib/codeEditor/browser/simpleEditorOptions';
+import { ChatSubmitEditorAction, ChatSubmitSecondaryAgentEditorAction } from 'vs/workbench/contrib/chat/browser/actions/chatActions';
+import { IPosition } from 'vs/editor/common/core/position';
 
 const $ = dom.$;
 
@@ -49,6 +51,9 @@ const INPUT_EDITOR_MAX_HEIGHT = 250;
 export class ChatInputPart extends Disposable implements IHistoryNavigationWidget {
 	static readonly INPUT_SCHEME = 'chatSessionInput';
 	private static _counter = 0;
+
+	private _onDidLoadInputState = this._register(new Emitter<any>());
+	readonly onDidLoadInputState = this._onDidLoadInputState.event;
 
 	private _onDidChangeHeight = this._register(new Emitter<void>());
 	readonly onDidChangeHeight = this._onDidChangeHeight.event;
@@ -77,8 +82,9 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		return this._inputEditor;
 	}
 
-	private history: HistoryNavigator<string>;
-	private setHistoryNavigationEnablement!: (enabled: boolean) => void;
+	private history: HistoryNavigator<{ text: string; state?: any }>;
+	private historyNavigationBackwardsEnablement!: IContextKey<boolean>;
+	private historyNavigationForewardsEnablement!: IContextKey<boolean>;
 	private inputModel: ITextModel | undefined;
 	private inputEditorHasText: IContextKey<boolean>;
 	private providerId: string | undefined;
@@ -145,11 +151,21 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	private navigateHistory(previous: boolean): void {
 		const historyInput = (previous ?
 			(this.history.previous() ?? this.history.first()) : this.history.next())
-			?? '';
+			?? { text: '' };
 
-		aria.status(historyInput);
-		this.setValue(historyInput);
-		this.setHistoryNavigationEnablement(true);
+		aria.status(historyInput.text);
+		this.setValue(historyInput.text);
+		this._onDidLoadInputState.fire(historyInput.state);
+		if (previous) {
+			this._inputEditor.setPosition({ lineNumber: 1, column: 1 });
+		} else {
+			const model = this._inputEditor.getModel();
+			if (!model) {
+				return;
+			}
+
+			this._inputEditor.setPosition(getLastPosition(model));
+		}
 	}
 
 	setValue(value: string): void {
@@ -170,9 +186,9 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	 * Reset the input and update history.
 	 * @param userQuery If provided, this will be added to the history. Followups and programmatic queries should not be passed.
 	 */
-	async acceptInput(userQuery?: string): Promise<void> {
+	async acceptInput(userQuery?: string, inputState?: any): Promise<void> {
 		if (userQuery) {
-			this.history.add(userQuery);
+			this.history.add({ text: userQuery, state: inputState });
 		}
 
 		if (this.accessibilityService.isScreenReaderOptimized() && isMacintosh) {
@@ -208,10 +224,8 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		const scopedInstantiationService = this.instantiationService.createChild(new ServiceCollection([IContextKeyService, inputScopedContextKeyService]));
 
 		const { historyNavigationBackwardsEnablement, historyNavigationForwardsEnablement } = this._register(registerAndCreateHistoryNavigationContext(inputScopedContextKeyService, this));
-		this.setHistoryNavigationEnablement = enabled => {
-			historyNavigationBackwardsEnablement.set(enabled);
-			historyNavigationForwardsEnablement.set(enabled);
-		};
+		this.historyNavigationBackwardsEnablement = historyNavigationBackwardsEnablement;
+		this.historyNavigationForewardsEnablement = historyNavigationForwardsEnablement;
 
 		const options = getSimpleEditorOptions(this.configurationService);
 		options.readOnly = false;
@@ -242,7 +256,6 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			// (If this model change happened as a result of a history navigation, this is canceled out by a call in this.navigateHistory)
 			const model = this._inputEditor.getModel();
 			const inputHasText = !!model && model.getValueLength() > 0;
-			this.setHistoryNavigationEnablement(!inputHasText);
 			this.inputEditorHasText.set(inputHasText);
 		}));
 		this._register(this._inputEditor.onDidFocusEditorText(() => {
@@ -253,6 +266,15 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			inputContainer.classList.toggle('focused', false);
 
 			this._onDidBlur.fire();
+		}));
+		this._register(this._inputEditor.onDidChangeCursorPosition(e => {
+			const model = this._inputEditor.getModel();
+			if (!model) {
+				return;
+			}
+
+			this.historyNavigationBackwardsEnablement.set(e.position.column === 1 && e.position.lineNumber === 1);
+			this.historyNavigationForewardsEnablement.set(e.position.equals(getLastPosition(model)));
 		}));
 
 		this.toolbar = this._register(this.instantiationService.createInstance(MenuWorkbenchToolBar, inputContainer, MenuId.ChatExecute, {
@@ -358,7 +380,7 @@ class SubmitButtonActionViewItem extends ActionViewItem {
 	) {
 		super(context, action, options);
 
-		const primaryKeybinding = keybindingService.lookupKeybinding(SubmitAction.ID)?.getLabel();
+		const primaryKeybinding = keybindingService.lookupKeybinding(ChatSubmitEditorAction.ID)?.getLabel();
 		let tooltip = action.label;
 		if (primaryKeybinding) {
 			tooltip += ` (${primaryKeybinding})`;
@@ -366,7 +388,7 @@ class SubmitButtonActionViewItem extends ActionViewItem {
 
 		const secondaryAgent = chatAgentService.getSecondaryAgent();
 		if (secondaryAgent) {
-			const secondaryKeybinding = keybindingService.lookupKeybinding(SubmitSecondaryAgentAction.ID)?.getLabel();
+			const secondaryKeybinding = keybindingService.lookupKeybinding(ChatSubmitSecondaryAgentEditorAction.ID)?.getLabel();
 			if (secondaryKeybinding) {
 				tooltip += `\n${chatAgentLeader}${secondaryAgent.id} (${secondaryKeybinding})`;
 			}
@@ -378,4 +400,8 @@ class SubmitButtonActionViewItem extends ActionViewItem {
 	protected override getTooltip(): string | undefined {
 		return this._tooltip;
 	}
+}
+
+function getLastPosition(model: ITextModel): IPosition {
+	return { lineNumber: model.getLineCount(), column: model.getLineLength(model.getLineCount()) + 1 };
 }
