@@ -1116,11 +1116,13 @@ export class NativeWindow extends BaseWindow {
 class ZoomStatusEntry extends Disposable {
 
 	private readonly disposable = this._register(new MutableDisposable<DisposableStore>());
-	private resetZoomAction: Action | undefined = undefined;
+
+	private zoomLevelLabel: Action | undefined = undefined;
 
 	constructor(
 		@IStatusbarService private readonly statusbarService: IStatusbarService,
-		@ICommandService private readonly commandService: ICommandService
+		@ICommandService private readonly commandService: ICommandService,
+		@IKeybindingService private readonly keybindingService: IKeybindingService
 	) {
 		super();
 	}
@@ -1129,13 +1131,14 @@ class ZoomStatusEntry extends Disposable {
 		if (typeof visibleOrText === 'string') {
 			if (!this.disposable.value) {
 				this.createZoomEntry(targetWindowId, visibleOrText);
-			} else {
-				this.updateZoomResetAction(targetWindowId);
 			}
+
+			this.updateZoomLevelLabel(targetWindowId);
 		} else {
 			this.disposable.clear();
 		}
 	}
+
 	private createZoomEntry(targetWindowId: number, visibleOrText: string) {
 		const disposables = new DisposableStore();
 		this.disposable.value = disposables;
@@ -1145,39 +1148,31 @@ class ZoomStatusEntry extends Disposable {
 
 		const left = document.createElement('div');
 		left.classList.add('zoom-status-left');
-		left.textContent = localize('zoomLabel', "Zoom");
 		container.appendChild(left);
 
-		const center = document.createElement('div');
-		center.classList.add('zoom-status-center');
-		container.appendChild(center);
+		const zoomOutAction: Action = disposables.add(new Action('workbench.action.zoomOut', localize('zoomOut', "Zoom Out"), ThemeIcon.asClassName(Codicon.remove), true, () => this.commandService.executeCommand(zoomOutAction.id)));
+		const zoomInAction: Action = disposables.add(new Action('workbench.action.zoomIn', localize('zoomIn', "Zoom In"), ThemeIcon.asClassName(Codicon.plus), true, () => this.commandService.executeCommand(zoomInAction.id)));
+		const zoomResetAction: Action = disposables.add(new Action('workbench.action.zoomReset', localize('zoomReset', "Reset"), undefined, true, () => this.commandService.executeCommand(zoomResetAction.id)));
+		zoomResetAction.tooltip = localize('zoomResetLabel', "Reset Zoom ({1})", zoomResetAction.label, this.keybindingService.lookupKeybinding(zoomResetAction.id)?.getLabel());
+		const zoomSettingsAction: Action = disposables.add(new Action('workbench.action.openSettings', localize('zoomSettings', "Settings"), ThemeIcon.asClassName(Codicon.settingsGear), true, () => this.commandService.executeCommand(zoomSettingsAction.id, 'window.zoom')));
+		const zoomLevelLabel = disposables.add(new Action('zoomLabel', undefined, undefined, false));
 
-		const actionBarZoom = disposables.add(new ActionBar(center));
-		actionBarZoom.push(
-			disposables.add(new Action('zoomOut', localize('zoomOut', "Zoom Out"), ThemeIcon.asClassName(Codicon.remove), true, () => this.commandService.executeCommand('workbench.action.zoomOut'))),
-			{ icon: true, label: false }
-		);
+		this.zoomLevelLabel = zoomLevelLabel;
+		disposables.add(toDisposable(() => this.zoomLevelLabel = undefined));
 
-		this.resetZoomAction = disposables.add(new Action('zoomReset', '', undefined, true, async () => this.commandService.executeCommand('workbench.action.zoomReset')));
-		this.updateZoomResetAction(targetWindowId);
-		disposables.add(toDisposable(() => this.resetZoomAction = undefined));
-		this.resetZoomAction.tooltip = localize('resetZoom', "Reset Zoom");
-		actionBarZoom.push(this.resetZoomAction, { icon: false, label: true });
-
-		actionBarZoom.push(
-			disposables.add(new Action('zoomIn', localize('zoomIn', "Zoom In"), ThemeIcon.asClassName(Codicon.plus), true, () => this.commandService.executeCommand('workbench.action.zoomIn'))),
-			{ icon: true, label: false }
-		);
+		const actionBarLeft = disposables.add(new ActionBar(left));
+		actionBarLeft.push(zoomOutAction, { icon: true, label: false, keybinding: this.keybindingService.lookupKeybinding(zoomOutAction.id)?.getLabel() });
+		actionBarLeft.push(this.zoomLevelLabel, { icon: false, label: true });
+		actionBarLeft.push(zoomInAction, { icon: true, label: false, keybinding: this.keybindingService.lookupKeybinding(zoomInAction.id)?.getLabel() });
 
 		const right = document.createElement('div');
 		right.classList.add('zoom-status-right');
 		container.appendChild(right);
 
-		const actionBarSettings = disposables.add(new ActionBar(right));
-		actionBarSettings.push(
-			disposables.add(new Action('zoomSettings', localize('zoomSettings', "Settings"), ThemeIcon.asClassName(Codicon.settingsGear), true, () => this.commandService.executeCommand('workbench.action.openSettings', 'window.zoom'))),
-			{ icon: true, label: false }
-		);
+		const actionBarRight = disposables.add(new ActionBar(right));
+
+		actionBarRight.push(zoomResetAction, { icon: false, label: true });
+		actionBarRight.push(zoomSettingsAction, { icon: true, label: false, keybinding: this.keybindingService.lookupKeybinding(zoomSettingsAction.id)?.getLabel() });
 
 		const name = localize('status.windowZoom', "Window Zoom");
 		disposables.add(this.statusbarService.addEntry({
@@ -1188,13 +1183,16 @@ class ZoomStatusEntry extends Disposable {
 			command: ShowTooltipCommand,
 			kind: 'prominent'
 		}, 'status.windowZoom', StatusbarAlignment.RIGHT, 102));
-
-		console.log(container);
 	}
 
-	private updateZoomResetAction(targetWindowId: number): void {
-		if (this.resetZoomAction) {
-			this.resetZoomAction.label = localize('zoomLevel', "{0}%", Math.round(getZoomFactor(getWindowById(targetWindowId)?.window ?? mainWindow) * 100));
+	private updateZoomLevelLabel(targetWindowId: number): void {
+		if (this.zoomLevelLabel) {
+			const targetWindow = getWindowById(targetWindowId)?.window ?? mainWindow;
+			const zoomFactor = Math.round(getZoomFactor(targetWindow) * 100);
+			const zoomLevel = getZoomLevel(targetWindow);
+
+			this.zoomLevelLabel.label = `${zoomLevel}`;
+			this.zoomLevelLabel.tooltip = localize('zoomNumber', "Zoom Level: {0} ({1}%)", zoomLevel, zoomFactor);
 		}
 	}
 }
