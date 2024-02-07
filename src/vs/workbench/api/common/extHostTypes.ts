@@ -4183,7 +4183,6 @@ export enum ChatMessageRole {
 	System = 0,
 	User = 1,
 	Assistant = 2,
-	Function = 3,
 }
 
 export class ChatMessage implements vscode.ChatMessage {
@@ -4212,16 +4211,18 @@ export class ChatResponseTextPart {
 }
 
 export class ChatResponseMarkdownPart {
-	value: string | vscode.MarkdownString;
+	value: vscode.MarkdownString;
 	constructor(value: string | vscode.MarkdownString) {
-		this.value = value;
+		this.value = typeof value === 'string' ? new MarkdownString(value) : value;
 	}
 }
 
-export class ChatResponseFilesPart {
-	value: vscode.ChatAgentFileTreeData;
-	constructor(value: vscode.ChatAgentFileTreeData) {
+export class ChatResponseFileTreePart {
+	value: vscode.ChatResponseFileTree[];
+	baseUri: vscode.Uri;
+	constructor(value: vscode.ChatResponseFileTree[], baseUri: vscode.Uri) {
 		this.value = value;
+		this.baseUri = baseUri;
 	}
 }
 

@@ -43,7 +43,12 @@ declare module 'vscode' {
 		| ChatAgentMarkdownContent
 		| ChatAgentDetectedAgent;
 
-	export type ChatAgentExtendedResponseStream = ChatAgentResponseStream & Progress<ChatAgentExtendedProgress>;
+	export type ChatAgentExtendedResponseStream = ChatAgentResponseStream & {
+		/**
+		 * @deprecated
+		 */
+		report(value: ChatAgentExtendedProgress): void;
+	};
 
 	export interface ChatAgent2<TResult extends ChatAgentResult2> {
 		/**
@@ -113,7 +118,7 @@ declare module 'vscode' {
 	export interface ChatAgentCommandAction {
 		// eslint-disable-next-line local/vscode-dts-string-type-literals
 		kind: 'command';
-		commandButton: ChatAgentCommandButton;
+		command: ChatAgentCommandFollowup;
 	}
 
 	export interface ChatAgentSessionFollowupAction {
