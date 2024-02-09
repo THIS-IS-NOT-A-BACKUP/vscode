@@ -18,7 +18,7 @@ declare module 'vscode' {
 		/**
 		 * The content that was received from the chat agent. Only the progress parts that represent actual content (not metadata) are represented.
 		 */
-		response: (ChatAgentContentProgress | ChatResponseTextPart | ChatResponseMarkdownPart | ChatResponseFileTreePart | ChatResponseAnchorPart)[];
+		response: (ChatResponseTextPart | ChatResponseMarkdownPart | ChatResponseFileTreePart | ChatResponseAnchorPart | ChatResponseCommandButtonPart)[];
 
 		/**
 		 * The result that was received from the chat agent.
@@ -33,6 +33,8 @@ declare module 'vscode' {
 	// 	 */
 	// 	response: (ChatAgentContentProgress | ChatResponseTextPart | ChatResponseMarkdownPart | ChatResponseFileTreePart | ChatResponseAnchorPart)[];
 
+	// agentId: string
+
 	// 	/**
 	// 	 * The result that was received from the chat agent.
 	// 	 */
@@ -44,6 +46,8 @@ declare module 'vscode' {
 		 * All of the chat messages so far in the current chat session.
 		 */
 		history: ChatAgentHistoryEntry[];
+
+		// location:
 
 		// TODO@API have "turns"
 		// history2: (ChatAgentRequest | ChatAgentResponse)[];
@@ -153,6 +157,7 @@ declare module 'vscode' {
 		readonly followupPlaceholder?: string;
 	}
 
+	// TODO@API NAME: w/o Sub just `ChatAgentCommand` etc pp
 	export interface ChatAgentSubCommandProvider {
 
 		/**
@@ -168,19 +173,10 @@ declare module 'vscode' {
 		provideSubCommands(token: CancellationToken): ProviderResult<ChatAgentSubCommand[]>;
 	}
 
-	// TODO@API This should become a progress type, and use vscode.Command
-	// TODO@API what's the when-property for? how about not returning it in the first place?
-	export interface ChatAgentCommandFollowup {
-		commandId: string;
-		args?: any[];
-		title: string; // supports codicon strings
-		when?: string;
-	}
-
 	/**
 	 * A followup question suggested by the model.
 	 */
-	export interface ChatAgentReplyFollowup {
+	export interface ChatAgentFollowup {
 		/**
 		 * The message to send to the chat.
 		 */
@@ -196,8 +192,6 @@ declare module 'vscode' {
 		 */
 		title?: string;
 	}
-
-	export type ChatAgentFollowup = ChatAgentCommandFollowup | ChatAgentReplyFollowup;
 
 	/**
 	 * Will be invoked once after each request to get suggested followup questions to show the user. The user can click the followup to send it to the chat.
@@ -253,8 +247,10 @@ declare module 'vscode' {
 		followupProvider?: ChatAgentFollowupProvider<TResult>;
 
 
-		// TODO@
+		// TODO@API
 		// notify(request: ChatResponsePart, reference: string): boolean;
+		// BETTER
+		// requestResponseStream(callback: (stream: ChatAgentResponseStream) => void, why?: string): void;
 
 		// TODO@API
 		// clear NEVER happens
@@ -339,6 +335,15 @@ declare module 'vscode' {
 		anchor(value: Uri | Location, title?: string): ChatAgentResponseStream;
 
 		/**
+		 * Push a command button part to this stream. Short-hand for
+		 * `push(new ChatResponseCommandButtonPart(value, title))`.
+		 *
+		 * @param command A Command that will be executed when the button is clicked.
+		 * @returns This stream.
+		 */
+		button(command: Command): ChatAgentResponseStream;
+
+		/**
 		 * Push a filetree part to this stream. Short-hand for
 		 * `push(new ChatResponseFileTreePart(value))`.
 		 *
@@ -379,11 +384,6 @@ declare module 'vscode' {
 		 * @param part A response part, rendered or metadata
 		 */
 		push(part: ChatResponsePart): ChatAgentResponseStream;
-
-		/**
-		 * @deprecated use above methods instread
-		 */
-		report(value: ChatAgentProgress): void;
 	}
 
 	// TODO@API
@@ -430,124 +430,17 @@ declare module 'vscode' {
 		constructor(value: Uri | Location);
 	}
 
+	export class ChatResponseCommandButtonPart {
+		value: Command;
+		constructor(value: Command);
+	}
+
 	export type ChatResponsePart = ChatResponseTextPart | ChatResponseMarkdownPart | ChatResponseFileTreePart | ChatResponseAnchorPart
-		| ChatResponseProgressPart | ChatResponseReferencePart;
+		| ChatResponseProgressPart | ChatResponseReferencePart | ChatResponseCommandButtonPart;
 
-	/**
-	 * @deprecated use ChatAgentResponseStream instead
-	 */
-	export type ChatAgentContentProgress =
-		| ChatAgentContent
-		| ChatAgentFileTree
-		| ChatAgentInlineContentReference;
 
-	/**
-	 * @deprecated use ChatAgentResponseStream instead
-	 */
-	export type ChatAgentMetadataProgress =
-		| ChatAgentUsedContext
-		| ChatAgentContentReference
-		| ChatAgentProgressMessage;
-
-	/**
-	 * @deprecated use ChatAgentResponseStream instead
-	 */
-	export type ChatAgentProgress = ChatAgentContentProgress | ChatAgentMetadataProgress;
-
-	/**
-	 * Is displayed in the UI to communicate steps of progress to the user. Should be used when the agent may be slow to respond, e.g. due to doing extra work before sending the actual request to the LLM.
-	 */
-	export interface ChatAgentProgressMessage {
-		message: string;
-	}
-
-	/**
-	 * Indicates a piece of content that was used by the chat agent while processing the request. Will be displayed to the user.
-	 */
-	export interface ChatAgentContentReference {
-		/**
-		 * The resource that was referenced.
-		 */
-		reference: Uri | Location;
-	}
-
-	/**
-	 * A reference to a piece of content that will be rendered inline with the markdown content.
-	 */
-	export interface ChatAgentInlineContentReference {
-		/**
-		 * The resource being referenced.
-		 */
-		inlineReference: Uri | Location;
-
-		/**
-		 * An alternate title for the resource.
-		 */
-		title?: string;
-	}
-
-	/**
-	 * A piece of the chat response's content. Will be merged with other progress pieces as needed, and rendered as markdown.
-	 */
-	export interface ChatAgentContent {
-		/**
-		 * The content as a string of markdown source.
-		 */
-		content: string;
-	}
-
-	/**
-	 * Represents a tree, such as a file and directory structure, rendered in the chat response.
-	 */
-	export interface ChatAgentFileTree {
-		/**
-		 * The root node of the tree.
-		 */
-		treeData: ChatAgentFileTreeData;
-	}
-
-	/**
-	 * Represents a node in a chat response tree.
-	 */
-	export interface ChatAgentFileTreeData {
-		/**
-		 * A human-readable string describing this node.
-		 */
-		label: string;
-
-		/**
-		 * A Uri for this node, opened when it's clicked.
-		 */
-		// TODO@API why label and uri. Can the former be derived from the latter?
-		// TODO@API don't use uri but just names? This API allows to to build nonsense trees where the data structure doesn't match the uris
-		// path-structure.
-		uri: Uri;
-
-		/**
-		 * The type of this node. Defaults to {@link FileType.Directory} if it has {@link ChatAgentFileTreeData.children children}.
-		 */
-		// TODO@API cross API usage
-		type?: FileType;
-
-		/**
-		 * The children of this node.
-		 */
-		children?: ChatAgentFileTreeData[];
-	}
-
-	export interface ChatAgentDocumentContext {
-		uri: Uri;
-		version: number;
-		ranges: Range[];
-	}
-
-	/**
-	 * Document references that should be used by the MappedEditsProvider.
-	 */
-	export interface ChatAgentUsedContext {
-		documents: ChatAgentDocumentContext[];
-	}
-
+	// TODO@API Remove a different type of `request` so that they can
+	// evolve at their own pace
 	export type ChatAgentHandler = (request: ChatAgentRequest, context: ChatAgentContext, response: ChatAgentResponseStream, token: CancellationToken) => ProviderResult<ChatAgentResult2>;
 
 	export namespace chat {
@@ -573,6 +466,7 @@ declare module 'vscode' {
 	/**
 	 * The detail level of this chat variable value.
 	 */
+	// TODO@API maybe for round2
 	export enum ChatVariableLevel {
 		Short = 1,
 		Medium = 2,
