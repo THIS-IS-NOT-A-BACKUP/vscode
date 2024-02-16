@@ -54,6 +54,8 @@ declare module 'vscode' {
 		 */
 		readonly agent: { readonly extensionId: string; readonly agent: string };
 
+		readonly command?: string;
+
 		private constructor(response: ReadonlyArray<ChatResponseTextPart | ChatResponseMarkdownPart | ChatResponseFileTreePart | ChatResponseAnchorPart | ChatResponseCommandButtonPart>, result: ChatAgentResult2, agentId: { extensionId: string; agent: string });
 	}
 
@@ -276,6 +278,11 @@ declare module 'vscode' {
 		 * When the user clicks this agent in `/help`, this text will be submitted to this command
 		 */
 		sampleRequest?: string;
+
+		/**
+		 * Whether invoking the agent puts the chat into a persistent mode, where the agent is automatically added to the chat input for the next message.
+		 */
+		isSticky?: boolean;
 
 		/**
 		 * An event that fires whenever feedback for a result is received, e.g. when a user up- or down-votes
