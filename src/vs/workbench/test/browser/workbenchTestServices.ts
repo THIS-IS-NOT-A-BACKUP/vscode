@@ -909,8 +909,8 @@ export class TestEditorGroupView implements IEditorGroupView {
 	isTransient(_editor: EditorInput): boolean { return false; }
 	isActive(_editor: EditorInput | IUntypedEditorInput): boolean { return false; }
 	contains(candidate: EditorInput | IUntypedEditorInput): boolean { return false; }
-	moveEditor(_editor: EditorInput, _target: IEditorGroup, _options?: IEditorOptions): void { }
-	moveEditors(_editors: EditorInputWithOptions[], _target: IEditorGroup): void { }
+	moveEditor(_editor: EditorInput, _target: IEditorGroup, _options?: IEditorOptions): boolean { return true; }
+	moveEditors(_editors: EditorInputWithOptions[], _target: IEditorGroup): boolean { return true; }
 	copyEditor(_editor: EditorInput, _target: IEditorGroup, _options?: IEditorOptions): void { }
 	copyEditors(_editors: EditorInputWithOptions[], _target: IEditorGroup): void { }
 	async closeEditor(_editor?: EditorInput, options?: ICloseEditorOptions): Promise<boolean> { return true; }
@@ -1762,6 +1762,18 @@ export class TestFileEditorInput extends EditorInput implements IFileEditorInput
 	}
 	movedEditor: IMoveResult | undefined = undefined;
 	override async rename(): Promise<IMoveResult | undefined> { return this.movedEditor; }
+
+	private moveDisabledReason: string | undefined = undefined;
+	setMoveDisabled(reason: string): void {
+		this.moveDisabledReason = reason;
+	}
+
+	override canMove(sourceGroup: GroupIdentifier, targetGroup: GroupIdentifier): string | true {
+		if (typeof this.moveDisabledReason === 'string') {
+			return this.moveDisabledReason;
+		}
+		return super.canMove(sourceGroup, targetGroup);
+	}
 }
 
 export class TestSingletonFileEditorInput extends TestFileEditorInput {
