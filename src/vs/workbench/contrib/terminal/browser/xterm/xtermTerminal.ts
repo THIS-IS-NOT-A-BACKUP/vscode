@@ -13,12 +13,10 @@ import type { ImageAddon as ImageAddonType } from '@xterm/addon-image';
 import * as dom from 'vs/base/browser/dom';
 import { IXtermCore } from 'vs/workbench/contrib/terminal/browser/xterm-private';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
-import { TerminalConfigHelper } from 'vs/workbench/contrib/terminal/browser/terminalConfigHelper';
 import { Disposable, DisposableStore } from 'vs/base/common/lifecycle';
 import { IEditorOptions } from 'vs/editor/common/config/editorOptions';
 import { IShellIntegration, ITerminalLogService, TerminalSettingId } from 'vs/platform/terminal/common/terminal';
 import { ITerminalFont, ITerminalConfiguration } from 'vs/workbench/contrib/terminal/common/terminal';
-import { isSafari } from 'vs/base/browser/browser';
 import { IMarkTracker, IInternalXtermTerminal, IXtermTerminal, IXtermColorProvider, XtermTerminalConstants, IXtermAttachToElementOptions, IDetachedXtermTerminal, ITerminalConfigurationService } from 'vs/workbench/contrib/terminal/browser/terminal';
 import { LogLevel } from 'vs/platform/log/common/log';
 import { INotificationService } from 'vs/platform/notification/common/notification';
@@ -181,7 +179,6 @@ export class XtermTerminal extends Disposable implements IXtermTerminal, IDetach
 	 */
 	constructor(
 		xtermCtor: typeof RawXtermTerminal,
-		private readonly _configHelper: TerminalConfigHelper,
 		cols: number,
 		rows: number,
 		private readonly _xtermColorProvider: IXtermColorProvider,
@@ -201,7 +198,7 @@ export class XtermTerminal extends Disposable implements IXtermTerminal, IDetach
 		@ILayoutService layoutService: ILayoutService
 	) {
 		super();
-		const font = this._configHelper.getFont(dom.getActiveWindow(), undefined, true);
+		const font = this._terminalConfigurationService.getFont(dom.getActiveWindow(), undefined, true);
 		const config = this._terminalConfigurationService.config;
 		const editorOptions = this._configurationService.getValue<IEditorOptions>('editor');
 
@@ -238,6 +235,11 @@ export class XtermTerminal extends Disposable implements IXtermTerminal, IDetach
 			overviewRulerWidth: 10,
 			ignoreBracketedPasteMode: config.ignoreBracketedPasteMode,
 			rescaleOverlappingGlyphs: config.rescaleOverlappingGlyphs,
+			windowOptions: {
+				getWinSizePixels: true,
+				getCellSizePixels: true,
+				getWinSizeChars: true,
+			},
 		}));
 		this._updateSmoothScrolling();
 		this._core = (this.raw as any)._core as IXtermCore;
@@ -418,7 +420,7 @@ export class XtermTerminal extends Disposable implements IXtermTerminal, IDetach
 	}
 
 	private _shouldLoadWebgl(): boolean {
-		return !isSafari && (this._terminalConfigurationService.config.gpuAcceleration === 'auto' && XtermTerminal._suggestedRendererType === undefined) || this._terminalConfigurationService.config.gpuAcceleration === 'on';
+		return (this._terminalConfigurationService.config.gpuAcceleration === 'auto' && XtermTerminal._suggestedRendererType === undefined) || this._terminalConfigurationService.config.gpuAcceleration === 'on';
 	}
 
 	private _shouldLoadCanvas(): boolean {
@@ -496,7 +498,7 @@ export class XtermTerminal extends Disposable implements IXtermTerminal, IDetach
 	}
 
 	getFont(): ITerminalFont {
-		return this._configHelper.getFont(dom.getWindow(this.raw.element), this._core);
+		return this._terminalConfigurationService.getFont(dom.getWindow(this.raw.element), this._core);
 	}
 
 	getLongestViewportWrappedLineLength(): number {
