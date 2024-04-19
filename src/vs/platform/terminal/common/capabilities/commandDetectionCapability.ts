@@ -91,7 +91,7 @@ export class CommandDetectionCapability extends Disposable implements ICommandDe
 	) {
 		super();
 
-		this._promptInputModel = this._register(new PromptInputModel(this._terminal, this.onCommandStarted, this.onCommandFinished, this._logService));
+		this._promptInputModel = this._register(new PromptInputModel(this._terminal, this.onCommandStarted, this.onCommandExecuted, this._logService));
 
 		// Pull command line from the buffer if it was not set explicitly
 		this._register(this.onCommandExecuted(command => {
@@ -402,6 +402,10 @@ export class CommandDetectionCapability extends Disposable implements ICommandDe
 		this._currentCommand.command = commandLine;
 		this._currentCommand.commandLineConfidence = 'high';
 		this._currentCommand.isTrusted = isTrusted;
+
+		if (isTrusted) {
+			this._promptInputModel.setConfidentCommandLine(commandLine);
+		}
 	}
 
 	serialize(): ISerializedCommandDetectionCapability {
