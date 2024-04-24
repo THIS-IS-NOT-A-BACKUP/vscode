@@ -142,6 +142,13 @@ export class SuggestAddon extends Disposable implements ITerminalAddon, ISuggest
 
 		this._currentPromptInputState = promptInputState;
 
+		// Hide the widget if the cursor moves to the left of the initial position as the
+		// completions are no longer valid
+		if (this._currentPromptInputState.cursorIndex < this._initialPromptInputState.cursorIndex) {
+			this.hideSuggestWidget();
+			return;
+		}
+
 		if (this._terminalSuggestWidgetVisibleContextKey.get()) {
 			const inputBeforeCursor = this._currentPromptInputState.value.substring(0, this._currentPromptInputState.cursorIndex);
 			this._cursorIndexDelta = this._currentPromptInputState.cursorIndex - this._initialPromptInputState.cursorIndex;
@@ -339,13 +346,6 @@ export class SuggestAddon extends Disposable implements ITerminalAddon, ISuggest
 
 	private _handleCompletionModel(model: SimpleCompletionModel): void {
 		if (model.items.length === 0 || !this._terminal?.element || !this._promptInputModel) {
-			return;
-		}
-		if (model.items.length === 1) {
-			this.acceptSelectedSuggestion({
-				item: model.items[0],
-				model: model
-			});
 			return;
 		}
 		const suggestWidget = this._ensureSuggestWidget(this._terminal);
