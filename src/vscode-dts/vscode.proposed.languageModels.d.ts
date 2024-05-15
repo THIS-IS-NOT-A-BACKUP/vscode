@@ -73,8 +73,6 @@ declare module 'vscode' {
 	 *
 	 * @see {@link LanguageModelAccess.chatRequest}
 	*/
-	// TODO@API add something like `modelResult: Thenable<{ [name: string]: any }>`
-	// TODO@API: add a StopReason-enum that's also used in LanguageModelChat
 	export interface LanguageModelChatResponse {
 
 		/**
@@ -100,8 +98,7 @@ declare module 'vscode' {
 		 * To cancel the stream, the consumer can {@link CancellationTokenSource.cancel cancel} the token that was used to make the request
 		 * or break from the for-loop.
 		 */
-		// TODO@API rename: text
-		stream: AsyncIterable<string>;
+		text: AsyncIterable<string>;
 	}
 
 	/**
@@ -143,12 +140,6 @@ declare module 'vscode' {
 		 * The maximum number of tokens that can be sent to the model in a single request.
 		 */
 		readonly maxInputTokens: number;
-
-		/**
-		 * The maximum number of tokens that a model can generate in a single response.
-		 */
-		// TODO@API leave it out for now
-		readonly maxOutputTokens: number;
 
 		/**
 		 * Make a chat request using a language model.
