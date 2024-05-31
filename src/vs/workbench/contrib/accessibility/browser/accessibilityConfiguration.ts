@@ -172,6 +172,7 @@ const configuration: IConfigurationNode = {
 			default: true
 		},
 		'accessibility.signalOptions': {
+			description: 'Configures the behavior of signals (audio cues and announcements) in the workbench. Includes volume, debounce position changes, and delays for different types of signals.',
 			type: 'object',
 			additionalProperties: false,
 			properties: {
@@ -187,7 +188,7 @@ const configuration: IConfigurationNode = {
 					'type': 'boolean',
 					'default': false,
 				},
-				'delays': {
+				'experimental.delays': {
 					'type': 'object',
 					'additionalProperties': false,
 					'properties': {
@@ -823,6 +824,21 @@ Registry.as<IConfigurationMigrationRegistry>(WorkbenchExtensions.ConfigurationMi
 			];
 		}
 	}]);
+
+Registry.as<IConfigurationMigrationRegistry>(WorkbenchExtensions.ConfigurationMigration)
+	.registerConfigurationMigrations([{
+		key: 'accessibility.signalOptions',
+		migrateFn: (value, accessor) => {
+			const delays = value.delays;
+			if (!delays) {
+				return [];
+			}
+			return [
+				['accessibility.signalOptions', { value: { ...value, 'experimental.delays': delays, 'delays': undefined } }],
+			];
+		}
+	}]);
+
 
 Registry.as<IConfigurationMigrationRegistry>(WorkbenchExtensions.ConfigurationMigration)
 	.registerConfigurationMigrations([{
