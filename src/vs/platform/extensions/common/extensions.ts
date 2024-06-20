@@ -458,7 +458,7 @@ export class ExtensionIdentifierMap<T> {
 	}
 }
 
-interface IRelaxedExtensionDescription extends IRelaxedExtensionManifest {
+export interface IRelaxedExtensionDescription extends IRelaxedExtensionManifest {
 	id?: string;
 	identifier: ExtensionIdentifier;
 	uuid?: string;
@@ -470,9 +470,7 @@ interface IRelaxedExtensionDescription extends IRelaxedExtensionManifest {
 	extensionLocation: URI;
 }
 
-export type IExtensionDescription = Readonly<IRelaxedExtensionDescription> & {
-	enabledApiProposals: string[] | undefined; // This needs to be updated while validating & updating the proposals.
-};
+export type IExtensionDescription = Readonly<IRelaxedExtensionDescription>;
 
 export function isApplicationScopedExtension(manifest: IExtensionManifest): boolean {
 	return isLanguagePackExtension(manifest);
@@ -492,6 +490,13 @@ export function isResolverExtension(manifest: IExtensionManifest, remoteAuthorit
 		return !!manifest.activationEvents?.includes(activationEvent);
 	}
 	return false;
+}
+
+export function parseApiProposals(enabledApiProposals: string[]): { proposalName: string; version?: number }[] {
+	return enabledApiProposals.map(proposal => {
+		const [proposalName, version] = proposal.split('@');
+		return { proposalName, version: version ? parseInt(version) : undefined };
+	});
 }
 
 export function parseEnabledApiProposalNames(enabledApiProposals: string[]): string[] {

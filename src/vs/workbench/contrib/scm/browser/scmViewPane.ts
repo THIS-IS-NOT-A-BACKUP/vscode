@@ -1203,7 +1203,7 @@ class SeparatorRenderer implements ICompressibleTreeRenderer<SCMViewSeparatorEle
 		append(element, $('.separator'));
 		disposables.add(label);
 
-		if (this.configurationService.getValue<boolean>('scm.showHistoryGraph') !== true) {
+		if (this.configurationService.getValue<boolean>('scm.experimental.showHistoryGraph') !== true) {
 			const toolBar = new MenuWorkbenchToolBar(append(element, $('.actions')), MenuId.SCMChangesSeparator, { moreIcon: Codicon.gear }, this.menuService, this.contextKeyService, this.contextMenuService, this.keybindingService, this.commandService, this.telemetryService);
 			disposables.add(toolBar);
 		}
@@ -1609,7 +1609,7 @@ MenuRegistry.appendMenuItem(MenuId.SCMTitle, {
 MenuRegistry.appendMenuItem(MenuId.SCMTitle, {
 	title: localize('scmChanges', "Incoming & Outgoing"),
 	submenu: Menus.ChangesSettings,
-	when: ContextKeyExpr.and(ContextKeyExpr.equals('view', VIEW_PANE_ID), ContextKeys.RepositoryCount.notEqualsTo(0), ContextKeyExpr.equals('config.scm.showHistoryGraph', true).negate()),
+	when: ContextKeyExpr.and(ContextKeyExpr.equals('view', VIEW_PANE_ID), ContextKeys.RepositoryCount.notEqualsTo(0), ContextKeyExpr.equals('config.scm.experimental.showHistoryGraph', true).negate()),
 	group: '0_view&sort',
 	order: 2
 });
@@ -3017,7 +3017,7 @@ export class SCMViewPane extends ViewPane {
 							e.affectsConfiguration('scm.showChangesSummary') ||
 							e.affectsConfiguration('scm.showIncomingChanges') ||
 							e.affectsConfiguration('scm.showOutgoingChanges') ||
-							e.affectsConfiguration('scm.showHistoryGraph'),
+							e.affectsConfiguration('scm.experimental.showHistoryGraph'),
 						this.visibilityDisposables)
 						(() => this.updateChildren(), this, this.visibilityDisposables);
 
@@ -3220,6 +3220,19 @@ export class SCMViewPane extends ViewPane {
 			return;
 		} else if (isSCMHistoryItemTreeElement(e.element)) {
 			this.scmViewService.focus(e.element.historyItemGroup.repository);
+			return;
+		} else if (isSCMHistoryItemViewModelTreeElement(e.element)) {
+			const historyItem = e.element.historyItemViewModel.historyItem;
+			const historyItemParentId = historyItem.parentIds.length > 0 ? historyItem.parentIds[0] : undefined;
+
+			const historyProvider = e.element.repository.provider.historyProvider;
+			const historyItemChanges = await historyProvider?.provideHistoryItemChanges(historyItem.id, historyItemParentId);
+			if (historyItemChanges) {
+				const title = `${historyItem.id.substring(0, 8)} - ${historyItem.message}`;
+				await this.commandService.executeCommand('_workbench.openMultiDiffEditor', { title, resources: historyItemChanges });
+			}
+
+			this.scmViewService.focus(e.element.repository);
 			return;
 		} else if (isSCMHistoryItemChangeTreeElement(e.element)) {
 			if (e.element.originalUri && e.element.modifiedUri) {
@@ -3855,16 +3868,16 @@ class SCMTreeDataSource implements IAsyncDataSource<ISCMViewService, TreeElement
 
 		if (!incomingHistoryItemGroup && !outgoingHistoryItemGroup) {
 			// Common ancestor, ahead, behind
-			const ancestor = await historyProvider.resolveHistoryItemGroupCommonAncestor(currentHistoryItemGroup.id, currentHistoryItemGroup.base?.id);
+			const ancestor = await historyProvider.resolveHistoryItemGroupCommonAncestor(currentHistoryItemGroup.id, currentHistoryItemGroup.remote?.id);
 			if (!ancestor) {
 				return [];
 			}
 
 			// Only show "Incoming" node if there is a base branch
-			incomingHistoryItemGroup = currentHistoryItemGroup.base ? {
-				id: currentHistoryItemGroup.base.id,
-				label: currentHistoryItemGroup.base.name,
-				ariaLabel: localize('incomingChangesAriaLabel', "Incoming changes from {0}", currentHistoryItemGroup.base.name),
+			incomingHistoryItemGroup = currentHistoryItemGroup.remote ? {
+				id: currentHistoryItemGroup.remote.id,
+				label: currentHistoryItemGroup.remote.name,
+				ariaLabel: localize('incomingChangesAriaLabel', "Incoming changes from {0}", currentHistoryItemGroup.remote.name),
 				icon: Codicon.arrowCircleDown,
 				direction: 'incoming',
 				ancestor: ancestor.id,
@@ -3973,11 +3986,10 @@ class SCMTreeDataSource implements IAsyncDataSource<ISCMViewService, TreeElement
 		const historyItemsMap = historyProviderCacheEntry.historyItems2;
 
 		if (!historyItemsElement) {
-			const historyItemGroupBase = await historyProvider.resolveHistoryItemGroupBase(currentHistoryItemGroup.id);
 			const historyItemGroupIds = [
 				currentHistoryItemGroup.id,
+				...currentHistoryItemGroup.remote ? [currentHistoryItemGroup.remote.id] : [],
 				...currentHistoryItemGroup.base ? [currentHistoryItemGroup.base.id] : [],
-				...historyItemGroupBase ? [historyItemGroupBase.id] : []
 			];
 
 			historyItemsElement = await historyProvider.provideHistoryItems2({ historyItemGroupIds }) ?? [];
@@ -3988,10 +4000,22 @@ class SCMTreeDataSource implements IAsyncDataSource<ISCMViewService, TreeElement
 			});
 		}
 
-		return toISCMHistoryItemViewModelArray(historyItemsElement)
-			.map(v => ({
+		// Create the color map
+		// TODO@lszomoru - use theme colors
+		const colorMap = new Map<string, number>([
+			[currentHistoryItemGroup.name, 0]
+		]);
+		if (currentHistoryItemGroup.remote) {
+			colorMap.set(currentHistoryItemGroup.remote.name, 1);
+		}
+		if (currentHistoryItemGroup.base) {
+			colorMap.set(currentHistoryItemGroup.base.name, 2);
+		}
+
+		return toISCMHistoryItemViewModelArray(historyItemsElement, colorMap)
+			.map(historyItemViewModel => ({
 				repository: element,
-				historyItemViewModel: v,
+				historyItemViewModel,
 				type: 'historyItem2'
 			}) satisfies SCMHistoryItemViewModelTreeElement);
 	}
@@ -4101,7 +4125,7 @@ class SCMTreeDataSource implements IAsyncDataSource<ISCMViewService, TreeElement
 			showChangesSummary: this.configurationService.getValue<boolean>('scm.showChangesSummary'),
 			showIncomingChanges: this.configurationService.getValue<ShowChangesSetting>('scm.showIncomingChanges'),
 			showOutgoingChanges: this.configurationService.getValue<ShowChangesSetting>('scm.showOutgoingChanges'),
-			showHistoryGraph: this.configurationService.getValue<boolean>('scm.showHistoryGraph')
+			showHistoryGraph: this.configurationService.getValue<boolean>('scm.experimental.showHistoryGraph')
 		};
 	}
 
