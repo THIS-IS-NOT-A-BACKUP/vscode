@@ -25,7 +25,7 @@ import { ITerminalConfigurationService } from 'vs/workbench/contrib/terminal/bro
 import type { IXtermCore } from 'vs/workbench/contrib/terminal/browser/xterm-private';
 import { TerminalStorageKeys } from 'vs/workbench/contrib/terminal/common/terminalStorageKeys';
 import { terminalSuggestConfigSection, type ITerminalSuggestConfiguration } from 'vs/workbench/contrib/terminalContrib/suggest/common/terminalSuggestConfiguration';
-import { SimpleCompletionItem } from 'vs/workbench/services/suggest/browser/simpleCompletionItem';
+import { SimpleCompletionItem, type ISimpleCompletion } from 'vs/workbench/services/suggest/browser/simpleCompletionItem';
 import { LineContext, SimpleCompletionModel } from 'vs/workbench/services/suggest/browser/simpleCompletionModel';
 import { ISimpleSelectedSuggestion, SimpleSuggestWidget } from 'vs/workbench/services/suggest/browser/simpleSuggestWidget';
 import type { ISimpleSuggestWidgetFontInfo } from 'vs/workbench/services/suggest/browser/simpleSuggestWidgetRenderer';
@@ -115,6 +115,7 @@ export class SuggestAddon extends Disposable implements ITerminalAddon, ISuggest
 	private _enableWidget: boolean = true;
 	private _pathSeparator: string = sep;
 	private _isFilteringDirectories: boolean = false;
+	private _mostRecentCompletion?: ISimpleCompletion;
 
 	private _codeCompletionsRequested: boolean = false;
 	private _gitCompletionsRequested: boolean = false;
@@ -348,6 +349,11 @@ export class SuggestAddon extends Disposable implements ITerminalAddon, ISuggest
 		else {
 			completions.push(...this._cachedPwshCommands);
 		}
+
+		if (this._mostRecentCompletion?.isDirectory && completions.every(e => e.completion.isDirectory)) {
+			completions.push(new SimpleCompletionItem(this._mostRecentCompletion));
+		}
+		this._mostRecentCompletion = undefined;
 
 		this._currentPromptInputState = {
 			value: this._promptInputModel.value,
@@ -611,6 +617,8 @@ export class SuggestAddon extends Disposable implements ITerminalAddon, ISuggest
 			this._lastAcceptedCompletionTimestamp = 0;
 		}
 
+		this._mostRecentCompletion = completion;
+
 		const commonPrefixLen = commonPrefixLength(replacementText, completion.label);
 
 		// Send the completion
@@ -726,6 +734,7 @@ function rawCompletionToSimpleCompletionItem(rawCompletion: PwshCompletion): Sim
 		detail,
 		isFile: rawCompletion.ResultType === 3,
 		isDirectory: rawCompletion.ResultType === 4,
+		isKeyword: rawCompletion.ResultType === 12,
 	});
 }
 
