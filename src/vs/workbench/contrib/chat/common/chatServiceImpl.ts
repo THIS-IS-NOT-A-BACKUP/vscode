@@ -253,6 +253,19 @@ export class ChatService extends Disposable implements IChatService {
 		this._onDidPerformUserAction.fire(action);
 	}
 
+	setChatSessionTitle(sessionId: string, title: string): void {
+		const model = this._sessionModels.get(sessionId);
+		if (model) {
+			model.setCustomTitle(title);
+			return;
+		}
+
+		const session = this._persistedSessions[sessionId];
+		if (session) {
+			session.customTitle = title;
+		}
+	}
+
 	private trace(method: string, message?: string): void {
 		if (message) {
 			this.logService.trace(`ChatService#${method}: ${message}`);
@@ -328,12 +341,12 @@ export class ChatService extends Disposable implements IChatService {
 		const persistedSessionItems = persistedSessions
 			.filter(session => !session.isImported)
 			.map(session => {
-				const title = session.computedTitle ?? ChatModel.getDefaultTitle(session.requests);
+				const title = session.customTitle ?? ChatModel.getDefaultTitle(session.requests);
 				return {
 					sessionId: session.sessionId,
 					title,
 					lastMessageDate: session.lastMessageDate,
-					isActive: false
+					isActive: false,
 				} satisfies IChatDetail;
 			});
 		const liveSessionItems = Array.from(this._sessionModels.values())
@@ -344,7 +357,7 @@ export class ChatService extends Disposable implements IChatService {
 					sessionId: session.sessionId,
 					title,
 					lastMessageDate: session.lastMessageDate,
-					isActive: true
+					isActive: true,
 				} satisfies IChatDetail;
 			});
 		return [...liveSessionItems, ...persistedSessionItems];
@@ -627,7 +640,7 @@ export class ChatService extends Disposable implements IChatService {
 						const chatAgentRequest = await prepareChatAgentRequest(defaultAgent, agentSlashCommandPart?.command, enableCommandDetection);
 
 						const result = await this.chatAgentService.detectAgentOrCommand(chatAgentRequest, defaultAgentHistory, { location }, token);
-						if (result) {
+						if (result && this.chatAgentService.getAgent(result.agent.id)?.locations?.includes(location)) {
 							// Update the response in the ChatModel to reflect the detected agent and command
 							request.response?.setAgent(result.agent, result.command);
 							detectedAgent = result.agent;
@@ -641,7 +654,7 @@ export class ChatService extends Disposable implements IChatService {
 
 					// Recompute history in case the agent or command changed
 					const history = this.getHistoryEntriesFromModel(model, location, agent.id);
-					const requestProps = await prepareChatAgentRequest(agent, command, !detectedAgent && enableCommandDetection, request /* Reuse the request object if we already created it for participant detection */);
+					const requestProps = await prepareChatAgentRequest(agent, command, enableCommandDetection, request /* Reuse the request object if we already created it for participant detection */);
 					const pendingRequest = this._pendingRequests.get(sessionId);
 					if (pendingRequest && !pendingRequest.requestId) {
 						pendingRequest.requestId = requestProps.requestId;
@@ -650,7 +663,7 @@ export class ChatService extends Disposable implements IChatService {
 					const agentResult = await this.chatAgentService.invokeAgent(agent.id, requestProps, progressCallback, history, token);
 					rawResult = agentResult;
 					agentOrCommandFollowups = this.chatAgentService.getFollowups(agent.id, requestProps, agentResult, history, followupsCancelToken);
-					chatTitlePromise = model.getRequests().length === 1 ? this.chatAgentService.getChatTitle(defaultAgent.id, this.getHistoryEntriesFromModel(model, location, agent.id), CancellationToken.None) : undefined;
+					chatTitlePromise = model.getRequests().length === 1 && !model.customTitle ? this.chatAgentService.getChatTitle(defaultAgent.id, this.getHistoryEntriesFromModel(model, location, agent.id), CancellationToken.None) : undefined;
 				} else if (commandPart && this.chatSlashCommandService.hasCommand(commandPart.slashCommand.command)) {
 					request = model.addRequest(parsedRequest, { variables: [] }, attempt);
 					completeResponseCreated();
@@ -712,13 +725,11 @@ export class ChatService extends Disposable implements IChatService {
 							this._chatServiceTelemetry.retrievedFollowups(agentPart?.agent.id ?? '', commandForTelemetry, followups?.length ?? 0);
 						});
 					}
-					if (chatTitlePromise) {
-						chatTitlePromise.then(title => {
-							if (title) {
-								model.setComputedTitle(title);
-							}
-						});
-					}
+					chatTitlePromise?.then(title => {
+						if (title) {
+							model.setCustomTitle(title);
+						}
+					});
 				}
 			} catch (err) {
 				const result = 'error';
