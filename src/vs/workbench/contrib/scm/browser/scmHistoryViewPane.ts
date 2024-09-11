@@ -52,7 +52,6 @@ import { ContextKeys } from './scmViewPane.js';
 import { IActionViewItem } from '../../../../base/browser/ui/actionbar/actionbar.js';
 import { IDropdownMenuActionViewItemOptions } from '../../../../base/browser/ui/dropdown/dropdownActionViewItem.js';
 import { ActionViewItem } from '../../../../base/browser/ui/actionbar/actionViewItems.js';
-import { renderLabelWithIcons } from '../../../../base/browser/ui/iconLabel/iconLabels.js';
 import { IQuickInputService, IQuickPickItem, IQuickPickSeparator } from '../../../../platform/quickinput/common/quickInput.js';
 import { Event } from '../../../../base/common/event.js';
 import { Iterable } from '../../../../base/common/iterator.js';
@@ -115,7 +114,6 @@ class SCMHistoryItemRefsActionViewItem extends ActionViewItem {
 				name.textContent = localize('auto', "Auto");
 			} else if (this._historyItemsFilter.length === 1) {
 				name.textContent = this._historyItemsFilter[0].name;
-				reset(this.label, ...renderLabelWithIcons(`$(git-branch) ${this._historyItemsFilter[0].name}`));
 			} else {
 				name.textContent = localize('items', "{0} Items", this._historyItemsFilter.length);
 			}
@@ -325,6 +323,7 @@ class HistoryItemRenderer implements ITreeRenderer<SCMHistoryItemViewModelTreeEl
 		templateData.elementDisposables.add(historyItemHover);
 
 		templateData.graphContainer.textContent = '';
+		templateData.graphContainer.classList.toggle('current', historyItemViewModel.isCurrent);
 		templateData.graphContainer.appendChild(renderSCMHistoryItemGraph(historyItemViewModel));
 
 		const provider = node.element.repository.provider;
@@ -766,10 +765,10 @@ class SCMHistoryViewModel extends Disposable {
 			}
 
 			const limit = clamp(this._configurationService.getValue<number>('scm.graph.pageSize'), 1, 1000);
-			const historyItemGroupIds = historyItemRefs.map(ref => ref.revision ?? ref.id);
+			const historyItemRefIds = historyItemRefs.map(ref => ref.revision ?? ref.id);
 
 			const historyItems = await historyProvider.provideHistoryItems({
-				historyItemRefs: historyItemGroupIds, limit, skip: existingHistoryItems.length
+				historyItemRefs: historyItemRefIds, limit, skip: existingHistoryItems.length
 			}) ?? [];
 
 			state = {
@@ -784,7 +783,7 @@ class SCMHistoryViewModel extends Disposable {
 		// Create the color map
 		const colorMap = this._getGraphColorMap(state.historyItemRefs);
 
-		return toISCMHistoryItemViewModelArray(state.items, colorMap)
+		return toISCMHistoryItemViewModelArray(state.items, colorMap, historyProvider.historyItemRef.get())
 			.map(historyItemViewModel => ({
 				repository,
 				historyItemViewModel,
@@ -908,30 +907,37 @@ class HistoryItemRefPicker extends Disposable {
 		quickPick.busy = true;
 		quickPick.show();
 
-		quickPick.items = await this._createQuickPickItems();
-		quickPick.busy = false;
+		const items = await this._createQuickPickItems();
 
 		// Set initial selection
 		let selectedItems: HistoryItemRefQuickPickItem[] = [];
 		if (this._historyItemsFilter === 'all') {
 			selectedItems.push(this._allQuickPickItem);
-			quickPick.selectedItems = [this._allQuickPickItem];
 		} else if (this._historyItemsFilter === 'auto') {
 			selectedItems.push(this._autoQuickPickItem);
-			quickPick.selectedItems = [this._autoQuickPickItem];
 		} else {
-			for (const item of quickPick.items) {
-				if (item.type === 'separator') {
+			let index = 0;
+			while (index < items.length) {
+				if (items[index].type === 'separator') {
+					index++;
 					continue;
 				}
 
-				if (this._historyItemsFilter.some(ref => ref.id === item.id)) {
-					selectedItems.push(item);
+				if (this._historyItemsFilter.some(ref => ref.id === items[index].id)) {
+					const item = items.splice(index, 1) as HistoryItemRefQuickPickItem[];
+					selectedItems.push(...item);
+				} else {
+					index++;
 				}
 			}
 
-			quickPick.selectedItems = selectedItems;
+			// Insert the selected items after `All` and `Auto`
+			items.splice(2, 0, { type: 'separator' }, ...selectedItems);
 		}
+
+		quickPick.items = items;
+		quickPick.selectedItems = selectedItems;
+		quickPick.busy = false;
 
 		return new Promise<'all' | 'auto' | ISCMHistoryItemRef[] | undefined>(resolve => {
 			this._store.add(quickPick.onDidChangeSelection(items => {
@@ -950,7 +956,9 @@ class HistoryItemRefPicker extends Disposable {
 			}));
 
 			this._store.add(quickPick.onDidAccept(() => {
-				if (selectedItems.length === 1 && selectedItems[0].historyItemRef === 'all') {
+				if (selectedItems.length === 0) {
+					resolve(undefined);
+				} else if (selectedItems.length === 1 && selectedItems[0].historyItemRef === 'all') {
 					resolve('all');
 				} else if (selectedItems.length === 1 && selectedItems[0].historyItemRef === 'auto') {
 					resolve('auto');

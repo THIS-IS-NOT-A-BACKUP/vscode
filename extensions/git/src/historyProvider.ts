@@ -16,7 +16,7 @@ function toSourceControlHistoryItemRef(ref: Ref): SourceControlHistoryItemRef {
 	switch (ref.type) {
 		case RefType.RemoteHead:
 			return {
-				id: `refs/remotes/${ref.remote}/${ref.name}`,
+				id: `refs/remotes/${ref.name}`,
 				name: ref.name ?? '',
 				description: ref.commit ? l10n.t('Remote branch at {0}', ref.commit.substring(0, 8)) : undefined,
 				revision: ref.commit,
@@ -65,7 +65,6 @@ export class GitHistoryProvider implements SourceControlHistoryProvider, FileDec
 
 	private _HEAD: Branch | undefined;
 	private historyItemRefs: SourceControlHistoryItemRef[] = [];
-	private historyItemBaseRef: SourceControlHistoryItemRef | undefined;
 
 	private historyItemDecorations = new Map<string, FileDecoration>();
 
@@ -95,10 +94,19 @@ export class GitHistoryProvider implements SourceControlHistoryProvider, FileDec
 					historyItemRefId = `refs/heads/${this.repository.HEAD.name}`;
 					historyItemRefName = this.repository.HEAD.name;
 
-					// Merge base if the branch has changed
+					// Remote
+					this._currentHistoryItemRemoteRef = this.repository.HEAD.upstream ? {
+						id: `refs/remotes/${this.repository.HEAD.upstream.remote}/${this.repository.HEAD.upstream.name}`,
+						name: `${this.repository.HEAD.upstream.remote}/${this.repository.HEAD.upstream.name}`,
+						revision: this.repository.HEAD.upstream.commit,
+						icon: new ThemeIcon('cloud')
+					} : undefined;
+
+					// Base - compute only if the branch has changed
 					if (this._HEAD?.name !== this.repository.HEAD.name) {
 						const mergeBase = await this.resolveHEADMergeBase();
-						this.historyItemBaseRef = mergeBase &&
+
+						this._currentHistoryItemBaseRef = mergeBase &&
 							(mergeBase.remote !== this.repository.HEAD.upstream?.remote ||
 								mergeBase.name !== this.repository.HEAD.upstream?.name) ? {
 							id: `refs/remotes/${mergeBase.remote}/${mergeBase.name}`,
@@ -110,7 +118,9 @@ export class GitHistoryProvider implements SourceControlHistoryProvider, FileDec
 					// Detached commit
 					historyItemRefId = this.repository.HEAD.commit ?? '';
 					historyItemRefName = this.repository.HEAD.commit ?? '';
-					this.historyItemBaseRef = undefined;
+
+					this._currentHistoryItemRemoteRef = undefined;
+					this._currentHistoryItemBaseRef = undefined;
 				}
 				break;
 			}
@@ -118,7 +128,9 @@ export class GitHistoryProvider implements SourceControlHistoryProvider, FileDec
 				// Tag
 				historyItemRefId = `refs/tags/${this.repository.HEAD.name}`;
 				historyItemRefName = this.repository.HEAD.name ?? this.repository.HEAD.commit ?? '';
-				this.historyItemBaseRef = undefined;
+
+				this._currentHistoryItemRemoteRef = undefined;
+				this._currentHistoryItemBaseRef = undefined;
 				break;
 			}
 		}
@@ -131,15 +143,6 @@ export class GitHistoryProvider implements SourceControlHistoryProvider, FileDec
 			revision: this.repository.HEAD.commit,
 			icon: new ThemeIcon('target'),
 		};
-
-		this._currentHistoryItemRemoteRef = this.repository.HEAD.upstream ? {
-			id: `refs/remotes/${this.repository.HEAD.upstream.remote}/${this.repository.HEAD.upstream.name}`,
-			name: `${this.repository.HEAD.upstream.remote}/${this.repository.HEAD.upstream.name}`,
-			revision: this.repository.HEAD.upstream.commit,
-			icon: new ThemeIcon('cloud')
-		} : undefined;
-
-		this._currentHistoryItemBaseRef = this.historyItemBaseRef;
 
 		this._onDidChangeCurrentHistoryItemRefs.fire();
 		this.logger.trace(`[GitHistoryProvider][onDidRunGitStatus] currentHistoryItemRef: ${JSON.stringify(this._currentHistoryItemRef)}`);
