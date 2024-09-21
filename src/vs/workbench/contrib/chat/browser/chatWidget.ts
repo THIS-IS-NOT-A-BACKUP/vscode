@@ -41,6 +41,7 @@ import { IChatSlashCommandService } from '../common/chatSlashCommands.js';
 import { ChatViewModel, IChatResponseViewModel, isRequestVM, isResponseVM, isWelcomeVM } from '../common/chatViewModel.js';
 import { CodeBlockModelCollection } from '../common/codeBlockModelCollection.js';
 import { ChatDragAndDrop } from './chatDragAndDrop.js';
+import { ChatImageDropAndPaste } from './chatImagePaste.js';
 import { IChatEditingService, IChatEditingSession } from '../common/chatEditingService.js';
 
 const $ = dom.$;
@@ -178,6 +179,10 @@ export class ChatWidget extends Disposable implements IChatWidget {
 	private parsedChatRequest: IParsedChatRequest | undefined;
 	get parsedInput() {
 		if (this.parsedChatRequest === undefined) {
+			if (!this.viewModel) {
+				return { text: '', parts: [] };
+			}
+
 			this.parsedChatRequest = this.instantiationService.createInstance(ChatRequestParser).parseChatRequest(this.viewModel!.sessionId, this.getInput(), this.location, { selectedAgent: this._lastSelectedAgent });
 		}
 
@@ -375,6 +380,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		}).filter(isDefined);
 
 		this._register(this.instantiationService.createInstance(ChatDragAndDrop, this.container, this.inputPart, this.styles));
+		this._register(this.instantiationService.createInstance(ChatImageDropAndPaste, this.inputPart));
 	}
 
 	getContrib<T extends IChatWidgetContrib>(id: string): T | undefined {
