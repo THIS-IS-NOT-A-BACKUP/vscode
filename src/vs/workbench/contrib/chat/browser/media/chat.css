@@ -479,10 +479,10 @@ have to be updated for changes to the rules above, or to support more deeply nes
 
 .interactive-session .chat-editing-session {
 	width: 100%;
-	margin-bottom: -10px;
 }
 
 .interactive-session .chat-editing-session .chat-editing-session-container {
+	margin-bottom: -10px;
 	padding: 8px 8px 12px 8px;
 	box-sizing: border-box;
 	cursor: text;
@@ -519,11 +519,19 @@ have to be updated for changes to the rules above, or to support more deeply nes
 
 .interactive-session .chat-editing-session .chat-editing-session-actions .monaco-button {
 	height: 17px;
-	width: 70px;
+	width: 66px;
 	font-size: 11px;
 	background-color: var(--vscode-button-background);
 	border: var(--vscode-button-border);
 	color: var(--vscode-button-foreground);
+}
+
+.interactive-session .chat-editing-session .chat-editing-session-actions .monaco-button.codicon.codicon-close {
+	width: 16px;
+	cursor: pointer;
+	font-size: 16px;
+	color: var(--vscode-descriptionForeground);
+	background-color: transparent;
 }
 
 .interactive-session .chat-editing-session .chat-editing-session-actions .monaco-button.secondary {
@@ -1051,7 +1059,7 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	overflow: hidden;
 
 	& > .chat-welcome-view-icon .codicon {
-		font-size: 44px;
+		font-size: 40px;
 	}
 
 	& > .chat-welcome-view-title {
@@ -1076,6 +1084,13 @@ have to be updated for changes to the rules above, or to support more deeply nes
 		opacity: 0.7;
 		max-width: 250px;
 		margin-top: 10px;
+
+		.rendered-markdown {
+			gap: 6px;
+			display: flex;
+			align-items: start;
+			flex-direction: column;
+		}
 
 		.rendered-markdown p {
 			display: flex;
