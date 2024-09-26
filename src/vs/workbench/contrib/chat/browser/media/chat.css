@@ -166,26 +166,26 @@
 	background-color: inherit;
 }
 
-.chat-footer-toolbar {
+.interactive-item-container .chat-footer-toolbar {
 	display: none;
 }
 
-.chat-footer-toolbar .monaco-action-bar .actions-container {
+.interactive-item-container .chat-footer-toolbar .monaco-action-bar .actions-container {
 	gap: 4px;
-	padding-top: 6px;
 }
 
-.interactive-response:not(.chat-response-loading) .chat-footer-toolbar {
-	/* Complete response only */
-	display: initial;
-	height: 22px;
-}
-
-.interactive-item-container .header .monaco-toolbar .checked.action-label,
-.interactive-item-container .header .monaco-toolbar .checked.action-label:hover {
+.interactive-item-container .chat-footer-toolbar .checked.action-label,
+.interactive-item-container .chat-footer-toolbar .checked.action-label:hover {
 	color: var(--vscode-inputOption-activeForeground) !important;
 	border-color: var(--vscode-inputOption-activeBorder);
 	background-color: var(--vscode-inputOption-activeBackground);
+}
+
+.interactive-item-container.interactive-response:not(.chat-response-loading) .chat-footer-toolbar {
+	/* Complete response only */
+	display: initial;
+	padding-top: 6px;
+	height: 22px;
 }
 
 .interactive-item-container .value {
@@ -524,12 +524,17 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	font-size: 11px;
 }
 
+.interactive-session .chat-editing-session .chat-editing-session-container .monaco-progress-container {
+	position: relative;
+}
+
 .interactive-session .chat-editing-session .chat-editing-session-actions {
 	display: flex;
 	flex-direction: row;
 	flex-wrap: wrap;
 	gap: 6px;
 	align-items: center;
+	justify-content: end;
 }
 
 .interactive-session .chat-editing-session .chat-editing-session-actions .monaco-button {

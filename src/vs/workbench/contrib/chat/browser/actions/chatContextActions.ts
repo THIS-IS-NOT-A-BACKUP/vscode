@@ -196,10 +196,16 @@ class AttachContextAction extends Action2 {
 			},
 			menu: [
 				{
-					when: AttachContextAction._cdt,
+					when: ContextKeyExpr.and(CONTEXT_CHAT_LOCATION.isEqualTo(ChatAgentLocation.Panel), AttachContextAction._cdt),
 					id: MenuId.ChatInput,
 					group: 'navigation',
 					order: 2
+				},
+				{
+					when: ContextKeyExpr.and(CONTEXT_CHAT_LOCATION.isEqualTo(ChatAgentLocation.Panel).negate(), AttachContextAction._cdt),
+					id: MenuId.ChatExecute,
+					group: 'navigation',
+					order: 1
 				},
 			]
 		});
@@ -328,8 +334,6 @@ class AttachContextAction extends Action2 {
 			return;
 		}
 
-		const imageData = await clipboardService.readImage();
-
 		const usedAgent = widget.parsedInput.parts.find(p => p instanceof ChatRequestAgentPart);
 		const slowSupported = usedAgent ? usedAgent.agent.metadata.supportsSlowVariables : true;
 		const quickPickItems: (IChatContextQuickPickItem | QuickPickItem)[] = [];
@@ -345,13 +349,16 @@ class AttachContextAction extends Action2 {
 			}
 		}
 
-		if (isImage(imageData) && configurationService.getValue<boolean>('chat.experimental.imageAttachments')) {
-			quickPickItems.push({
-				id: await imageToHash(imageData),
-				kind: 'image',
-				label: localize('imageFromClipboard', 'Image from Clipboard'),
-				iconClass: ThemeIcon.asClassName(Codicon.fileMedia),
-			});
+		if (configurationService.getValue<boolean>('chat.experimental.imageAttachments')) {
+			const imageData = await clipboardService.readImage();
+			if (isImage(imageData)) {
+				quickPickItems.push({
+					id: await imageToHash(imageData),
+					kind: 'image',
+					label: localize('imageFromClipboard', 'Image from Clipboard'),
+					iconClass: ThemeIcon.asClassName(Codicon.fileMedia),
+				});
+			}
 		}
 
 		if (widget.viewModel?.sessionId) {
