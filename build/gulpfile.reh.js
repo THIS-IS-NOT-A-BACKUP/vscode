@@ -103,29 +103,7 @@ const serverWithWebResources = [
 	...serverWithWebResourceIncludes,
 	...serverWithWebResourceExcludes
 ];
-
-const serverEntryPoints = [
-	{
-		name: 'vs/server/node/server.main',
-		exclude: ['vs/css']
-	},
-	{
-		name: 'vs/server/node/server.cli',
-		exclude: ['vs/css']
-	},
-	{
-		name: 'vs/workbench/api/node/extensionHostProcess',
-		exclude: ['vs/css']
-	},
-	{
-		name: 'vs/platform/files/node/watcher/watcherMain',
-		exclude: ['vs/css']
-	},
-	{
-		name: 'vs/platform/terminal/node/ptyHostMain',
-		exclude: ['vs/css']
-	}
-];
+const serverEntryPoints = buildfile.codeServer;
 
 const webEntryPoints = [
 	buildfile.workerEditor,
