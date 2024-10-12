@@ -837,14 +837,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			}
 			if (e.kind === 'addRequest') {
 				if (this._location.location === ChatAgentLocation.EditingSession) {
-					const requests = model.getRequests();
-					for (let i = 0; i < requests.length - 1; i++) {
-						if (requests[i + 1].id === e.request.id) {
-							// Capture a snapshot for the request right before the one that was just added
-							this.chatEditingService.createSnapshot(requests[i].id);
-							break;
-						}
-					}
+					this.chatEditingService.createSnapshot(e.request.id);
 				}
 			}
 		}));
@@ -938,12 +931,22 @@ export class ChatWidget extends Disposable implements IChatWidget {
 				}
 			}
 
+			const attachedContext = [...this.attachmentModel.attachments];
+			if (this.location === ChatAgentLocation.EditingSession) {
+				const currentEditingSession = this.chatEditingService.currentEditingSessionObs.get();
+				if (currentEditingSession?.workingSet) {
+					for (const [file, _] of currentEditingSession?.workingSet) {
+						attachedContext.push(this.attachmentModel.asVariableEntry(file));
+					}
+				}
+			}
+
 			const result = await this.chatService.sendRequest(this.viewModel.sessionId, input, {
 				userSelectedModelId: this.inputPart.currentLanguageModel,
 				location: this.location,
 				locationData: this._location.resolveData?.(),
 				parserContext: { selectedAgent: this._lastSelectedAgent },
-				attachedContext: [...this.attachmentModel.attachments]
+				attachedContext: attachedContext
 			});
 
 			if (result) {
@@ -1132,7 +1135,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		this.inputPart.saveState();
 
 		if (this.viewModel?.model.welcomeMessage) {
-			this.storageService.store(PersistWelcomeMessageContentKey, this.viewModel?.model.welcomeMessage, StorageScope.APPLICATION, StorageTarget.MACHINE);
+			this.storageService.store(`${PersistWelcomeMessageContentKey}.${this.location}`, this.viewModel?.model.welcomeMessage, StorageScope.APPLICATION, StorageTarget.MACHINE);
 		}
 	}
 
