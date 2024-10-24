@@ -402,6 +402,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 
 		templateData.disabledOverlay.classList.toggle('disabled', element.isDisabled);
 		templateData.rowContainer.classList.toggle('disabled', element.isDisabled);
+		templateData.rowContainer.classList.toggle(mostRecentResponseClassName, index === this.delegate.getListLength() - 1);
 
 		if (isRequestVM(element) && element.confirmation) {
 			this.renderConfirmationAction(element, templateData);
@@ -414,7 +415,6 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		//   - Or, we previously started a progressive rendering of this element (if the element is complete, we will finish progressive rendering with a very fast rate)
 		if (isResponseVM(element) && index === this.delegate.getListLength() - 1 && (!element.isComplete || element.renderData)) {
 			this.traceLayout('renderElement', `start progressive render, index=${index}`);
-			templateData.rowContainer.classList.toggle(mostRecentResponseClassName, true);
 
 			const timer = templateData.elementDisposables.add(new dom.WindowIntervalTimer());
 			const runProgressiveRender = (initial?: boolean) => {
@@ -431,7 +431,6 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			timer.cancelAndSet(runProgressiveRender, 50, dom.getWindow(templateData.rowContainer));
 			runProgressiveRender(true);
 		} else {
-			templateData.rowContainer.classList.toggle(mostRecentResponseClassName, false);
 			if (isResponseVM(element)) {
 				this.basicRenderElement(element, index, templateData);
 			} else if (isRequestVM(element)) {
@@ -625,6 +624,13 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			} else {
 				// Nothing new to render, stop rendering until next model update
 				this.traceLayout('doNextProgressiveRender', 'caught up with the stream- no new content to render');
+
+				if (!templateData.renderedParts) {
+					// First render? Initialize currentRenderedHeight. https://github.com/microsoft/vscode/issues/232096
+					const height = templateData.rowContainer.offsetHeight;
+					element.currentRenderedHeight = height;
+				}
+
 				return true;
 			}
 		}
@@ -636,7 +642,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		const height = templateData.rowContainer.offsetHeight;
 		element.currentRenderedHeight = height;
 		if (!isInRenderElement) {
-			this._onDidChangeItemHeight.fire({ element, height: templateData.rowContainer.offsetHeight });
+			this._onDidChangeItemHeight.fire({ element, height });
 		}
 
 		return false;
