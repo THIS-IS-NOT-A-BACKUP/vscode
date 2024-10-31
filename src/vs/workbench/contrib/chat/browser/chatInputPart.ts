@@ -719,8 +719,11 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 
 		dom.clearNode(container);
 		const hoverDelegate = store.add(createInstantHoverDelegate());
-		dom.setVisibility(Boolean(this.attachmentModel.size) || Boolean(this.implicitContext?.value), this.attachedContextContainer);
-		if (!this.attachmentModel.size) {
+		const attachments = this.location === ChatAgentLocation.EditingSession
+			? [...this.attachmentModel.attachments.entries()].filter(([_, attachment]) => !attachment.isFile)
+			: [...this.attachmentModel.attachments.entries()];
+		dom.setVisibility(Boolean(attachments.length) || Boolean(this.implicitContext?.value), this.attachedContextContainer);
+		if (!attachments.length) {
 			this._indexOfLastAttachedContextDeletedWithKeyboard = -1;
 		}
 
@@ -730,11 +733,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		}
 
 		const attachmentInitPromises: Promise<void>[] = [];
-		for (const [index, attachment] of this.attachmentModel.attachments.entries()) {
-			if (attachment.isFile && this.location === ChatAgentLocation.EditingSession) {
-				return;
-			}
-
+		for (const [index, attachment] of attachments) {
 			const widget = dom.append(container, $('.chat-attached-context-attachment.show-file-icons'));
 			const label = this._contextResourceLabels.create(widget, { supportIcons: true, hoverDelegate, hoverTargetOverride: widget });
 
@@ -1039,6 +1038,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		}
 
 		// Working set
+		const workingSetContainer = innerContainer.querySelector('.chat-editing-session-list') as HTMLElement ?? dom.append(innerContainer, $('.chat-editing-session-list'));
 		if (!this._chatEditList) {
 			this._chatEditList = this._chatEditsListPool.get();
 			const list = this._chatEditList.object;
@@ -1068,7 +1068,8 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 					this._onDidFocus.fire();
 				}
 			}, true));
-			dom.append(innerContainer, list.getHTMLElement());
+			dom.append(workingSetContainer, list.getHTMLElement());
+			dom.append(innerContainer, workingSetContainer);
 		}
 
 		const maxItemsShown = 6;
