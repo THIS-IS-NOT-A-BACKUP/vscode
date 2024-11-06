@@ -217,7 +217,6 @@ export class TerminalChatWidget extends Disposable {
 
 	private _reset() {
 		this.inlineChatWidget.placeholder = terminalChatPlaceholder;
-		this._inlineChatWidget.updateInfo(localize('welcome.1', "AI-generated commands may be incorrect"));
 	}
 
 	async reveal(viewState?: IChatViewState): Promise<void> {
@@ -304,7 +303,7 @@ export class TerminalChatWidget extends Disposable {
 		if (!code) {
 			return;
 		}
-		const value = code.textEditorModel.getValue();
+		const value = code.getValue();
 		this._instance.runCommand(value, shouldExecute);
 		this.hide();
 	}
