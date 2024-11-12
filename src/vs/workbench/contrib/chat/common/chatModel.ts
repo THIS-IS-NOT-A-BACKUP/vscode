@@ -168,9 +168,11 @@ export interface IChatResponseModel {
 	readonly voteDownReason: ChatAgentVoteDownReason | undefined;
 	readonly followups?: IChatFollowup[] | undefined;
 	readonly result?: IChatAgentResult;
+	readonly editChangeCount: number;
 	setVote(vote: ChatAgentVoteDirection): void;
 	setVoteDownReason(reason: ChatAgentVoteDownReason | undefined): void;
 	setEditApplied(edit: IChatTextEditGroup, editCount: number): boolean;
+	reportEditCountChange(): void;
 }
 
 export class ChatRequestModel implements IChatRequestModel {
@@ -418,6 +420,11 @@ export class ChatResponseModel extends Disposable implements IChatResponseModel 
 		return this._session;
 	}
 
+	private _editChangeCount: number = 0;
+	public get editChangeCount(): number {
+		return this._editChangeCount;
+	}
+
 	public get isHidden() {
 		return this._isHidden;
 	}
@@ -558,7 +565,7 @@ export class ChatResponseModel extends Disposable implements IChatResponseModel 
 	setAgent(agent: IChatAgentData, slashCommand?: IChatAgentCommand) {
 		this._agent = agent;
 		this._slashCommand = slashCommand;
-		this._agentOrSlashCommandDetected = true;
+		this._agentOrSlashCommandDetected = !agent.isDefault;
 		this._onDidChange.fire();
 	}
 
@@ -607,6 +614,11 @@ export class ChatResponseModel extends Disposable implements IChatResponseModel 
 		edit.state.applied = editCount; // must not be edit.edits.length
 		this._onDidChange.fire();
 		return true;
+	}
+
+	reportEditCountChange() {
+		this._editChangeCount++;
+		this._onDidChange.fire();
 	}
 
 	adoptTo(session: ChatModel) {
