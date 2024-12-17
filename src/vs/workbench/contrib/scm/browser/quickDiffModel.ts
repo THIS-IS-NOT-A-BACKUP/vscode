@@ -33,7 +33,13 @@ export const IQuickDiffModelService = createDecorator<IQuickDiffModelService>('I
 
 export interface QuickDiffModelOptions {
 	readonly algorithm: DiffAlgorithmName;
+	readonly maxComputationTimeMs?: number;
 }
+
+const decoratorQuickDiffModelOptions: QuickDiffModelOptions = {
+	algorithm: 'legacy',
+	maxComputationTimeMs: 1000
+};
 
 export interface IQuickDiffModelService {
 	_serviceBrand: undefined;
@@ -52,7 +58,7 @@ class QuickDiffModelReferenceCollection extends ReferenceCollection<QuickDiffMod
 		super();
 	}
 
-	protected override createReferencedObject(_key: string, textFileModel: IResolvedTextFileEditorModel, options?: QuickDiffModelOptions): QuickDiffModel {
+	protected override createReferencedObject(_key: string, textFileModel: IResolvedTextFileEditorModel, options: QuickDiffModelOptions): QuickDiffModel {
 		return this._instantiationService.createInstance(QuickDiffModel, textFileModel, options);
 	}
 
@@ -74,16 +80,13 @@ export class QuickDiffModelService implements IQuickDiffModelService {
 		this._references = this.instantiationService.createInstance(QuickDiffModelReferenceCollection);
 	}
 
-	createQuickDiffModelReference(resource: URI, options?: QuickDiffModelOptions): IReference<QuickDiffModel> | undefined {
+	createQuickDiffModelReference(resource: URI, options: QuickDiffModelOptions = decoratorQuickDiffModelOptions): IReference<QuickDiffModel> | undefined {
 		const textFileModel = this.textFileService.files.get(resource);
 		if (!textFileModel?.isResolved()) {
 			return undefined;
 		}
 
-		resource = options === undefined
-			? this.uriIdentityService.asCanonicalUri(resource)
-			: this.uriIdentityService.asCanonicalUri(resource).with({ query: JSON.stringify(options) });
-
+		resource = this.uriIdentityService.asCanonicalUri(resource).with({ query: JSON.stringify(options) });
 		return this._references.acquire(resource.toString(), textFileModel, options);
 	}
 }
@@ -119,7 +122,7 @@ export class QuickDiffModel extends Disposable {
 
 	constructor(
 		textFileModel: IResolvedTextFileEditorModel,
-		private readonly options: QuickDiffModelOptions | undefined,
+		private readonly options: QuickDiffModelOptions,
 		@ISCMService private readonly scmService: ISCMService,
 		@IQuickDiffService private readonly quickDiffService: IQuickDiffService,
 		@IEditorWorkerService private readonly editorWorkerService: IEditorWorkerService,
@@ -211,10 +214,6 @@ export class QuickDiffModel extends Disposable {
 					return; // disposed
 				}
 
-				if (editorModels.every(editorModel => editorModel.textEditorModel.getValueLength() === 0)) {
-					result.changes = [];
-				}
-
 				this.setChanges(result.changes, result.mapChanges);
 			})
 			.catch(err => onUnexpectedError(err));
@@ -273,14 +272,11 @@ export class QuickDiffModel extends Disposable {
 	}
 
 	private async _diff(original: URI, modified: URI, ignoreTrimWhitespace: boolean): Promise<{ changes: readonly IChange[] | null; changes2: readonly LineRangeMapping[] | null }> {
-		// When no algorithm is specified, we use the legacy diff algorithm along with a 1000ms
-		// timeout as the diff information is being used for the quick diff editor decorations
-		const algorithm = this.options?.algorithm ?? 'legacy';
-		const maxComputationTimeMs = this.options?.algorithm ? Number.MAX_SAFE_INTEGER : 1000;
+		const maxComputationTimeMs = this.options.maxComputationTimeMs ?? Number.MAX_SAFE_INTEGER;
 
 		const result = await this.editorWorkerService.computeDiff(original, modified, {
 			computeMoves: false, ignoreTrimWhitespace, maxComputationTimeMs
-		}, algorithm);
+		}, this.options.algorithm);
 
 		return { changes: result ? toLineChanges(DiffState.fromDiffResult(result)) : null, changes2: result?.changes ?? null };
 	}
@@ -355,15 +351,7 @@ export class QuickDiffModel extends Disposable {
 		}
 
 		const isSynchronized = this._model.textEditorModel ? shouldSynchronizeModel(this._model.textEditorModel) : undefined;
-		const quickDiffs = await this.quickDiffService.getQuickDiffs(uri, this._model.getLanguageId(), isSynchronized);
-
-		// TODO@lszomoru - find a long term solution for this
-		// When the QuickDiffModel is created for a diff editor, there is no
-		// need to compute the diff information for the `isSCM` quick diff
-		// provider as that information will be provided by the diff editor
-		return this.options?.algorithm !== undefined
-			? quickDiffs.filter(quickDiff => !quickDiff.isSCM)
-			: quickDiffs;
+		return this.quickDiffService.getQuickDiffs(uri, this._model.getLanguageId(), isSynchronized);
 	}
 
 	findNextClosestChange(lineNumber: number, inclusive = true, provider?: string): number {
