@@ -56,7 +56,8 @@ export class InlineCompletionsModel extends Disposable {
 	private readonly _editorObs = observableCodeEditor(this._editor);
 
 	private readonly _acceptCompletionDecorationTimer = this._register(new MutableDisposable());
-	private readonly _acceptCompletionDecoration: IModelDecorationOptions = {
+	private readonly _acceptCompletionDecorationCollection = this._editor.createDecorationsCollection();
+	private readonly _acceptCompletionDecorationOptions: IModelDecorationOptions = {
 		description: 'inline-completion-accepted',
 		className: 'inline-completion-accepted',
 		stickiness: TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges
@@ -94,6 +95,19 @@ export class InlineCompletionsModel extends Disposable {
 					const i = completion.inlineCompletion;
 					const src = i.source;
 					src.provider.handleItemDidShow?.(src.inlineCompletions, i.sourceInlineCompletion, i.insertText);
+				}
+			}
+		}));
+		this._register(autorun(reader => {
+			/** @description handle text edits collapsing */
+			const inlineCompletions = this._source.inlineCompletions.read(reader);
+			if (!inlineCompletions) {
+				return;
+			}
+			for (const inlineCompletion of inlineCompletions.inlineCompletions) {
+				const singleEdit = inlineCompletion.toSingleTextEdit(reader);
+				if (singleEdit.isEmpty) {
+					this.stop();
 				}
 			}
 		}));
@@ -581,8 +595,6 @@ export class InlineCompletionsModel extends Disposable {
 			completion.source.addRef();
 		}
 
-		this._acceptCompletionDecorationTimer.clear();
-
 		editor.pushUndoStop();
 		if (completion.snippetInfo) {
 			editor.executeEdits(
@@ -605,8 +617,8 @@ export class InlineCompletionsModel extends Disposable {
 			editor.setSelections(selections, 'inlineCompletionAccept');
 
 			if (state.kind === 'inlineEdit') {
-				const acceptEditsDecorations = editor.createDecorationsCollection(modifiedRanges.map(r => ({ range: r, options: this._acceptCompletionDecoration })));
-				this._acceptCompletionDecorationTimer.value = disposableTimeout(() => acceptEditsDecorations.clear(), 2500);
+				this._acceptCompletionDecorationCollection.set(modifiedRanges.map(r => ({ range: r, options: this._acceptCompletionDecorationOptions })));
+				this._acceptCompletionDecorationTimer.value = disposableTimeout(() => this._acceptCompletionDecorationCollection.clear(), 2500);
 			}
 		}
 
