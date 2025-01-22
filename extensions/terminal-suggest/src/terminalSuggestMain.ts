@@ -136,7 +136,6 @@ export async function activate(context: vscode.ExtensionContext) {
 
 			const result = await getCompletionItemsFromSpecs(availableSpecs, terminalContext, commands, prefix, terminal.shellIntegration?.cwd, token);
 			if (result.cwd && (result.filesRequested || result.foldersRequested)) {
-				// const cwd = resolveCwdFromPrefix(prefix, terminal.shellIntegration?.cwd) ?? terminal.shellIntegration?.cwd;
 				return new vscode.TerminalCompletionList(result.items, { filesRequested: result.filesRequested, foldersRequested: result.foldersRequested, cwd: result.cwd, pathSeparator: isWindows ? '\\' : '/' });
 			}
 			return result.items;
@@ -198,7 +197,12 @@ export async function resolveCwdFromPrefix(prefix: string, currentCwd?: vscode.U
 	// If the prefix is not a folder, return the current cwd
 	return currentCwd;
 }
-
+function getDescription(spec: Fig.Spec): string {
+	if ('description' in spec) {
+		return spec.description ?? '';
+	}
+	return '';
+}
 
 function getLabel(spec: Fig.Spec | Fig.Arg | Fig.Suggestion | string): string[] | undefined {
 	if (typeof spec === 'string') {
@@ -213,12 +217,13 @@ function getLabel(spec: Fig.Spec | Fig.Arg | Fig.Suggestion | string): string[] 
 	return spec.name;
 }
 
-function createCompletionItem(cursorPosition: number, prefix: string, commandResource: ICompletionResource, description?: string, kind?: vscode.TerminalCompletionItemKind): vscode.TerminalCompletionItem {
+function createCompletionItem(cursorPosition: number, prefix: string, commandResource: ICompletionResource, detail?: string, documentation?: string | vscode.MarkdownString, kind?: vscode.TerminalCompletionItemKind): vscode.TerminalCompletionItem {
 	const endsWithSpace = prefix.endsWith(' ');
 	const lastWord = endsWithSpace ? '' : prefix.split(' ').at(-1) ?? '';
 	return {
 		label: commandResource.label,
-		detail: description ?? commandResource.detail ?? '',
+		detail: detail ?? commandResource.detail ?? '',
+		documentation,
 		replacementIndex: cursorPosition - lastWord.length,
 		replacementLength: lastWord.length,
 		kind: kind ?? vscode.TerminalCompletionItemKind.Method
@@ -327,7 +332,8 @@ export async function getCompletionItemsFromSpecs(
 		}
 
 		for (const specLabel of specLabels) {
-			if (!availableCommands.find(command => command.label === specLabel) || (token && token.isCancellationRequested)) {
+			const availableCommand = availableCommands.find(command => command.label === specLabel);
+			if (!availableCommand || (token && token.isCancellationRequested)) {
 				continue;
 			}
 
@@ -338,7 +344,7 @@ export async function getCompletionItemsFromSpecs(
 				|| !!firstCommand && specLabel.startsWith(firstCommand)
 			) {
 				// push it to the completion items
-				items.push(createCompletionItem(terminalContext.cursorPosition, prefix, { label: specLabel }));
+				items.push(createCompletionItem(terminalContext.cursorPosition, prefix, { label: specLabel }, getDescription(spec), availableCommand.detail));
 			}
 
 			if (!terminalContext.commandLine.startsWith(specLabel)) {
@@ -374,7 +380,7 @@ export async function getCompletionItemsFromSpecs(
 		const labels = new Set(items.map((i) => i.label));
 		for (const command of availableCommands) {
 			if (!labels.has(command.label)) {
-				items.push(createCompletionItem(terminalContext.cursorPosition, prefix, command));
+				items.push(createCompletionItem(terminalContext.cursorPosition, prefix, command, command.detail));
 			}
 		}
 	}
@@ -445,6 +451,7 @@ function handleOptions(specLabel: string, spec: Fig.Spec, terminalContext: { com
 					prefix,
 					{ label: optionLabel },
 					option.description,
+					undefined,
 					vscode.TerminalCompletionItemKind.Flag
 				)
 			);
@@ -505,7 +512,7 @@ function getCompletionItemsFromArgs(args: Fig.SingleOrArray<Fig.Arg> | undefined
 					}
 					if (suggestionLabel && suggestionLabel.startsWith(currentPrefix.trim())) {
 						const description = typeof suggestion !== 'string' ? suggestion.description : '';
-						items.push(createCompletionItem(terminalContext.cursorPosition, wordBefore ?? '', { label: suggestionLabel }, description, vscode.TerminalCompletionItemKind.Argument));
+						items.push(createCompletionItem(terminalContext.cursorPosition, wordBefore ?? '', { label: suggestionLabel }, description, undefined, vscode.TerminalCompletionItemKind.Argument));
 					}
 				}
 			}

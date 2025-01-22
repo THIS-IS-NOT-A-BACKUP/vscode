@@ -134,7 +134,9 @@ class EditTool implements IToolImpl {
 		}
 
 		const result = await this.codeMapperService.mapCode({
-			codeBlocks: [{ code: parameters.code, resource: uri, markdownBeforeBlock: parameters.explanation }]
+			codeBlocks: [{ code: parameters.code, resource: uri, markdownBeforeBlock: parameters.explanation }],
+			location: 'tool',
+			chatRequestId: invocation.chatRequestId
 		}, {
 			textEdit: (target, edits) => {
 				model.acceptResponseProgress(request, { kind: 'textEdit', uri: target, edits });
@@ -161,7 +163,7 @@ class EditTool implements IToolImpl {
 		await this.textFileService.save(uri);
 
 		return {
-			content: [{ kind: 'text', value: 'Success' }]
+			content: [{ kind: 'text', value: 'The file was edited successfully' }]
 		};
 	}
 }
