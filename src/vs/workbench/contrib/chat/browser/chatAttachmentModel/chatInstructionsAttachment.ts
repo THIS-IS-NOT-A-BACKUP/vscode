@@ -26,16 +26,16 @@ export class ChatInstructionsAttachmentModel extends Disposable {
 	}
 
 	/**
-	 * Get `URI` for the main reference and `URI`s of all valid
-	 * child references it may contain.
+	 * Get `URI` for the main reference and `URI`s of all valid child
+	 * references it may contain, including reference of this model itself.
 	 */
 	public get references(): readonly URI[] {
-		const { reference, enabled } = this;
+		const { reference } = this;
 		const { errorCondition } = this.reference;
 
 		// return no references if the attachment is disabled
 		// or if this object itself has an error
-		if (!enabled || errorCondition) {
+		if (errorCondition) {
 			return [];
 		}
 
@@ -45,6 +45,14 @@ export class ChatInstructionsAttachmentModel extends Disposable {
 			...reference.allValidReferencesUris,
 			reference.uri,
 		];
+	}
+
+	/**
+	 * Promise that resolves when the prompt is fully parsed,
+	 * including all its possible nested child references.
+	 */
+	public get allSettled(): Promise<FilePromptParser> {
+		return this.reference.settledAll();
 	}
 
 	/**
@@ -88,18 +96,6 @@ export class ChatInstructionsAttachmentModel extends Disposable {
 		return this;
 	}
 
-	/**
-	 * Private property to track the `enabled` state of the prompt
-	 * instructions attachment.
-	 */
-	private _enabled: boolean = true;
-	/**
-	 * Get the `enabled` state of the prompt instructions attachment.
-	 */
-	public get enabled(): boolean {
-		return this._enabled;
-	}
-
 	constructor(
 		uri: URI,
 		@IInstantiationService private readonly initService: IInstantiationService,
@@ -117,16 +113,6 @@ export class ChatInstructionsAttachmentModel extends Disposable {
 	 */
 	public resolve(): this {
 		this._reference.start();
-
-		return this;
-	}
-
-	/**
-	 * Toggle the `enabled` state of the prompt instructions attachment.
-	 */
-	public toggle(): this {
-		this._enabled = !this._enabled;
-		this._onUpdate.fire();
 
 		return this;
 	}
