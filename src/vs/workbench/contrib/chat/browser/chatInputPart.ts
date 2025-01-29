@@ -89,7 +89,7 @@ import { IChatVariablesService } from '../common/chatVariables.js';
 import { IChatResponseViewModel } from '../common/chatViewModel.js';
 import { ChatInputHistoryMaxEntries, IChatHistoryEntry, IChatInputState, IChatWidgetHistoryService } from '../common/chatWidgetHistoryService.js';
 import { ILanguageModelChatMetadataAndIdentifier, ILanguageModelsService } from '../common/languageModels.js';
-import { CancelAction, ChatModelPickerActionId, ChatSubmitAction, ChatSubmitSecondaryAgentAction, IChatExecuteActionContext, ToggleAgentModeActionId } from './actions/chatExecuteActions.js';
+import { CancelAction, ChatModelPickerActionId, ChatSubmitAction, ChatSubmitSecondaryAgentAction, IChatExecuteActionContext, IToggleAgentModeArgs, ToggleAgentModeActionId } from './actions/chatExecuteActions.js';
 import { ImplicitContextAttachmentWidget } from './attachments/implicitContextAttachment.js';
 import { InstructionAttachmentsWidget } from './attachments/instructionsAttachment/instructionAttachments.js';
 import { IChatWidget } from './chat.js';
@@ -275,7 +275,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	private chatCursorAtTop: IContextKey<boolean>;
 	private inputEditorHasFocus: IContextKey<boolean>;
 	/**
-	 * Context key is set when prompt instructions are attached.3
+	 * Context key is set when prompt instructions are attached.
 	 */
 	private promptInstructionsAttached: IContextKey<boolean>;
 
@@ -628,7 +628,9 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	async acceptInput(isUserQuery?: boolean): Promise<void> {
 		if (isUserQuery) {
 			const userQuery = this._inputEditor.getValue();
-			const entry: IChatHistoryEntry = { text: userQuery, state: this.getInputState() };
+			const inputState = this.getInputState();
+			inputState.chatContextAttachments = inputState.chatContextAttachments?.filter(attachment => !attachment.isImage);
+			const entry: IChatHistoryEntry = { text: userQuery, state: inputState };
 			this.history.replaceLast(entry);
 			this.history.add({ text: '' });
 		}
@@ -1728,7 +1730,7 @@ class ToggleAgentActionViewItem extends MenuEntryActionViewItem {
 				label: localize('chat.agentMode', "Agent"),
 				class: undefined,
 				enabled: true,
-				run: () => this.action.run()
+				run: () => this.action.run({ agentMode: true } satisfies IToggleAgentModeArgs)
 			},
 			{
 				...this.action,
@@ -1737,7 +1739,7 @@ class ToggleAgentActionViewItem extends MenuEntryActionViewItem {
 				class: undefined,
 				enabled: true,
 				checked: !this.action.checked,
-				run: () => this.action.run()
+				run: () => this.action.run({ agentMode: false } satisfies IToggleAgentModeArgs)
 			},
 		];
 	}
