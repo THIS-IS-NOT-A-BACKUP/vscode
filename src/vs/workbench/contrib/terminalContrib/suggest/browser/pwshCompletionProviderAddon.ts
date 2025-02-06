@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { ITerminalCompletion, ITerminalCompletionProvider } from './terminalCompletionService.js';
+import { ITerminalCompletionProvider } from './terminalCompletionService.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import type { ITerminalAddon, Terminal } from '@xterm/xterm';
 import { Event, Emitter } from '../../../../../base/common/event.js';
@@ -21,6 +21,7 @@ import { ITerminalCapabilityStore, TerminalCapability } from '../../../../../pla
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
 import { DeferredPromise } from '../../../../../base/common/async.js';
 import { CancellationToken } from '../../../../../base/common/cancellation.js';
+import { ITerminalCompletion, TerminalCompletionItemKind } from './terminalCompletionItem.js';
 
 export const enum VSCodeSuggestOscPt {
 	Completions = 'Completions',
@@ -207,7 +208,7 @@ export class PwshCompletionProviderAddon extends Disposable implements ITerminal
 			}
 		}
 
-		if (this._mostRecentCompletion?.isDirectory && completions.every(c => c.isDirectory)) {
+		if (this._mostRecentCompletion?.kind === TerminalCompletionItemKind.Folder && completions.every(c => c.kind === TerminalCompletionItemKind.Folder)) {
 			completions.push(this._mostRecentCompletion);
 		}
 		this._mostRecentCompletion = undefined;
@@ -351,8 +352,8 @@ function rawCompletionToITerminalCompletion(rawCompletion: PwshCompletion, repla
 		provider: PwshCompletionProviderAddon.ID,
 		icon,
 		detail,
-		isFile: rawCompletion.ResultType === 3,
-		isDirectory: rawCompletion.ResultType === 4,
+		// HACK: This isn't complete, but we'll remove it soon
+		kind: rawCompletion.ResultType === 3 ? TerminalCompletionItemKind.File : TerminalCompletionItemKind.Folder,
 		isKeyword: rawCompletion.ResultType === 12,
 		replacementIndex,
 		replacementLength
