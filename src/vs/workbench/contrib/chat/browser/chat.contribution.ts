@@ -78,7 +78,7 @@ import { agentSlashCommandToMarkdown, agentToMarkdown } from './chatMarkdownDeco
 import { ChatCompatibilityNotifier, ChatExtensionPointHandler } from './chatParticipant.contribution.js';
 import { ChatPasteProvidersFeature } from './chatPasteProviders.js';
 import { QuickChatService } from './chatQuick.js';
-import { ChatQuotasService, ChatQuotasStatusBarEntry, IChatQuotasService } from './chatQuotasService.js';
+import { ChatQuotasService, IChatQuotasService } from '../common/chatQuotasService.js';
 import { ChatResponseAccessibleView } from './chatResponseAccessibleView.js';
 import { ChatSetupContribution } from './chatSetup.js';
 import { ChatVariablesService } from './chatVariables.js';
@@ -96,6 +96,7 @@ import { PromptsConfig } from '../../../../platform/prompts/common/config.js';
 import { PROMPT_FILE_EXTENSION } from '../../../../platform/prompts/common/constants.js';
 import { DOCUMENTATION_URL } from '../common/promptSyntax/constants.js';
 import { registerChatToolActions } from './actions/chatToolActions.js';
+import { ChatStatusBarEntry } from './chatStatus.js';
 
 // Register configuration
 const configurationRegistry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration);
@@ -164,6 +165,11 @@ configurationRegistry.registerConfiguration({
 			type: 'boolean',
 			description: nls.localize('chat.detectParticipant.enabled', "Enables chat participant autodetection for panel chat."),
 			default: true
+		},
+		'chat.renderRelatedFiles': {
+			type: 'boolean',
+			description: nls.localize('chat.renderRelatedFiles', "Controls whether related files should be rendered in the chat input."),
+			default: false
 		},
 		[PromptsConfig.CONFIG_KEY]: {
 			type: 'object',
@@ -418,7 +424,7 @@ registerWorkbenchContribution2(ChatRelatedFilesContribution.ID, ChatRelatedFiles
 registerWorkbenchContribution2(ChatViewsWelcomeHandler.ID, ChatViewsWelcomeHandler, WorkbenchPhase.BlockStartup);
 registerWorkbenchContribution2(ChatGettingStartedContribution.ID, ChatGettingStartedContribution, WorkbenchPhase.Eventually);
 registerWorkbenchContribution2(ChatSetupContribution.ID, ChatSetupContribution, WorkbenchPhase.BlockRestore);
-registerWorkbenchContribution2(ChatQuotasStatusBarEntry.ID, ChatQuotasStatusBarEntry, WorkbenchPhase.Eventually);
+registerWorkbenchContribution2(ChatStatusBarEntry.ID, ChatStatusBarEntry, WorkbenchPhase.BlockRestore);
 registerWorkbenchContribution2(BuiltinToolsContribution.ID, BuiltinToolsContribution, WorkbenchPhase.Eventually);
 registerWorkbenchContribution2(ChatAgentSettingContribution.ID, ChatAgentSettingContribution, WorkbenchPhase.BlockRestore);
 registerWorkbenchContribution2(ChatEditingEditorAccessibility.ID, ChatEditingEditorAccessibility, WorkbenchPhase.AfterRestored);

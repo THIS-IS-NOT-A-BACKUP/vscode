@@ -79,7 +79,7 @@ import { revealInSideBarCommand } from '../../files/browser/fileActions.contribu
 import { ChatAgentLocation, IChatAgentService } from '../common/chatAgents.js';
 import { ChatContextKeys } from '../common/chatContextKeys.js';
 import { IChatEditingSession, WorkingSetEntryRemovalReason, WorkingSetEntryState } from '../common/chatEditingService.js';
-import { IChatRequestVariableEntry, isPasteVariableEntry } from '../common/chatModel.js';
+import { IChatRequestVariableEntry, isLinkVariableEntry, isPasteVariableEntry } from '../common/chatModel.js';
 import { IChatFollowup } from '../common/chatService.js';
 import { IChatVariablesService } from '../common/chatVariables.js';
 import { IChatResponseViewModel } from '../common/chatViewModel.js';
@@ -87,10 +87,10 @@ import { ChatInputHistoryMaxEntries, IChatHistoryEntry, IChatInputState, IChatWi
 import { ILanguageModelChatMetadataAndIdentifier, ILanguageModelsService } from '../common/languageModels.js';
 import { CancelAction, ChatModelPickerActionId, ChatSubmitAction, ChatSubmitSecondaryAgentAction, IChatExecuteActionContext, IToggleAgentModeArgs, ToggleAgentModeActionId } from './actions/chatExecuteActions.js';
 import { ImplicitContextAttachmentWidget } from './attachments/implicitContextAttachment.js';
-import { InstructionAttachmentsWidget } from './attachments/instructionsAttachment/instructionAttachments.js';
+import { PromptAttachmentsCollectionWidget } from './attachments/promptAttachments/promptAttachmentsCollectionWidget.js';
 import { IChatWidget } from './chat.js';
 import { ChatAttachmentModel } from './chatAttachmentModel.js';
-import { toChatVariable } from './chatAttachmentModel/chatInstructionAttachmentsModel.js';
+import { toChatVariable } from './chatAttachmentModel/chatPromptAttachmentsCollection.js';
 import { hookUpResourceAttachmentDragAndContextMenu, hookUpSymbolAttachmentDragAndContextMenu } from './chatContentParts/chatAttachmentsContentPart.js';
 import { IDisposableReference } from './chatContentParts/chatCollections.js';
 import { CollapsibleListPool, IChatCollapsibleListItem } from './chatContentParts/chatReferencesContentPart.js';
@@ -121,6 +121,7 @@ interface IChatInputPartOptions {
 	};
 	editorOverflowWidgetsDomNode?: HTMLElement;
 	renderWorkingSet?: boolean;
+	enableImplicitContext?: boolean;
 }
 
 export interface IWorkingSetEntry {
@@ -323,9 +324,9 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 
 	/**
 	 * Child widget of prompt instruction attachments.
-	 * See {@linkcode InstructionAttachmentsWidget}.
+	 * See {@linkcode PromptAttachmentsCollectionWidget}.
 	 */
-	private instructionAttachmentsPart: InstructionAttachmentsWidget;
+	private instructionAttachmentsPart: PromptAttachmentsCollectionWidget;
 
 	constructor(
 		// private readonly editorOptions: ChatEditorOptions, // TODO this should be used
@@ -392,7 +393,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 
 		this.instructionAttachmentsPart = this._register(
 			instantiationService.createInstance(
-				InstructionAttachmentsWidget,
+				PromptAttachmentsCollectionWidget,
 				this.attachmentModel.promptInstructions,
 				this._contextResourceLabels,
 			),
@@ -705,8 +706,10 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		const toolbarsContainer = elements.inputToolbars;
 		this.chatEditingSessionWidgetContainer = elements.chatEditingSessionWidgetContainer;
 		this.renderAttachedContext(widget);
-		this._implicitContext = this._register(new ChatImplicitContext());
-		this._register(this._implicitContext.onDidChangeValue(() => this._handleAttachedContextChange()));
+		if (this.options.enableImplicitContext) {
+			this._implicitContext = this._register(new ChatImplicitContext());
+			this._register(this._implicitContext.onDidChangeValue(() => this._handleAttachedContextChange()));
+		}
 
 		this._register(this._attachmentModel.onDidChangeContext(() => this._handleAttachedContextChange()));
 		this.renderChatEditingSessionState(null, widget);
@@ -944,7 +947,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		}
 
 		this.promptInstructionsAttached.set(!this.instructionAttachmentsPart.empty);
-		container.appendChild(this.instructionAttachmentsPart.domNode);
+		this.instructionAttachmentsPart.render(container);
 
 		const attachmentInitPromises: Promise<void>[] = [];
 		for (const [index, attachment] of attachments) {
@@ -1050,7 +1053,10 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 				if (copiedFromResource) {
 					store.add(this.instantiationService.invokeFunction(accessor => hookUpResourceAttachmentDragAndContextMenu(accessor, widget, copiedFromResource)));
 				}
-
+			} else if (isLinkVariableEntry(attachment)) {
+				ariaLabel = localize('chat.attachment.link', "Attached link, {0}", attachment.name);
+				label.setResource({ resource: attachment.value, name: attachment.name }, { icon: Codicon.link, title: attachment.value.toString() });
+				this.attachButtonAndDisposables(widget, index, attachment, hoverDelegate);
 			} else {
 				const attachmentLabel = attachment.fullName ?? attachment.name;
 				const withIcon = attachment.icon?.id ? `$(${attachment.icon.id}) ${attachmentLabel}` : attachmentLabel;
@@ -1198,13 +1204,23 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		hoverImage.onload = () => {
 			URL.revokeObjectURL(url);
 		};
+
+		hoverImage.onerror = () => {
+			// reset to original icon on error or invalid image
+			const pillIcon = dom.$('div.chat-attached-context-pill', {}, dom.$('span.codicon.codicon-file-media'));
+			const pill = dom.$('div.chat-attached-context-pill', {}, pillIcon);
+			const existingPill = widget.querySelector('.chat-attached-context-pill');
+			if (existingPill) {
+				existingPill.replaceWith(pill);
+			}
+		};
 	}
 
 	async renderChatEditingSessionState(chatEditingSession: IChatEditingSession | null, chatWidget?: IChatWidget) {
 		dom.setVisibility(Boolean(chatEditingSession), this.chatEditingSessionWidgetContainer);
 
 		await this.renderAttachedContext(chatWidget);
-		if (chatEditingSession) {
+		if (chatEditingSession && this.configurationService.getValue('chat.renderRelatedFiles')) {
 			this.renderChatRelatedFiles(chatEditingSession, this.relatedFilesContainer);
 		}
 
