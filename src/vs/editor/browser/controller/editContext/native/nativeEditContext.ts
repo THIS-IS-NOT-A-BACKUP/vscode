@@ -77,6 +77,10 @@ export class NativeEditContext extends AbstractEditContext {
 		this.textArea = new FastDomNode(document.createElement('textarea'));
 		this.textArea.setClassName('native-edit-context-textarea');
 		this.textArea.setAttribute('tabindex', '-1');
+		this.domNode.setAttribute('autocorrect', 'off');
+		this.domNode.setAttribute('autocapitalize', 'off');
+		this.domNode.setAttribute('autocomplete', 'off');
+		this.domNode.setAttribute('spellcheck', 'false');
 
 		this._updateDomAttributes();
 
@@ -258,8 +262,7 @@ export class NativeEditContext extends AbstractEditContext {
 	}
 
 	public isFocused(): boolean {
-		this.refreshFocusState();
-		return this._focusTracker.isFocused;
+		return this._focusTracker.isFocused || (getActiveWindow().document.activeElement === this.textArea.domNode);
 	}
 
 	public focus(): void {

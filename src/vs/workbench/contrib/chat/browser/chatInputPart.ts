@@ -126,7 +126,6 @@ interface IChatInputPartOptions {
 
 export interface IWorkingSetEntry {
 	uri: URI;
-	isMarkedReadonly?: boolean;
 }
 
 export class ChatInputPart extends Disposable implements IHistoryNavigationWidget {
@@ -413,6 +412,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			if (model) {
 				this._currentLanguageModel = { metadata: model, identifier: persistedSelection };
 				this._onDidChangeCurrentLanguageModel.fire(this._currentLanguageModel);
+				this.checkModelSupported();
 			} else {
 				this._waitForPersistedLanguageModel.value = this.languageModelsService.onDidChangeLanguageModels(e => {
 					const persistedModel = e.added?.find(m => m.identifier === persistedSelection);
@@ -422,6 +422,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 						if (persistedModel.metadata.isUserSelectable) {
 							this._currentLanguageModel = { metadata: persistedModel.metadata, identifier: persistedSelection };
 							this._onDidChangeCurrentLanguageModel.fire(this._currentLanguageModel!);
+							this.checkModelSupported();
 						}
 					}
 				});
@@ -429,10 +430,14 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		}
 
 		this._register(this.chatAgentService.onDidChangeToolsAgentModeEnabled(() => {
-			if (this._currentLanguageModel && !this.modelSupportedForDefaultAgent(this._currentLanguageModel)) {
-				this.setCurrentLanguageModelToDefault();
-			}
+			this.checkModelSupported();
 		}));
+	}
+
+	private checkModelSupported(): void {
+		if (this._currentLanguageModel && !this.modelSupportedForDefaultAgent(this._currentLanguageModel)) {
+			this.setCurrentLanguageModelToDefault();
+		}
 	}
 
 	private supportsVision(): boolean {
@@ -473,6 +478,9 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		this._currentLanguageModel = hasUserSelectableLanguageModels && defaultLanguageModelId ?
 			{ metadata: this.languageModelsService.lookupLanguageModel(defaultLanguageModelId)!, identifier: defaultLanguageModelId } :
 			undefined;
+		if (this._currentLanguageModel) {
+			this._onDidChangeCurrentLanguageModel.fire(this._currentLanguageModel);
+		}
 	}
 
 	private setCurrentLanguageModelByUser(model: ILanguageModelChatMetadataAndIdentifier) {
@@ -1305,7 +1313,6 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 					state: metadata.state,
 					description: metadata.description,
 					kind: 'reference',
-					isMarkedReadonly: metadata.isMarkedReadonly,
 				});
 				seenEntries.add(file);
 			}
