@@ -3,6 +3,9 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-.quick-input-list .quick-input-list-rows > .quick-input-list-row .monaco-icon-label.mcp-tool .codicon[class*='codicon-'] {
-	font-size: 14px;
-}
+import { BaseToken } from '../../../../../../../editor/common/codecs/baseToken.js';
+
+/**
+ * Common base token that all chatbot `prompt` tokens should inherit from.
+ */
+export abstract class PromptToken extends BaseToken { }

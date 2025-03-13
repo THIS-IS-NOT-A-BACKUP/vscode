@@ -200,23 +200,37 @@ export class TestDecoder<T extends BaseToken, D extends BaseDecoder<T>> extends 
 	) {
 		for (let i = 0; i < expectedTokens.length; i++) {
 			const expectedToken = expectedTokens[i];
-			const receivedtoken = receivedTokens[i];
+			const receivedToken = receivedTokens[i];
 
 			assertDefined(
-				receivedtoken,
+				receivedToken,
 				`Expected token '${i}' to be '${expectedToken}', got 'undefined'.`,
 			);
 
 			assert(
-				receivedtoken.equals(expectedToken),
-				`Expected token '${i}' to be '${expectedToken}', got '${receivedtoken}'.`,
+				receivedToken.equals(expectedToken),
+				`Expected token '${i}' to be '${expectedToken}', got '${receivedToken}'.`,
 			);
 		}
 
-		assert.strictEqual(
-			receivedTokens.length,
-			expectedTokens.length,
-			'Must produce correct number of tokens.',
+		if (receivedTokens.length === expectedTokens.length) {
+			return;
+		}
+
+		// sanity check - if received/expected list lengths are not equal, the received
+		// list must be longer than the expected one, because the other way around case
+		// must have been caught by the comparison loop above
+		assert(
+			receivedTokens.length > expectedTokens.length,
+			'Must have received more tokens than expected.',
+		);
+
+		const index = expectedTokens.length;
+		throw new Error(
+			[
+				`Expected no '${index}' token present, got '${receivedTokens[index]}'.`,
+				`(received ${receivedTokens.length} tokens in total)`,
+			].join(' '),
 		);
 	}
 }
