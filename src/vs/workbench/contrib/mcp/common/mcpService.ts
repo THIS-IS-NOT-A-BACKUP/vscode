@@ -175,7 +175,14 @@ export class McpService extends Disposable implements IMcpService {
 		// Create any new servers that are needed.
 		for (const def of nextDefinitions) {
 			const store = new DisposableStore();
-			const object = this._instantiationService.createInstance(McpServer, def.collectionDefinition, def.serverDefinition, !!def.collectionDefinition.lazy, def.collectionDefinition.scope === StorageScope.WORKSPACE ? this.workspaceCache : this.userCache);
+			const object = this._instantiationService.createInstance(
+				McpServer,
+				def.collectionDefinition,
+				def.serverDefinition,
+				def.serverDefinition.roots,
+				!!def.collectionDefinition.lazy,
+				def.collectionDefinition.scope === StorageScope.WORKSPACE ? this.workspaceCache : this.userCache,
+			);
 			store.add(object);
 			this._syncTools(object, store);
 
@@ -220,6 +227,7 @@ class McpToolImplementation implements IToolImpl {
 			confirmationMessages: {
 				title: localize('msg.title', "Run `{0}`", tool.definition.name, server.definition.label),
 				message: new MarkdownString(localize('msg.msg', "{0}\n\n {1}", tool.definition.description, mcpToolWarning), { supportThemeIcons: true }),
+				allowAutoConfirm: true,
 			},
 			invocationMessage: new MarkdownString(localize('msg.run', "Running `{0}`", tool.definition.name, server.definition.label)),
 			pastTenseMessage: new MarkdownString(localize('msg.ran', "Ran `{0}` ", tool.definition.name, server.definition.label)),
