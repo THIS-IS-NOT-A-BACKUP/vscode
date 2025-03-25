@@ -97,7 +97,7 @@ export class McpService extends Disposable implements IMcpService {
 				const collection = this._mcpRegistry.collections.get().find(c => c.id === server.collection.id);
 				const toolData: IToolData = {
 					id: tool.id,
-					source: { type: 'mcp', collectionId: server.collection.id },
+					source: { type: 'mcp', collectionId: server.collection.id, definitionId: server.definition.id },
 					displayName: tool.definition.name,
 					toolReferenceName: tool.definition.name,
 					modelDescription: tool.definition.description ?? '',
@@ -105,7 +105,7 @@ export class McpService extends Disposable implements IMcpService {
 					inputSchema: tool.definition.inputSchema,
 					canBeReferencedInPrompt: true,
 					runsInWorkspace: collection?.scope === StorageScope.WORKSPACE || !!collection?.remoteAuthority,
-					tags: ['mcp', 'vscode_editing'], // TODO@jrieken remove this tag
+					tags: ['mcp'],
 				};
 
 				if (existing) {

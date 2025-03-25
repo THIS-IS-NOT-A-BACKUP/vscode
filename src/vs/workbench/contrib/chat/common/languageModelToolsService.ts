@@ -34,18 +34,19 @@ export interface IToolData {
 	 * on the host, undefined if known.
 	 */
 	runsInWorkspace?: boolean;
+	requiresConfirmation?: boolean;
 }
 
 export type ToolDataSource =
 	| { type: 'extension'; extensionId: ExtensionIdentifier }
-	| { type: 'mcp'; collectionId: string }
+	| { type: 'mcp'; collectionId: string; definitionId: string }
 	| { type: 'internal' };
 
 export namespace ToolDataSource {
 	export function toKey(source: ToolDataSource): string {
 		switch (source.type) {
 			case 'extension': return `extension:${source.extensionId.value}`;
-			case 'mcp': return `mcp:${source.collectionId}`;
+			case 'mcp': return `mcp:${source.collectionId}:${source.definitionId}`;
 			case 'internal': return 'internal';
 		}
 	}

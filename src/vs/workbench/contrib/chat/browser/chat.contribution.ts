@@ -30,7 +30,7 @@ import { EditorExtensions, IEditorFactoryRegistry } from '../../../common/editor
 import { IWorkbenchAssignmentService } from '../../../services/assignment/common/assignmentService.js';
 import { mcpSchemaId } from '../../../services/configuration/common/configuration.js';
 import { IEditorResolverService, RegisteredEditorPriority } from '../../../services/editor/common/editorResolverService.js';
-import { allDiscoverySources, discoverySourceLabel, mcpConfigurationSection, mcpDiscoverySection, mcpSchemaExampleServers } from '../../mcp/common/mcpConfiguration.js';
+import { allDiscoverySources, discoverySourceLabel, mcpConfigurationSection, mcpDiscoverySection, mcpEnabledSection, mcpSchemaExampleServers } from '../../mcp/common/mcpConfiguration.js';
 import { ChatAgentNameService, ChatAgentService, IChatAgentNameService, IChatAgentService } from '../common/chatAgents.js';
 import { CodeMapperService, ICodeMapperService } from '../common/chatCodeMapperService.js';
 import '../common/chatColors.js';
@@ -218,6 +218,18 @@ configurationRegistry.registerConfiguration({
 				{ type: 'array', items: { type: 'string' } }
 			],
 		},
+		[mcpEnabledSection]: {
+			type: 'boolean',
+			description: nls.localize('chat.mcp.enabled', "Enables integration with Model Context Protocol servers to provide additional tools and functionality."),
+			default: true,
+			tags: ['preview'],
+			policy: {
+				name: 'ChatMCP',
+				minimumVersion: '1.99',
+				previewFeature: true,
+				defaultValue: false
+			}
+		},
 		[mcpConfigurationSection]: {
 			type: 'object',
 			default: {
@@ -238,6 +250,11 @@ configurationRegistry.registerConfiguration({
 			description: nls.localize('chat.useFileStorage', "Enables storing chat sessions on disk instead of in the storage service. Enabling this does a one-time per-workspace migration of existing sessions to the new format."),
 			default: true,
 			tags: ['experimental'],
+		},
+		[ChatConfiguration.Edits2Enabled]: {
+			type: 'boolean',
+			description: nls.localize('chat.edits2Enabled', "Enable the new Edits mode that is based on tool-calling. When this is enabled, models that don't support tool-calling are unavailable for Edits mode."),
+			default: true,
 		},
 		[mcpDiscoverySection]: {
 			oneOf: [
@@ -269,6 +286,13 @@ configurationRegistry.registerConfiguration({
 			restricted: true,
 			disallowConfigurationDefault: true,
 			tags: ['experimental', 'prompts', 'reusable prompts', 'prompt snippets', 'instructions'],
+			policy: {
+				name: 'ChatPromptFiles',
+				minimumVersion: '1.99',
+				description: nls.localize('chat.promptFiles.policy', "Enables reusable prompt files in Chat, Edits, and Inline Chat sessions."),
+				previewFeature: true,
+				defaultValue: false
+			}
 		},
 		[PromptsConfig.LOCATIONS_KEY]: {
 			type: 'object',
@@ -390,7 +414,7 @@ class ChatAgentSettingContribution extends Disposable implements IWorkbenchContr
 			return;
 		}
 
-		this.registeredNode = {
+		this.registeredNode = configurationRegistry.registerConfiguration({
 			id: 'chatAgent',
 			title: nls.localize('interactiveSessionConfigurationTitle', "Chat"),
 			type: 'object',
@@ -400,10 +424,15 @@ class ChatAgentSettingContribution extends Disposable implements IWorkbenchContr
 					description: nls.localize('chat.agent.enabled.description', "Enable agent mode for {0}. When this is enabled, a dropdown appears in the {0} view to toggle agent mode.", 'Copilot Edits'),
 					default: this.productService.quality !== 'stable',
 					tags: ['experimental', 'onExp'],
+					policy: {
+						name: 'ChatAgentMode',
+						minimumVersion: '1.99',
+						previewFeature: true,
+						defaultValue: false
+					}
 				},
 			}
-		};
-		configurationRegistry.registerConfiguration(this.registeredNode);
+		});
 	}
 
 	private deregisterSetting() {
