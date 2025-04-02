@@ -5,7 +5,6 @@
 
 import * as cp from 'child_process';
 import * as os from 'os';
-import * as treekill from 'tree-kill';
 import { IElement, ILocaleInfo, ILocalizedStrings, ILogFile } from './driver';
 import { Logger, measureAndLog } from './logger';
 import { launch as launchPlaywrightBrowser } from './playwrightBrowser';
@@ -22,7 +21,7 @@ export interface LaunchOptions {
 	readonly logger: Logger;
 	logsPath: string;
 	crashesPath: string;
-	readonly verbose?: boolean;
+	verbose?: boolean;
 	readonly extraArgs?: string[];
 	readonly remote?: boolean;
 	readonly web?: boolean;
@@ -80,7 +79,7 @@ export async function launch(options: LaunchOptions): Promise<Code> {
 		const { serverProcess, driver } = await measureAndLog(() => launchPlaywrightBrowser(options), 'launch playwright (browser)', options.logger);
 		registerInstance(serverProcess, options.logger, 'server');
 
-		return new Code(driver, options.logger, serverProcess, options.quality);
+		return new Code(driver, options.logger, serverProcess, undefined, options.quality);
 	}
 
 	// Electron smoke tests (playwright)
@@ -88,7 +87,15 @@ export async function launch(options: LaunchOptions): Promise<Code> {
 		const { electronProcess, driver } = await measureAndLog(() => launchPlaywrightElectron(options), 'launch playwright (electron)', options.logger);
 		registerInstance(electronProcess, options.logger, 'electron');
 
-		return new Code(driver, options.logger, electronProcess, options.quality);
+		const safeToKill = new Promise<void>(resolve => {
+			process.stdout?.on('data', data => {
+				if (data.toString().includes('Lifecycle#app.on(will-quit) - calling app.quit()')) {
+					resolve();
+				}
+			});
+		});
+
+		return new Code(driver, options.logger, electronProcess, safeToKill, options.quality);
 	}
 }
 
@@ -100,6 +107,7 @@ export class Code {
 		driver: PlaywrightDriver,
 		readonly logger: Logger,
 		private readonly mainProcess: cp.ChildProcess,
+		private readonly safeToKill: Promise<void> | undefined,
 		readonly quality: Quality
 	) {
 		this.driver = new Proxy(driver, {
@@ -144,7 +152,10 @@ export class Code {
 			let done = false;
 
 			// Start the exit flow via driver
-			this.driver.exitApplication();
+			this.driver.close();
+
+			let safeToKill = false;
+			this.safeToKill?.then(() => safeToKill = true);
 
 			// Await the exit of the application
 			(async () => {
@@ -152,21 +163,17 @@ export class Code {
 				while (!done) {
 					retries++;
 
-					switch (retries) {
+					if (safeToKill) {
+						this.logger.log('Smoke test exit() call did not terminate the process yet, but safeToKill is true, so we can kill it');
+						process.kill(pid, 'SIGTERM');
+					}
 
-						// after 5 / 10 seconds: try to exit gracefully again
-						case 10:
-						case 20: {
-							this.logger.log('Smoke test exit() call did not terminate process after 5-10s, gracefully trying to exit the application again...');
-							this.driver.exitApplication();
-							break;
-						}
+					switch (retries) {
 
 						// after 20 seconds: forcefully kill
 						case 40: {
 							this.logger.log('Smoke test exit() call did not terminate process after 20s, forcefully exiting the application...');
-							this.kill(pid); // no need to await since we're polling for the process to die anyways
-
+							process.kill(pid, 'SIGTERM');
 							break;
 						}
 
@@ -180,16 +187,7 @@ export class Code {
 
 					try {
 						process.kill(pid, 0); // throws an exception if the process doesn't exist anymore.
-
-						const isAlive = await this.driver.isAlive();
-						if (!isAlive) {
-							this.logger.log('Smoke test exit() call did not terminate process, but process is not alive anymore, forcefully exiting the application...');
-							this.kill(pid); // no need to await since we're polling for the process to die anyways
-						}
-
 						await this.wait(500);
-
-						process.kill(pid, 0); // throws an exception if the process doesn't exist anymore.
 					} catch (error) {
 						this.logger.log('Smoke test exit() call terminated process successfully');
 						done = true;
@@ -199,21 +197,6 @@ export class Code {
 				}
 			})();
 		}), 'Code#exit()', this.logger);
-	}
-
-	private kill(pid: number): Promise<void> {
-		return new Promise<void>(resolve => {
-			treekill(pid, err => {
-				try {
-					process.kill(pid, 0); // throws an exception if the process doesn't exist anymore
-					this.logger.log('Failed to kill Electron process tree:', err?.message);
-				} catch (error) {
-					// Expected when process is gone
-				}
-
-				resolve();
-			});
-		});
 	}
 
 	async getElement(selector: string): Promise<IElement | undefined> {
