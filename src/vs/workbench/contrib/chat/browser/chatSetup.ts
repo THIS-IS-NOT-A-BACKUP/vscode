@@ -230,28 +230,42 @@ class SetupChatAgentImplementation extends Disposable implements IChatAgentImple
 	}
 
 	private async forwardRequestToCopilot(requestModel: IChatRequestModel, progress: (part: IChatProgress) => void, chatService: IChatService, languageModelsService: ILanguageModelsService, chatAgentService: IChatAgentService, chatWidgetService: IChatWidgetService): Promise<void> {
-		if (this.pendingForwardedRequests.has(requestModel.id)) {
-			return this.pendingForwardedRequests.get(requestModel.id)!;
-		}
-
-		const forwardRequest = this.doForwardRequestToCopilot(requestModel, progress, chatService, languageModelsService, chatAgentService, chatWidgetService);
-		this.pendingForwardedRequests.set(requestModel.id, forwardRequest);
-
 		try {
-			await forwardRequest;
-		} finally {
-			this.pendingForwardedRequests.delete(requestModel.id);
+			await this.doForwardRequestToCopilot(requestModel, progress, chatService, languageModelsService, chatAgentService, chatWidgetService);
+		} catch (error) {
+			progress({
+				kind: 'warning',
+				content: new MarkdownString(localize('copilotUnavailableWarning', "Copilot failed to get a response. Please try again."))
+			});
 		}
 	}
 
 	private async doForwardRequestToCopilot(requestModel: IChatRequestModel, progress: (part: IChatProgress) => void, chatService: IChatService, languageModelsService: ILanguageModelsService, chatAgentService: IChatAgentService, chatWidgetService: IChatWidgetService): Promise<void> {
+		if (this.pendingForwardedRequests.has(requestModel.session.sessionId)) {
+			throw new Error('Request already in progress');
+		}
+
+		const forwardRequest = this.doForwardRequestToCopilotWhenReady(requestModel, progress, chatService, languageModelsService, chatAgentService, chatWidgetService);
+		this.pendingForwardedRequests.set(requestModel.session.sessionId, forwardRequest);
+
+		try {
+			await forwardRequest;
+		} finally {
+			this.pendingForwardedRequests.delete(requestModel.session.sessionId);
+		}
+	}
+
+	private async doForwardRequestToCopilotWhenReady(requestModel: IChatRequestModel, progress: (part: IChatProgress) => void, chatService: IChatService, languageModelsService: ILanguageModelsService, chatAgentService: IChatAgentService, chatWidgetService: IChatWidgetService): Promise<void> {
+		const widget = chatWidgetService.getWidgetBySessionId(requestModel.session.sessionId);
+		const mode = widget?.input.currentMode;
+		const languageModel = widget?.input.currentLanguageModel;
 
 		// We need a signal to know when we can resend the request to
 		// Copilot. Waiting for the registration of the agent is not
 		// enough, we also need a language model to be available.
 
 		const whenLanguageModelReady = this.whenLanguageModelReady(languageModelsService);
-		const whenAgentReady = this.whenAgentReady(chatAgentService);
+		const whenAgentReady = this.whenAgentReady(chatAgentService, mode);
 
 		if (whenLanguageModelReady instanceof Promise || whenAgentReady instanceof Promise) {
 			const timeoutHandle = setTimeout(() => {
@@ -287,11 +301,7 @@ class SetupChatAgentImplementation extends Disposable implements IChatAgentImple
 			}
 		}
 
-		const widget = chatWidgetService.getWidgetBySessionId(requestModel.session.sessionId);
-		chatService.resendRequest(requestModel, {
-			mode: widget?.input.currentMode,
-			userSelectedModelId: widget?.input.currentLanguageModel,
-		});
+		await chatService.resendRequest(requestModel, { mode, userSelectedModelId: languageModel });
 	}
 
 	private whenLanguageModelReady(languageModelsService: ILanguageModelsService): Promise<unknown> | void {
@@ -305,14 +315,14 @@ class SetupChatAgentImplementation extends Disposable implements IChatAgentImple
 		return Event.toPromise(Event.filter(languageModelsService.onDidChangeLanguageModels, e => e.added?.some(added => added.metadata.isDefault) ?? false));
 	}
 
-	private whenAgentReady(chatAgentService: IChatAgentService): Promise<unknown> | void {
-		const defaultAgent = chatAgentService.getDefaultAgent(this.location);
+	private whenAgentReady(chatAgentService: IChatAgentService, mode: ChatMode | undefined): Promise<unknown> | void {
+		const defaultAgent = chatAgentService.getDefaultAgent(this.location, mode);
 		if (defaultAgent && !defaultAgent.isCore) {
 			return; // we have a default agent from an extension!
 		}
 
 		return Event.toPromise(Event.filter(chatAgentService.onDidChangeAgents, () => {
-			const defaultAgent = chatAgentService.getDefaultAgent(this.location);
+			const defaultAgent = chatAgentService.getDefaultAgent(this.location, mode);
 			return Boolean(defaultAgent && !defaultAgent.isCore);
 		}));
 	}

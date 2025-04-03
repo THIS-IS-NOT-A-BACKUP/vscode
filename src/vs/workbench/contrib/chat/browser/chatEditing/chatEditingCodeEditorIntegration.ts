@@ -149,18 +149,14 @@ export class ChatEditingCodeEditorIntegration implements IModifiedFileEntryEdito
 			// done: render diff
 			if (!_entry.isCurrentlyBeingModifiedBy.read(r)) {
 
-				// Add diff decoration to the UI (unless in diff editor)
-				if (!this._editor.getOption(EditorOption.inDiffEditor)) {
-					codeEditorObs.getOption(EditorOption.fontInfo).read(r);
-					codeEditorObs.getOption(EditorOption.lineHeight).read(r);
+				const isDiffEditor = this._editor.getOption(EditorOption.inDiffEditor);
 
-					const reviewMode = _entry.reviewMode.read(r);
-					const diff = documentDiffInfo.read(r);
-					this._updateDiffRendering(diff, reviewMode);
+				codeEditorObs.getOption(EditorOption.fontInfo).read(r);
+				codeEditorObs.getOption(EditorOption.lineHeight).read(r);
 
-				} else {
-					this._clearDiffRendering();
-				}
+				const reviewMode = _entry.reviewMode.read(r);
+				const diff = documentDiffInfo.read(r);
+				this._updateDiffRendering(diff, reviewMode, isDiffEditor);
 			}
 		}));
 
@@ -274,7 +270,7 @@ export class ChatEditingCodeEditorIntegration implements IModifiedFileEntryEdito
 		this._diffVisualDecorations.clear();
 	}
 
-	private _updateDiffRendering(diff: IDocumentDiff2, reviewMode: boolean): void {
+	private _updateDiffRendering(diff: IDocumentDiff2, reviewMode: boolean, diffMode: boolean): void {
 
 		const chatDiffAddDecoration = ModelDecorationOptions.createDynamic({
 			...diffAddDecoration,
@@ -370,7 +366,7 @@ export class ChatEditingCodeEditorIntegration implements IModifiedFileEntryEdito
 					});
 				}
 
-				if (reviewMode) {
+				if (reviewMode || diffMode) {
 					const domNode = document.createElement('div');
 					domNode.className = 'chat-editing-original-zone view-lines line-delete monaco-mouse-cursor-text';
 					const result = renderLines(source, renderOptions, decorations, domNode);
@@ -407,7 +403,7 @@ export class ChatEditingCodeEditorIntegration implements IModifiedFileEntryEdito
 				}
 			}
 
-			this._diffVisualDecorations.set(modifiedVisualDecorations);
+			this._diffVisualDecorations.set(!diffMode ? modifiedVisualDecorations : []);
 		});
 
 		const diffHunkDecoCollection = this._editor.createDecorationsCollection(diffHunkDecorations);
@@ -583,18 +579,18 @@ export class ChatEditingCodeEditorIntegration implements IModifiedFileEntryEdito
 		return closestWidget;
 	}
 
-	rejectNearestChange(closestWidget: IModifiedFileEntryChangeHunk | undefined): void {
+	async rejectNearestChange(closestWidget: IModifiedFileEntryChangeHunk | undefined): Promise<void> {
 		closestWidget = closestWidget ?? this._findClosestWidget();
 		if (closestWidget instanceof DiffHunkWidget) {
-			closestWidget.reject();
+			await closestWidget.reject();
 			this.next(true);
 		}
 	}
 
-	acceptNearestChange(closestWidget: IModifiedFileEntryChangeHunk | undefined): void {
+	async acceptNearestChange(closestWidget: IModifiedFileEntryChangeHunk | undefined): Promise<void> {
 		closestWidget = closestWidget ?? this._findClosestWidget();
 		if (closestWidget instanceof DiffHunkWidget) {
-			closestWidget.accept();
+			await closestWidget.accept();
 			this.next(true);
 		}
 	}
