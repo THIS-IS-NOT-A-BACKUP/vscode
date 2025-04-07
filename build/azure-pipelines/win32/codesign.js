@@ -43,8 +43,7 @@ async function main() {
     // Package client
     if (process.env['BUILT_CLIENT']) {
         // Product version
-        const packageJson = await (0, zx_1.$) `Get-Content -Raw -Path ../VSCode-win32-${arch}/resources/app/package.json | ConvertFrom-Json`;
-        const version = packageJson.version;
+        const version = await (0, zx_1.$) `node -p "require('../VSCode-win32-${arch}/resources/app/package.json').version"`;
         printBanner('Package client');
         const clientArchivePath = `.build/win32-${arch}/VSCode-win32-${arch}-${version}.zip`;
         await (0, zx_1.$) `7z.exe a -tzip ${clientArchivePath} ../VSCode-win32-${arch}/* "-xr!CodeSignSummary*.md"`.pipe(process.stdout);
