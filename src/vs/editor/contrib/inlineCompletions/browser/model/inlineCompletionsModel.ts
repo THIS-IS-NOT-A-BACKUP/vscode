@@ -26,7 +26,7 @@ import { Selection } from '../../../../common/core/selection.js';
 import { SingleTextEdit, TextEdit } from '../../../../common/core/textEdit.js';
 import { TextLength } from '../../../../common/core/textLength.js';
 import { ScrollType } from '../../../../common/editorCommon.js';
-import { Command, InlineCompletion, InlineCompletionContext, InlineCompletionTriggerKind, PartialAcceptTriggerKind } from '../../../../common/languages.js';
+import { Command, InlineCompletionEndOfLifeReasonKind, InlineCompletion, InlineCompletionContext, InlineCompletionTriggerKind, PartialAcceptTriggerKind } from '../../../../common/languages.js';
 import { ILanguageConfigurationService } from '../../../../common/languages/languageConfigurationRegistry.js';
 import { EndOfLinePreference, IModelDeltaDecoration, ITextModel } from '../../../../common/model.js';
 import { TextModelText } from '../../../../common/model/textModelText.js';
@@ -35,6 +35,7 @@ import { IModelContentChangedEvent } from '../../../../common/textModelEvents.js
 import { SnippetController2 } from '../../../snippet/browser/snippetController2.js';
 import { addPositions, getEndPositionsAfterApplying, substringPos, subtractPositions } from '../utils.js';
 import { AnimatedValue, easeOutCubic, ObservableAnimatedValue } from './animation.js';
+import { ITextModelChangeRecorderMetadata, TextModelChangeRecorder } from './changeRecorder.js';
 import { computeGhostText } from './computeGhostText.js';
 import { GhostText, GhostTextOrReplacement, ghostTextOrReplacementEquals, ghostTextsOrReplacementsEqual } from './ghostText.js';
 import { InlineCompletionsSource } from './inlineCompletionsSource.js';
@@ -85,17 +86,12 @@ export class InlineCompletionsModel extends Disposable {
 
 		this._register(recomputeInitiallyAndOnChange(this._fetchInlineCompletionsPromise));
 
-		let lastItem: InlineCompletionItem | undefined = undefined;
 		this._register(autorun(reader => {
 			/** @description call handleItemDidShow */
 			const item = this.inlineCompletionState.read(reader);
 			const completion = item?.inlineCompletion;
-			if (completion?.semanticId !== lastItem?.semanticId) {
-				lastItem = completion;
-				if (completion) {
-					const src = completion.source;
-					src.provider.handleItemDidShow?.(src.inlineSuggestions, completion.getSourceCompletion(), completion.insertText);
-				}
+			if (completion) {
+				this.handleInlineSuggestionShown(completion);
 			}
 		}));
 
@@ -315,10 +311,8 @@ export class InlineCompletionsModel extends Disposable {
 		subtransaction(tx, tx => {
 			if (stopReason === 'explicitCancel') {
 				const inlineCompletion = this.state.get()?.inlineCompletion;
-				const source = inlineCompletion?.source;
-				const sourceInlineCompletion = inlineCompletion?.getSourceCompletion();
-				if (sourceInlineCompletion && source?.provider.handleRejection) {
-					source.provider.handleRejection(source.inlineSuggestions, sourceInlineCompletion);
+				if (inlineCompletion) {
+					inlineCompletion.reportEndOfLife({ kind: InlineCompletionEndOfLifeReasonKind.Rejected });
 				}
 			}
 
@@ -645,6 +639,14 @@ export class InlineCompletionsModel extends Disposable {
 
 	public async previous(): Promise<void> { await this._deltaSelectedInlineCompletionIndex(-1); }
 
+	private _getMetadata(completion: InlineSuggestionItem, type: 'word' | 'line' | undefined = undefined): ITextModelChangeRecorderMetadata {
+		return {
+			extensionId: completion.source.provider.groupId,
+			nes: completion.isInlineEdit,
+			type
+		};
+	}
+
 	public async accept(editor: ICodeEditor = this._editor): Promise<void> {
 		if (editor.getModel() !== this.textModel) {
 			throw new BugIndicatingError();
@@ -664,6 +666,8 @@ export class InlineCompletionsModel extends Disposable {
 			return;
 		}
 
+		completion.reportEndOfLife({ kind: InlineCompletionEndOfLifeReasonKind.Accepted });
+
 		if (completion.command) {
 			// Make sure the completion list will not be disposed.
 			completion.source.addRef();
@@ -671,23 +675,27 @@ export class InlineCompletionsModel extends Disposable {
 
 		editor.pushUndoStop();
 		if (completion.snippetInfo) {
-			editor.executeEdits(
-				'inlineSuggestion.accept',
-				[
-					EditOperation.replace(completion.range, ''),
-					...completion.additionalTextEdits
-				]
-			);
+			TextModelChangeRecorder.editWithMetadata(this._getMetadata(completion), () => {
+				editor.executeEdits(
+					'inlineSuggestion.accept',
+					[
+						EditOperation.replace(completion.range, ''),
+						...completion.additionalTextEdits
+					]
+				);
+			});
 			editor.setPosition(completion.snippetInfo.range.getStartPosition(), 'inlineCompletionAccept');
 			SnippetController2.get(editor)?.insert(completion.snippetInfo.snippet, { undoStopBefore: false });
 		} else {
 			const edits = state.edits;
 			const selections = getEndPositionsAfterApplying(edits).map(p => Selection.fromPositions(p));
-			editor.executeEdits('inlineSuggestion.accept', [
-				...edits.map(edit => EditOperation.replace(edit.range, edit.text)),
-				...completion.additionalTextEdits
-			]);
 
+			TextModelChangeRecorder.editWithMetadata(this._getMetadata(completion), () => {
+				editor.executeEdits('inlineSuggestion.accept', [
+					...edits.map(edit => EditOperation.replace(edit.range, edit.text)),
+					...completion.additionalTextEdits
+				]);
+			});
 			if (completion.displayLocation === undefined) {
 				// do not move the cursor when the completion is displayed in a different location
 				editor.setSelections(state.kind === 'inlineEdit' ? selections.slice(-1) : selections, 'inlineCompletionAccept');
@@ -719,7 +727,7 @@ export class InlineCompletionsModel extends Disposable {
 	}
 
 	public async acceptNextWord(): Promise<void> {
-		await this._acceptNext(this._editor, (pos, text) => {
+		await this._acceptNext(this._editor, 'word', (pos, text) => {
 			const langId = this.textModel.getLanguageIdAtPosition(pos.lineNumber, pos.column);
 			const config = this._languageConfigurationService.getLanguageConfiguration(langId);
 			const wordRegExp = new RegExp(config.wordDefinition.source, config.wordDefinition.flags.replace('g', ''));
@@ -748,7 +756,7 @@ export class InlineCompletionsModel extends Disposable {
 	}
 
 	public async acceptNextLine(): Promise<void> {
-		await this._acceptNext(this._editor, (pos, text) => {
+		await this._acceptNext(this._editor, 'line', (pos, text) => {
 			const m = text.match(/\n/);
 			if (m && m.index !== undefined) {
 				return m.index + 1;
@@ -757,7 +765,7 @@ export class InlineCompletionsModel extends Disposable {
 		}, PartialAcceptTriggerKind.Line);
 	}
 
-	private async _acceptNext(editor: ICodeEditor, getAcceptUntilIndex: (position: Position, text: string) => number, kind: PartialAcceptTriggerKind): Promise<void> {
+	private async _acceptNext(editor: ICodeEditor, type: 'word' | 'line', getAcceptUntilIndex: (position: Position, text: string) => number, kind: PartialAcceptTriggerKind): Promise<void> {
 		if (editor.getModel() !== this.textModel) {
 			throw new BugIndicatingError();
 		}
@@ -799,25 +807,21 @@ export class InlineCompletionsModel extends Disposable {
 				const primaryEdit = new SingleTextEdit(replaceRange, newText);
 				const edits = [primaryEdit, ...getSecondaryEdits(this.textModel, positions, primaryEdit)];
 				const selections = getEndPositionsAfterApplying(edits).map(p => Selection.fromPositions(p));
-				editor.executeEdits('inlineSuggestion.accept', edits.map(edit => EditOperation.replace(edit.range, edit.text)));
+				TextModelChangeRecorder.editWithMetadata(this._getMetadata(completion, type), () => {
+					editor.executeEdits('inlineSuggestion.accept', edits.map(edit => EditOperation.replace(edit.range, edit.text)));
+				});
 				editor.setSelections(selections, 'inlineCompletionPartialAccept');
 				editor.revealPositionInCenterIfOutsideViewport(editor.getPosition()!, ScrollType.Immediate);
 			} finally {
 				this._isAcceptingPartially = false;
 			}
 
-			if (completion.source.provider.handlePartialAccept) {
-				const acceptedRange = Range.fromPositions(completion.range.getStartPosition(), TextLength.ofText(partialGhostTextVal).addToPosition(ghostTextPos));
-				// This assumes that the inline completion and the model use the same EOL style.
-				const text = editor.getModel()!.getValueInRange(acceptedRange, EndOfLinePreference.LF);
-				const acceptedLength = text.length;
-				completion.source.provider.handlePartialAccept(
-					completion.source.inlineSuggestions,
-					completion.getSourceCompletion(),
-					acceptedLength,
-					{ kind, acceptedLength: acceptedLength, }
-				);
-			}
+			const acceptedRange = Range.fromPositions(completion.range.getStartPosition(), TextLength.ofText(partialGhostTextVal).addToPosition(ghostTextPos));
+			// This assumes that the inline completion and the model use the same EOL style.
+			const text = editor.getModel()!.getValueInRange(acceptedRange, EndOfLinePreference.LF);
+			const acceptedLength = text.length;
+			completion.reportPartialAccept(acceptedLength, { kind, acceptedLength: acceptedLength });
+
 		} finally {
 			completion.source.removeRef();
 		}
@@ -832,16 +836,10 @@ export class InlineCompletionsModel extends Disposable {
 		const alreadyAcceptedLength = this.textModel.getValueInRange(augmentedCompletion.completion.range, EndOfLinePreference.LF).length;
 		const acceptedLength = alreadyAcceptedLength + itemEdit.text.length;
 
-		const source = augmentedCompletion.completion.source;
-		source.provider.handlePartialAccept?.(
-			source.inlineSuggestions,
-			augmentedCompletion.completion.getSourceCompletion(),
-			itemEdit.text.length,
-			{
-				kind: PartialAcceptTriggerKind.Suggest,
-				acceptedLength,
-			}
-		);
+		augmentedCompletion.completion.reportPartialAccept(itemEdit.text.length, {
+			kind: PartialAcceptTriggerKind.Suggest,
+			acceptedLength,
+		});
 	}
 
 	public extractReproSample(): Repro {
@@ -880,17 +878,8 @@ export class InlineCompletionsModel extends Disposable {
 		});
 	}
 
-	public async handleInlineEditShown(inlineCompletion: InlineSuggestionItem): Promise<void> {
-		if (inlineCompletion.didShow) {
-			return;
-		}
-		inlineCompletion.didShow = true;
-
-		inlineCompletion.source.provider.handleItemDidShow?.(inlineCompletion.source.inlineSuggestions, inlineCompletion.getSourceCompletion(), inlineCompletion.insertText);
-
-		if (inlineCompletion.shownCommand) {
-			await this._commandService.executeCommand(inlineCompletion.shownCommand.id, ...(inlineCompletion.shownCommand.arguments || []));
-		}
+	public async handleInlineSuggestionShown(inlineCompletion: InlineSuggestionItem): Promise<void> {
+		await inlineCompletion.reportInlineEditShown(this._commandService);
 	}
 }
 
