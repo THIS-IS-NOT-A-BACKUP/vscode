@@ -74,10 +74,10 @@ export class ChatEditingNotebookEditorIntegration extends Disposable implements 
 	enableAccessibleDiffView(): void {
 		this.integration.enableAccessibleDiffView();
 	}
-	acceptNearestChange(change: IModifiedFileEntryChangeHunk): Promise<void> {
+	acceptNearestChange(change: IModifiedFileEntryChangeHunk | undefined): Promise<void> {
 		return this.integration.acceptNearestChange(change);
 	}
-	rejectNearestChange(change: IModifiedFileEntryChangeHunk): Promise<void> {
+	rejectNearestChange(change: IModifiedFileEntryChangeHunk | undefined): Promise<void> {
 		return this.integration.rejectNearestChange(change);
 	}
 	toggleDiff(change: IModifiedFileEntryChangeHunk | undefined): Promise<void> {
@@ -104,11 +104,9 @@ class ChatEditingNotebookEditorWidgetIntegration extends Disposable implements I
 
 	private readonly cellEditorIntegrations = new Map<NotebookCellTextModel, { integration: ChatEditingCodeEditorIntegration; diff: ISettableObservable<IDocumentDiff2> }>();
 
-	private readonly mdCellEditorAttached = observableValue<number>(this, -1);
+	private readonly markdownEditState = observableValue<string>(this, '');
 
 	private markupCellListeners = new Map<number, IDisposable>();
-
-	private editingPreview: ICellDiffInfo | undefined = undefined;
 
 	constructor(
 		private readonly _entry: ChatEditingModifiedNotebookEntry,
@@ -192,7 +190,7 @@ class ChatEditingNotebookEditorWidgetIntegration extends Disposable implements I
 				});
 				return;
 			}
-			this.mdCellEditorAttached.read(r);
+			this.markdownEditState.read(r);
 
 			const validCells = new Set<NotebookCellTextModel>();
 			changes.forEach((change) => {
@@ -206,20 +204,18 @@ class ChatEditingNotebookEditorWidgetIntegration extends Disposable implements I
 				if (!cell || !originalModel || !modifiedModel) {
 					return;
 				}
-				if (!editor) {
-					if (!this.markupCellListeners.has(cell.handle) && cell.cellKind === CellKind.Markup) {
-						const cellModel = this.notebookEditor.getViewModel()?.viewCells.find(c => c.handle === cell.handle);
-						if (cellModel) {
-							const listener = cellModel.onDidChangeEditorAttachState(() => {
-								if (cellModel.editorAttached) {
-									this.mdCellEditorAttached.set(cell.handle, undefined);
-									listener.dispose();
-									this.markupCellListeners.delete(cell.handle);
-								}
-							});
-							this.markupCellListeners.set(cell.handle, listener);
-						}
+				if (cell.cellKind === CellKind.Markup && !this.markupCellListeners.has(cell.handle)) {
+					const cellModel = this.notebookEditor.getViewModel()?.viewCells.find(c => c.handle === cell.handle);
+					if (cellModel) {
+						const listener = cellModel.onDidChangeState((e) => {
+							if (e.editStateChanged) {
+								setTimeout(() => this.markdownEditState.set(cellModel.handle + '-' + cellModel.getEditState(), undefined), 0);
+							}
+						});
+						this.markupCellListeners.set(cell.handle, listener);
 					}
+				}
+				if (!editor) {
 					return;
 				}
 				const diff = {
@@ -421,10 +417,7 @@ class ChatEditingNotebookEditorWidgetIntegration extends Disposable implements I
 	private async revealChangeInView(cell: ICellViewModel, lines: LineRange | undefined, change: ICellDiffInfo): Promise<void> {
 		const targetLines = lines ?? new LineRange(0, 0);
 		if (cell.cellKind === CellKind.Markup && cell.getEditState() === CellEditState.Preview) {
-			this.editingPreview = change;
 			cell.updateEditState(CellEditState.Editing, 'chatEditNavigation');
-		} else {
-			this.editingPreview = undefined;
 		}
 
 		await this.notebookEditor.focusNotebookCell(cell, 'editor', { focusEditorLine: targetLines.startLineNumber });
@@ -436,7 +429,7 @@ class ChatEditingNotebookEditorWidgetIntegration extends Disposable implements I
 			return;
 		}
 		const cellViewModel = this.getCellViewModel(change);
-		if (cellViewModel?.cellKind === CellKind.Markup && cellViewModel.getEditState() === CellEditState.Editing && this.editingPreview === change) {
+		if (cellViewModel?.cellKind === CellKind.Markup && cellViewModel.getEditState() === CellEditState.Editing && cellViewModel.editStateSource === 'chatEditNavigation') {
 			cellViewModel.updateEditState(CellEditState.Preview, 'chatEditNavigation');
 		}
 	}
@@ -467,7 +460,7 @@ class ChatEditingNotebookEditorWidgetIntegration extends Disposable implements I
 						}
 					}
 
-					const isLastChangeInCell = currentChange.index === lastChangeIndex(currentChange.change);
+					const isLastChangeInCell = currentChange.index >= lastChangeIndex(currentChange.change);
 					const index = isLastChangeInCell ? 0 : currentChange.index + 1;
 					const change = isLastChangeInCell ? changes[changes.indexOf(currentChange.change) + 1] : currentChange.change;
 
@@ -527,7 +520,7 @@ class ChatEditingNotebookEditorWidgetIntegration extends Disposable implements I
 						}
 					}
 
-					const isFirstChangeInCell = currentChange.index === 0;
+					const isFirstChangeInCell = currentChange.index <= 0;
 					const change = isFirstChangeInCell ? changes[changes.indexOf(currentChange.change) - 1] : currentChange.change;
 
 					if (change) {
@@ -571,12 +564,45 @@ class ChatEditingNotebookEditorWidgetIntegration extends Disposable implements I
 			integration?.enableAccessibleDiffView();
 		}
 	}
-	async acceptNearestChange(change: IModifiedFileEntryChangeHunk): Promise<void> {
-		await change.accept();
+
+	private getfocusedIntegration(): ChatEditingCodeEditorIntegration | undefined {
+		const first = this.notebookEditor.getSelectionViewModels()[0];
+		if (first) {
+			return this.cellEditorIntegrations.get(first.model)?.integration;
+		}
+		return undefined;
+	}
+
+	async acceptNearestChange(change: IModifiedFileEntryChangeHunk | undefined): Promise<void> {
+		if (change) {
+			await change.accept();
+		} else {
+			const current = this.currentChange.get()!;
+			const focused = this.getfocusedIntegration();
+			if (focused) {
+				focused.acceptNearestChange();
+			} else if (current) {
+				current.change.keep(current?.change.diff.get().changes[current.index]);
+			}
+		}
+
 		this.next(true);
 	}
-	async rejectNearestChange(change: IModifiedFileEntryChangeHunk): Promise<void> {
-		await change.reject();
+	async rejectNearestChange(change: IModifiedFileEntryChangeHunk | undefined): Promise<void> {
+		if (change) {
+			await change.reject();
+		} else {
+			const focused = this.getfocusedIntegration();
+			if (focused) {
+				focused.rejectNearestChange();
+			} else if (this.currentChange.get()) {
+				const current = this.currentChange.get()!;
+				current.change.undo(current.change.diff.get().changes[current.index]);
+			} else {
+				return;
+			}
+		}
+
 		this.next(true);
 	}
 	async toggleDiff(_change: IModifiedFileEntryChangeHunk | undefined): Promise<void> {
