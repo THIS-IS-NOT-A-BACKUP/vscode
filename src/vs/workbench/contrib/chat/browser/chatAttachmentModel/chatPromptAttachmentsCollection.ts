@@ -6,7 +6,7 @@
 import { URI } from '../../../../../base/common/uri.js';
 import { Emitter } from '../../../../../base/common/event.js';
 import { basename } from '../../../../../base/common/resources.js';
-import { IChatRequestVariableEntry } from '../../common/chatModel.js';
+import { IChatRequestVariableEntry, isChatRequestFileEntry } from '../../common/chatModel.js';
 import { ChatPromptAttachmentModel } from './chatPromptAttachmentModel.js';
 import { PromptsConfig } from '../../../../../platform/prompts/common/config.js';
 import { IPromptFileReference } from '../../common/promptSyntax/parsers/types.js';
@@ -81,11 +81,46 @@ export const toChatVariable = (
 	};
 };
 
+export function isPromptFileChatVariable(variable: IChatRequestVariableEntry): boolean {
+	return isChatRequestFileEntry(variable) && variable.name.startsWith('prompt:');
+}
+
 /**
  * Model for a collection of prompt instruction attachments.
  * See {@linkcode ChatPromptAttachmentModel} for individual attachment.
  */
 export class ChatPromptAttachmentsCollection extends Disposable {
+	/**
+	 * Event that fires then this model is updated.
+	 *
+	 * See {@linkcode onUpdate}.
+	 */
+	protected _onUpdate = this._register(new Emitter<void>());
+	/**
+	 * Subscribe to the `onUpdate` event.
+	 */
+	public onUpdate = this._onUpdate.event;
+
+	/**
+	 * Event that fires when a new prompt instruction attachment is added.
+	 * See {@linkcode onAdd}.
+	 */
+	protected _onAdd = this._register(new Emitter<ChatPromptAttachmentModel>());
+	/**
+	 * The `onAdd` event fires when a new prompt instruction attachment is added.
+	 */
+	public onAdd = this._onAdd.event;
+
+	/**
+	 * Event that fires when a new prompt instruction attachment is removed.
+	 * See {@linkcode onRemove}.
+	 */
+	protected _onRemove = this._register(new Emitter<ChatPromptAttachmentModel>());
+	/**
+	 * The `onRemove` event fires when a new prompt instruction attachment is removed.
+	 */
+	public onRemove = this._onRemove.event;
+
 	/**
 	 * List of all prompt instruction attachments.
 	 */
@@ -154,38 +189,6 @@ export class ChatPromptAttachmentsCollection extends Disposable {
 		);
 	}
 
-	/**
-	 * Event that fires then this model is updated.
-	 *
-	 * See {@linkcode onUpdate}.
-	 */
-	protected _onUpdate = this._register(new Emitter<void>());
-	/**
-	 * Subscribe to the `onUpdate` event.
-	 * @param callback Function to invoke on update.
-	 */
-	public onUpdate(callback: () => unknown): this {
-		this._register(this._onUpdate.event(callback));
-
-		return this;
-	}
-
-	/**
-	 * Event that fires when a new prompt instruction attachment is added.
-	 * See {@linkcode onAdd}.
-	 */
-	protected _onAdd = this._register(new Emitter<ChatPromptAttachmentModel>());
-	/**
-	 * The `onAdd` event fires when a new prompt instruction attachment is added.
-	 *
-	 * @param callback Function to invoke on add.
-	 */
-	public onAdd(callback: (attachment: ChatPromptAttachmentModel) => unknown): this {
-		this._register(this._onAdd.event(callback));
-
-		return this;
-	}
-
 	constructor(
 		@IInstantiationService private readonly initService: IInstantiationService,
 		@IConfigurationService private readonly configService: IConfigurationService,
@@ -214,6 +217,7 @@ export class ChatPromptAttachmentsCollection extends Disposable {
 				//       alternative results in an infinite loop of calling this callback
 				this.attachments.deleteAndLeak(uri.path);
 				this._onUpdate.fire();
+				this._onRemove.fire(instruction);
 			});
 
 		this.attachments.set(uri.path, instruction);
