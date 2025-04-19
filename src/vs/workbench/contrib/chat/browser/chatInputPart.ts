@@ -160,7 +160,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 
 	readonly selectedToolsModel: ChatSelectedTools;
 
-	public getAttachedAndImplicitContext(sessionId: string): IChatRequestVariableEntry[] {
+	public async getAttachedAndImplicitContext(sessionId: string): Promise<IChatRequestVariableEntry[]> {
 		const contextArr = [...this.attachmentModel.attachments];
 		if (this.implicitContext?.enabled && this.implicitContext.value) {
 			contextArr.push(this.implicitContext.toBaseEntry());
@@ -181,6 +181,9 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 				}),
 			);
 		}
+
+		// wait for all prompt files resolve precesses to settle
+		await this.promptInstructionsAttachmentsPart.allSettled();
 
 		contextArr
 			.push(...this.promptInstructionsAttachmentsPart.chatAttachments);
@@ -411,8 +414,8 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		);
 
 		// trigger re-layout of chat input when number of instruction attachment changes
-		this.promptInstructionsAttachmentsPart.onAttachmentsCountChange(() => {
-			this._onDidChangeHeight.fire();
+		this.promptInstructionsAttachmentsPart.onAttachmentsChange(() => {
+			this._handleAttachedContextChange();
 		});
 
 		this.initSelectedModel();
@@ -429,22 +432,34 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		return `chat.currentLanguageModel.${this.location}`;
 	}
 
+	private getSelectedModelIsDefaultStorageKey(): string {
+		return `chat.currentLanguageModel.${this.location}.isDefault`;
+	}
+
 	private initSelectedModel() {
 		const persistedSelection = this.storageService.get(this.getSelectedModelStorageKey(), StorageScope.APPLICATION);
+		const persistedAsDefault = this.storageService.getBoolean(this.getSelectedModelIsDefaultStorageKey(), StorageScope.APPLICATION, persistedSelection === 'github.copilot-chat/gpt-4o');
+
 		if (persistedSelection) {
 			const model = this.languageModelsService.lookupLanguageModel(persistedSelection);
 			if (model) {
-				this.setCurrentLanguageModel({ metadata: model, identifier: persistedSelection });
-				this.checkModelSupported();
+				// Only restore the model if it wasn't the default at the time of storing or it is now the default
+				if (!persistedAsDefault || model.isDefault) {
+					this.setCurrentLanguageModel({ metadata: model, identifier: persistedSelection });
+					this.checkModelSupported();
+				}
 			} else {
 				this._waitForPersistedLanguageModel.value = this.languageModelsService.onDidChangeLanguageModels(e => {
 					const persistedModel = e.added?.find(m => m.identifier === persistedSelection);
 					if (persistedModel) {
 						this._waitForPersistedLanguageModel.clear();
 
-						if (persistedModel.metadata.isUserSelectable) {
-							this.setCurrentLanguageModel({ metadata: persistedModel.metadata, identifier: persistedSelection });
-							this.checkModelSupported();
+						// Only restore the model if it wasn't the default at the time of storing or it is now the default
+						if (!persistedAsDefault || persistedModel.metadata.isDefault) {
+							if (persistedModel.metadata.isUserSelectable) {
+								this.setCurrentLanguageModel({ metadata: persistedModel.metadata, identifier: persistedSelection });
+								this.checkModelSupported();
+							}
 						}
 					}
 				});
@@ -535,6 +550,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		}
 
 		this.storageService.store(this.getSelectedModelStorageKey(), model.identifier, StorageScope.APPLICATION, StorageTarget.USER);
+		this.storageService.store(this.getSelectedModelIsDefaultStorageKey(), !!model.metadata.isDefault, StorageScope.APPLICATION, StorageTarget.USER);
 
 		this._onDidChangeCurrentLanguageModel.fire(model);
 	}
