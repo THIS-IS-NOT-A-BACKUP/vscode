@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { ChatMode } from '../../constants.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { ResolveError } from '../../promptFileReferenceErrors.js';
 import { IDisposable } from '../../../../../../base/common/lifecycle.js';
@@ -46,6 +47,26 @@ export interface ITopError extends IResolveError {
 	 * Localized error message.
 	 */
 	readonly localizedMessage: string;
+}
+
+/**
+ * Metadata defined in the prompt header.
+ */
+export interface IPromptMetadata {
+	/**
+	 * Description metadata in the prompt header.
+	 */
+	description?: string;
+
+	/**
+	 * Tools metadata in the prompt header.
+	 */
+	tools?: readonly string[];
+
+	/**
+	 * Chat mode metadata in the prompt header.
+	 */
+	mode: ChatMode;
 }
 
 /**
@@ -151,15 +172,15 @@ interface IPromptReferenceBase extends IDisposable {
 	readonly allValidReferences: readonly IPromptReference[];
 
 	/**
-	 * Associated `tools` metadata for the current reference.
-	 */
-	readonly toolsMetadata?: readonly string[] | null;
-
-	/**
 	 * Entire associated `tools` metadata for this reference and
 	 * all possible nested child references.
 	 */
 	readonly allToolsMetadata: readonly string[] | null;
+
+	/**
+	 * Metadata defined in the prompt header.
+	 */
+	readonly metadata: IPromptMetadata;
 
 	/**
 	 * Returns a promise that resolves when the reference contents
