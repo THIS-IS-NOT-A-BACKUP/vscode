@@ -63,6 +63,7 @@ import { getPrivateApiFor } from './extHostTestingPrivateApi.js';
 import * as types from './extHostTypes.js';
 import { LanguageModelPromptTsxPart, LanguageModelTextPart } from './extHostTypes.js';
 import { ChatAgentLocation } from '../../contrib/chat/common/constants.js';
+import { AiSettingsSearchResult, AiSettingsSearchResultKind } from '../../services/aiSettingsSearch/common/aiSettingsSearch.js';
 import { McpServerLaunch, McpServerTransportType } from '../../contrib/mcp/common/mcpTypes.js';
 
 export namespace Command {
@@ -2422,12 +2423,7 @@ export namespace LanguageModelChatMessage2 {
 				});
 				return new types.LanguageModelToolResultPart(c.toolCallId, content, c.isError);
 			} else if (c.type === 'image_url') {
-				const value: vscode.ChatImagePart = {
-					mimeType: c.value.mimeType,
-					data: c.value.data.buffer,
-				};
-
-				return new types.LanguageModelDataPart(value);
+				return new types.LanguageModelDataPart(c.value.data.buffer, c.value.mimeType);
 			} else if (c.type === 'extra_data') {
 				return new types.LanguageModelExtraDataPart(c.kind, c.data);
 			} else {
@@ -2474,8 +2470,8 @@ export namespace LanguageModelChatMessage2 {
 				};
 			} else if (c instanceof types.LanguageModelDataPart) {
 				const value: chatProvider.IChatImageURLPart = {
-					mimeType: c.value.mimeType,
-					data: VSBuffer.wrap(c.value.data),
+					mimeType: c.mimeType as chatProvider.ChatImageMimeType,
+					data: VSBuffer.wrap(c.data),
 				};
 
 				return {
@@ -2897,7 +2893,7 @@ export namespace ChatResponsePart {
 }
 
 export namespace ChatAgentRequest {
-	export function to(request: IChatAgentRequest, location2: vscode.ChatRequestEditorData | vscode.ChatRequestNotebookData | undefined, model: vscode.LanguageModelChat, diagnostics: readonly [vscode.Uri, readonly vscode.Diagnostic[]][], tools: vscode.LanguageModelToolInformation[] | undefined, extension: IRelaxedExtensionDescription): vscode.ChatRequest {
+	export function to(request: IChatAgentRequest, location2: vscode.ChatRequestEditorData | vscode.ChatRequestNotebookData | undefined, model: vscode.LanguageModelChat, diagnostics: readonly [vscode.Uri, readonly vscode.Diagnostic[]][], toolSelection: vscode.ChatRequestToolSelection | undefined, extension: IRelaxedExtensionDescription): vscode.ChatRequest {
 		const toolReferences = request.variables.variables.filter(v => v.kind === 'tool');
 		const variableReferences = request.variables.variables.filter(v => v.kind !== 'tool');
 		const requestWithAllProps: vscode.ChatRequest = {
@@ -2914,7 +2910,7 @@ export namespace ChatAgentRequest {
 			rejectedConfirmationData: request.rejectedConfirmationData,
 			location2,
 			toolInvocationToken: Object.freeze({ sessionId: request.sessionId }) as never,
-			tools,
+			toolSelection,
 			model,
 			editedFileEvents: request.editedFileEvents,
 		};
@@ -3275,6 +3271,29 @@ export namespace LanguageModelToolResult {
 export namespace IconPath {
 	export function fromThemeIcon(iconPath: vscode.ThemeIcon): languages.IconPath {
 		return iconPath;
+	}
+}
+
+export namespace AiSettingsSearch {
+	export function fromSettingsSearchResult(result: vscode.SettingsSearchResult): AiSettingsSearchResult {
+		return {
+			query: result.query,
+			kind: fromSettingsSearchResultKind(result.kind),
+			settings: result.settings
+		};
+	}
+
+	function fromSettingsSearchResultKind(kind: number): AiSettingsSearchResultKind {
+		switch (kind) {
+			case AiSettingsSearchResultKind.EMBEDDED:
+				return AiSettingsSearchResultKind.EMBEDDED;
+			case AiSettingsSearchResultKind.LLM_RANKED:
+				return AiSettingsSearchResultKind.LLM_RANKED;
+			case AiSettingsSearchResultKind.CANCELED:
+				return AiSettingsSearchResultKind.CANCELED;
+			default:
+				throw new Error('Unknown AiSettingsSearchResultKind');
+		}
 	}
 }
 
