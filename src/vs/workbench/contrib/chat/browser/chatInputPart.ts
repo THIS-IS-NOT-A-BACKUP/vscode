@@ -204,7 +204,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	 */
 	public get hasPromptFileAttachments(): boolean {
 		// if prompt attached explicitly as a "prompt" attachment
-		if (this.promptInstructionsAttachmentsPart.hasPromptFile) {
+		if (this.promptInstructionsAttachmentsPart.hasInstructions) {
 			return true;
 		}
 
@@ -425,6 +425,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		// trigger re-layout of chat input when number of instruction attachment changes
 		this.promptInstructionsAttachmentsPart.onAttachmentsChange(() => {
 			this._handleAttachedContextChange();
+			this._onDidChangeHeight.fire();
 		});
 
 		this.initSelectedModel();
@@ -958,7 +959,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 
 		this._inputEditorElement = dom.append(editorContainer!, $(chatInputEditorContainerSelector));
 		const editorOptions = getSimpleCodeEditorWidgetOptions();
-		editorOptions.contributions?.push(...EditorExtensionsRegistry.getSomeEditorContributions([ContentHoverController.ID, GlyphHoverController.ID, CopyPasteController.ID, LinkDetector.ID]));
+		editorOptions.contributions?.push(...EditorExtensionsRegistry.getSomeEditorContributions([ContentHoverController.ID, GlyphHoverController.ID, DropIntoEditorController.ID, CopyPasteController.ID, LinkDetector.ID]));
 		this._inputEditor = this._register(scopedInstantiationService.createInstance(CodeEditorWidget, this._inputEditorElement, options, editorOptions));
 
 		SuggestController.get(this._inputEditor)?.forceRenderingAbove();
