@@ -152,7 +152,6 @@ class SetupAgent extends Disposable implements IChatAgentImplementation {
 				canBeReferencedInPrompt: true,
 				toolReferenceName: 'new',
 				when: ContextKeyExpr.true(),
-				supportsToolPicker: true,
 			}).disposable);
 
 			return { agent, disposable: disposables };
@@ -832,7 +831,7 @@ export class ChatSetupContribution extends Disposable implements IWorkbenchContr
 				});
 			}
 
-			override async run(accessor: ServicesAccessor, mode: ChatMode): Promise<void> {
+			override async run(accessor: ServicesAccessor, mode: ChatMode): Promise<boolean> {
 				const viewsService = accessor.get(IViewsService);
 				const layoutService = accessor.get(IWorkbenchLayoutService);
 				const instantiationService = accessor.get(IInstantiationService);
@@ -858,9 +857,11 @@ export class ChatSetupContribution extends Disposable implements IWorkbenchContr
 					});
 
 					if (confirmed) {
-						commandService.executeCommand(CHAT_SETUP_ACTION_ID);
+						return Boolean(await commandService.executeCommand(CHAT_SETUP_ACTION_ID));
 					}
 				}
+
+				return Boolean(success);
 			}
 		}
 
