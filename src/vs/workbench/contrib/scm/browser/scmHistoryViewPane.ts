@@ -286,7 +286,7 @@ registerAction2(class extends Action2 {
 			getHistoryItemEditorTitle(historyItem) :
 			localize('historyItemChangesEditorTitle', "All Changes ({0} ↔ {1})", historyItemLast.displayId ?? historyItemLast.id, historyItem.displayId ?? historyItem.id);
 
-		const multiDiffSourceUri = ScmHistoryItemResolver.getMultiDiffSourceUri(provider.id, historyItem);
+		const multiDiffSourceUri = ScmHistoryItemResolver.getMultiDiffSourceUri(provider, historyItem);
 		commandService.executeCommand('_workbench.openMultiDiffEditor', { title, multiDiffSourceUri });
 	}
 });
@@ -1828,10 +1828,12 @@ export class SCMHistoryViewPane extends ViewPane {
 			}
 		}
 
-		const historyItemMenuActions = this._menuService.getMenuActions(MenuId.SCMHistoryItemContext, this.scopedContextKeyService, {
+		const historyItemMenuActions = this._menuService.getMenuActions(
+			MenuId.SCMHistoryItemContext,
+			this.scopedContextKeyService, {
 			arg: element.repository.provider,
 			shouldForwardArgs: true
-		});
+		}).filter(group => group[0] !== 'inline');
 
 		this.contextMenuService.showContextMenu({
 			contextKeyService: this.scopedContextKeyService,
