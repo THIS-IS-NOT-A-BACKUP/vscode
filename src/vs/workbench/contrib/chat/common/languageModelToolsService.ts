@@ -16,10 +16,10 @@ import { ContextKeyExpression } from '../../../../platform/contextkey/common/con
 import { ExtensionIdentifier } from '../../../../platform/extensions/common/extensions.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 import { IProgress } from '../../../../platform/progress/common/progress.js';
-import { IChatTerminalToolInvocationData, IChatToolInputInvocationData } from './chatService.js';
+import { IChatExtensionsContent, IChatTerminalToolInvocationData, IChatToolInputInvocationData } from './chatService.js';
 import { PromptElementJSON, stringifyPromptElementJSON } from './tools/promptTsxTypes.js';
 import { VSBuffer } from '../../../../base/common/buffer.js';
-import { derived, IObservable, IReader, ObservableSet } from '../../../../base/common/observable.js';
+import { derived, IObservable, IReader, ITransaction, ObservableSet } from '../../../../base/common/observable.js';
 import { Iterable } from '../../../../base/common/iterator.js';
 
 export interface IToolData {
@@ -110,7 +110,7 @@ export interface IToolInvocation {
 	context: IToolInvocationContext | undefined;
 	chatRequestId?: string;
 	chatInteractionId?: string;
-	toolSpecificData?: IChatTerminalToolInvocationData | IChatToolInputInvocationData;
+	toolSpecificData?: IChatTerminalToolInvocationData | IChatToolInputInvocationData | IChatExtensionsContent;
 	modelId?: string;
 }
 
@@ -166,7 +166,7 @@ export interface IToolResultDataPart {
 }
 
 export interface IToolConfirmationMessages {
-	title: string;
+	title: string | IMarkdownString;
 	message: string | IMarkdownString;
 	allowAutoConfirm?: boolean;
 }
@@ -178,7 +178,7 @@ export interface IPreparedToolInvocation {
 	confirmationMessages?: IToolConfirmationMessages;
 	presentation?: 'hidden' | undefined;
 	// When this gets extended, be sure to update `chatResponseAccessibleView.ts` to handle the new properties.
-	toolSpecificData?: IChatTerminalToolInvocationData | IChatToolInputInvocationData;
+	toolSpecificData?: IChatTerminalToolInvocationData | IChatToolInputInvocationData | IChatExtensionsContent;
 }
 
 export interface IToolImpl {
@@ -212,14 +212,14 @@ export class ToolSet {
 		});
 	}
 
-	addTool(data: IToolData): IDisposable {
+	addTool(data: IToolData, tx?: ITransaction): IDisposable {
 		this._tools.add(data);
 		return toDisposable(() => {
 			this._tools.delete(data);
 		});
 	}
 
-	addToolSet(toolSet: ToolSet): IDisposable {
+	addToolSet(toolSet: ToolSet, tx?: ITransaction): IDisposable {
 		if (toolSet === this) {
 			return Disposable.None;
 		}
