@@ -1867,12 +1867,16 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	display: none;
 }
 
-.pane-body,
-.quick-input-html-widget {
+.interactive-session:not(.chat-widget > .interactive-session) {
+
+	.interactive-item-container {
+		padding-top: 5px 16px;
+	}
 
 	.interactive-item-container.interactive-request {
 		align-items: flex-end;
 		padding-bottom: 0px;
+		padding-top: 5px;
 	}
 
 	.interactive-item-container.interactive-request .value .rendered-markdown {
@@ -1883,7 +1887,6 @@ have to be updated for changes to the rules above, or to support more deeply nes
 		margin-left: auto;
 		width: fit-content;
 		margin-bottom: 5px;
-		box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 		position: relative;
 	}
 
@@ -1900,8 +1903,7 @@ have to be updated for changes to the rules above, or to support more deeply nes
 		width: fit-content;
 	}
 
-	.interactive-session .interactive-item-container.interactive-request .chat-attached-context {
-		margin-top: 10px;
+	.interactive-item-container.interactive-request .chat-attached-context {
 		max-width: 100%;
 		width: fit-content;
 		justify-content: flex-end;
@@ -1914,8 +1916,35 @@ have to be updated for changes to the rules above, or to support more deeply nes
 		box-shadow: none;
 	}
 
-	.interactive-session .interactive-request .header.hidden {
+	.interactive-request .header.header-disabled {
+		display: none !important;
+	}
+
+	.request-hover {
+		position: absolute;
+		overflow: hidden;
 		display: none;
+		z-index: 100;
+		background-color: var(--vscode-toolbar-hoverBackground);
+		top: 0px;
+		right: 10px;
+		border-radius: 6px;
+	}
+
+	.request-hover .actions-container {
+		width: 18px;
+		height: 17px;
+	}
+
+	.request-hover .actions-container .action-label.codicon-x {
+		width: 14px;
+		height: 14px;
+		padding-top: 4px;
+		padding-left: 1px;
+	}
+
+	.request-hover.has-no-actions {
+		display: none !important;
 	}
 }
 
@@ -1939,3 +1968,4 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	width: initial;
 	padding: 4px 8px;
 }
+
