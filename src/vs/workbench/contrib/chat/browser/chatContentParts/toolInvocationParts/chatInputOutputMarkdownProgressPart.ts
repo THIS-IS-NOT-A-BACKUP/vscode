@@ -42,6 +42,7 @@ export class ChatInputOutputMarkdownProgressPart extends BaseChatToolInvocationS
 		input: string,
 		output: IToolResultInputOutputDetails['output'] | undefined,
 		isError: boolean,
+		currentWidthDelegate: () => number,
 		@IInstantiationService instantiationService: IInstantiationService,
 		@IModelService modelService: IModelService,
 		@ILanguageService languageService: ILanguageService,
@@ -101,7 +102,7 @@ export class ChatInputOutputMarkdownProgressPart extends BaseChatToolInvocationS
 					if (o.type === 'data') {
 						const decoded = decodeBase64(o.value64).buffer;
 						if (getAttachableImageExtension(o.mimeType)) {
-							return { kind: 'data', value: decoded, mimeType: o.mimeType };
+							return { kind: 'data', value: decoded, mimeType: o.mimeType, uri: o.uri };
 						} else {
 							return toCodePart(localize('toolResultData', "Data of type {0} ({1} bytes)", o.mimeType, decoded.byteLength));
 						}
@@ -116,6 +117,7 @@ export class ChatInputOutputMarkdownProgressPart extends BaseChatToolInvocationS
 			},
 			isError,
 			ChatInputOutputMarkdownProgressPart._expandedByDefault.get(toolInvocation) ?? false,
+			currentWidthDelegate(),
 		));
 		this._codeblocks.push(...collapsibleListPart.codeblocks);
 		this._register(collapsibleListPart.onDidChangeHeight(() => this._onDidChangeHeight.fire()));
