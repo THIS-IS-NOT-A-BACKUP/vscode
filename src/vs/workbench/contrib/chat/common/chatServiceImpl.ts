@@ -493,13 +493,16 @@ export class ChatService extends Disposable implements IChatService {
 			throw new ErrorNoTelemetry('No default agent contributed');
 		}
 
-		// No setup participant to fall back on- wait for extension activation
-		// Using `activateById` as workaround for https://github.com/microsoft/vscode/issues/250590
-		await this.extensionService.activateById(defaultAgentData.extensionId, {
-			activationEvent: `onChatParticipant:${defaultAgentData.id}`,
-			extensionId: defaultAgentData.extensionId,
-			startup: false
-		});
+		// Await activation of the extension provided agent
+		// Using `activateById` as workaround for the issue
+		// https://github.com/microsoft/vscode/issues/250590
+		if (!defaultAgentData.isCore) {
+			await this.extensionService.activateById(defaultAgentData.extensionId, {
+				activationEvent: `onChatParticipant:${defaultAgentData.id}`,
+				extensionId: defaultAgentData.extensionId,
+				startup: false
+			});
+		}
 
 		const defaultAgent = this.chatAgentService.getActivatedAgents().find(agent => agent.id === defaultAgentData.id);
 		if (!defaultAgent) {
@@ -769,7 +772,6 @@ export class ChatService extends Disposable implements IChatService {
 							userSelectedModelId: options?.userSelectedModelId,
 							userSelectedTools: options?.userSelectedTools,
 							modeInstructions: options?.modeInstructions,
-							toolSelectionIsExclusive: options?.toolSelectionIsExclusive,
 							editedFileEvents: request.editedFileEvents
 						} satisfies IChatAgentRequest;
 					};
