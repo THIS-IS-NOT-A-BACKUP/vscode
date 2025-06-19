@@ -7422,7 +7422,7 @@ declare namespace monaco.languages {
 		 * Is called when an inline completion item is no longer being used.
 		 * Provides a reason of why it is not used anymore.
 		*/
-		handleEndOfLifetime?(completions: T, item: T['items'][number], reason: InlineCompletionEndOfLifeReason<T['items'][number]>): void;
+		handleEndOfLifetime?(completions: T, item: T['items'][number], reason: InlineCompletionEndOfLifeReason<T['items'][number]>, lifetimeSummary: LifetimeSummary): void;
 		/**
 		 * Will be called when a completions list is no longer in use and can be garbage-collected.
 		*/
@@ -7444,7 +7444,7 @@ declare namespace monaco.languages {
 	}
 
 	export type InlineCompletionsDisposeReason = {
-		kind: 'lostRace' | 'tokenCancellation' | 'other';
+		kind: 'lostRace' | 'tokenCancellation' | 'other' | 'empty' | 'notTaken';
 	};
 
 	export enum InlineCompletionEndOfLifeReasonKind {
@@ -7461,6 +7461,16 @@ declare namespace monaco.languages {
 		kind: InlineCompletionEndOfLifeReasonKind.Ignored;
 		supersededBy?: TInlineCompletion;
 		userTypingDisagreed: boolean;
+	};
+
+	export type LifetimeSummary = {
+		requestUuid: string;
+		shown: boolean;
+		shownDuration: number;
+		shownDurationUncollapsed: number;
+		editorType: string;
+		viewKind: string | undefined;
+		error: string | undefined;
 	};
 
 	export interface CodeAction {
