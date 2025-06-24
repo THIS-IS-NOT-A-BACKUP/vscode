@@ -18,13 +18,11 @@ import { SuggestController } from '../../../../editor/contrib/suggest/browser/su
 import { ILocalizedString, localize, localize2 } from '../../../../nls.js';
 import { IActionViewItemService } from '../../../../platform/actions/browser/actionViewItemService.js';
 import { MenuEntryActionViewItem } from '../../../../platform/actions/browser/menuEntryActionViewItem.js';
-import { Action2, MenuId, MenuItemAction } from '../../../../platform/actions/common/actions.js';
+import { Action2, MenuId, MenuItemAction, MenuRegistry } from '../../../../platform/actions/common/actions.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { ConfigurationTarget } from '../../../../platform/configuration/common/configuration.js';
 import { ContextKeyExpr } from '../../../../platform/contextkey/common/contextkey.js';
-import { ExtensionsLocalizedLabel } from '../../../../platform/extensionManagement/common/extensionManagement.js';
 import { IInstantiationService, ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
-import { IMcpGalleryService } from '../../../../platform/mcp/common/mcpManagement.js';
 import { IProductService } from '../../../../platform/product/common/productService.js';
 import { IQuickInputService, IQuickPickItem, IQuickPickSeparator } from '../../../../platform/quickinput/common/quickInput.js';
 import { StorageScope } from '../../../../platform/storage/common/storage.js';
@@ -47,7 +45,7 @@ import { TEXT_FILE_EDITOR_ID } from '../../files/common/files.js';
 import { McpCommandIds } from '../common/mcpCommandIds.js';
 import { McpContextKeys } from '../common/mcpContextKeys.js';
 import { IMcpRegistry } from '../common/mcpRegistryTypes.js';
-import { IMcpSamplingService, IMcpServer, IMcpServerStartOpts, IMcpService, IMcpWorkbenchService, InstalledMcpServersViewId, LazyCollectionState, McpCapability, McpConnectionState, mcpPromptPrefix, McpServerCacheState, McpServersGalleryEnabledContext } from '../common/mcpTypes.js';
+import { HasInstalledMcpServersContext, IMcpSamplingService, IMcpServer, IMcpServerStartOpts, IMcpService, InstalledMcpServersViewId, LazyCollectionState, McpCapability, McpConnectionState, mcpPromptPrefix, McpServerCacheState } from '../common/mcpTypes.js';
 import { McpAddConfigurationCommand } from './mcpCommandsAddConfiguration.js';
 import { McpResourceQuickAccess, McpResourceQuickPick } from './mcpResourceQuickAccess.js';
 import { McpUrlHandler } from './mcpUrlHandler.js';
@@ -67,7 +65,7 @@ export class ListMcpServerCommand extends Action2 {
 			icon: Codicon.server,
 			category,
 			f1: true,
-			menu: {
+			menu: [{
 				when: ContextKeyExpr.and(
 					ContextKeyExpr.or(McpContextKeys.hasUnknownTools, McpContextKeys.hasServersWithErrors),
 					ChatContextKeys.chatMode.isEqualTo(ChatMode.Agent)
@@ -75,7 +73,7 @@ export class ListMcpServerCommand extends Action2 {
 				id: MenuId.ChatExecute,
 				group: 'navigation',
 				order: 2,
-			},
+			}],
 		});
 	}
 
@@ -83,18 +81,6 @@ export class ListMcpServerCommand extends Action2 {
 		const mcpService = accessor.get(IMcpService);
 		const commandService = accessor.get(ICommandService);
 		const quickInput = accessor.get(IQuickInputService);
-		const mcpWorkbenchService = accessor.get(IMcpWorkbenchService);
-		const extensionWorkbenchService = accessor.get(IExtensionsWorkbenchService);
-		const viewsService = accessor.get(IViewsService);
-		const mcpGalleryService = accessor.get(IMcpGalleryService);
-
-		if (mcpGalleryService.isEnabled()) {
-			if (mcpWorkbenchService.local.length) {
-				return viewsService.openView(InstalledMcpServersViewId, true);
-			} else {
-				return extensionWorkbenchService.openSearch('@mcp');
-			}
-		}
 
 		type ItemType = { id: string } & IQuickPickItem;
 
@@ -616,7 +602,10 @@ export class AddConfigurationAction extends Action2 {
 	}
 
 	async run(accessor: ServicesAccessor, configUri?: string): Promise<void> {
-		return accessor.get(IInstantiationService).createInstance(McpAddConfigurationCommand, configUri).run();
+		const instantiationService = accessor.get(IInstantiationService);
+		const workspaceService = accessor.get(IWorkspaceContextService);
+		const target = configUri ? workspaceService.getWorkspaceFolder(URI.parse(configUri)) : undefined;
+		return instantiationService.createInstance(McpAddConfigurationCommand, target ?? undefined).run();
 	}
 }
 
@@ -773,13 +762,9 @@ export class McpBrowseCommand extends Action2 {
 		super({
 			id: McpCommandIds.Browse,
 			title: localize2('mcp.command.browse', "MCP Servers"),
-			category: ExtensionsLocalizedLabel,
+			category,
 			menu: [{
-				id: MenuId.CommandPalette,
-				when: McpServersGalleryEnabledContext,
-			}, {
 				id: extensionsFilterSubMenu,
-				when: McpServersGalleryEnabledContext,
 				group: '1_predefined',
 				order: 1,
 			}],
@@ -788,6 +773,30 @@ export class McpBrowseCommand extends Action2 {
 
 	async run(accessor: ServicesAccessor) {
 		accessor.get(IExtensionsWorkbenchService).openSearch('@mcp ');
+	}
+}
+
+MenuRegistry.appendMenuItem(MenuId.CommandPalette, {
+	command: {
+		id: McpCommandIds.Browse,
+		title: localize2('mcp.command.browse.mcp', "Browse Servers"),
+		category
+	},
+});
+
+export class ShowInstalledMcpServersCommand extends Action2 {
+	constructor() {
+		super({
+			id: McpCommandIds.ShowInstalled,
+			title: localize2('mcp.command.show.installed', "Show Installed Servers"),
+			category,
+			precondition: HasInstalledMcpServersContext,
+			f1: true,
+		});
+	}
+
+	async run(accessor: ServicesAccessor) {
+		accessor.get(IViewsService).openView(InstalledMcpServersViewId, true);
 	}
 }
 
