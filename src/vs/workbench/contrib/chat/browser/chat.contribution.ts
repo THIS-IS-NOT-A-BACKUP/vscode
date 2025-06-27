@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import './promptSyntax/promptToolsCodeLensProvider.js';
+import './promptSyntax/promptCodingAgentActionContribution.js';
 import { timeout } from '../../../../base/common/async.js';
 import { Event } from '../../../../base/common/event.js';
 import { MarkdownString, isMarkdownString } from '../../../../base/common/htmlContent.js';
@@ -111,6 +112,7 @@ import { runSaveToPromptAction, SAVE_TO_PROMPT_SLASH_COMMAND_NAME } from './prom
 import { ChatDynamicVariableModel } from './contrib/chatDynamicVariables.js';
 import { ChatAttachmentResolveService, IChatAttachmentResolveService } from './chatAttachmentResolveService.js';
 import { registerLanguageModelActions } from './actions/chatLanguageModelActions.js';
+import { PromptUrlHandler } from './promptSyntax/promptUrlHandler.js';
 
 // Register configuration
 const configurationRegistry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration);
@@ -246,10 +248,11 @@ configurationRegistry.registerConfiguration({
 			tags: ['experimental']
 		},
 		'chat.editRequests': {
-			default: true,
 			markdownDescription: nls.localize('chat.editRequests', "Enables editing of requests in the chat. This allows you to change the request content and resubmit it to the model."),
-			type: 'boolean',
-			tags: ['experimental']
+			type: 'string',
+			enum: ['inline', 'hover', 'input', 'none'],
+			default: 'inline',
+			tags: ['experimental'],
 		},
 		[mcpEnabledSection]: {
 			type: 'boolean',
@@ -711,6 +714,7 @@ registerWorkbenchContribution2(ChatEditingEditorContextKeys.ID, ChatEditingEdito
 registerWorkbenchContribution2(ChatTransferContribution.ID, ChatTransferContribution, WorkbenchPhase.BlockRestore);
 registerWorkbenchContribution2(ChatContextContributions.ID, ChatContextContributions, WorkbenchPhase.AfterRestored);
 registerWorkbenchContribution2(ChatResponseResourceFileSystemProvider.ID, ChatResponseResourceFileSystemProvider, WorkbenchPhase.AfterRestored);
+registerWorkbenchContribution2(PromptUrlHandler.ID, PromptUrlHandler, WorkbenchPhase.BlockRestore);
 
 registerChatActions();
 registerChatCopyActions();

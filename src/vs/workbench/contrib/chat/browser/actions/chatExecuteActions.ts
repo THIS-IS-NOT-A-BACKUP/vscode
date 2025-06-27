@@ -32,6 +32,8 @@ import { getEditingSessionContext } from '../chatEditing/chatEditingActions.js';
 import { ACTION_ID_NEW_CHAT, CHAT_CATEGORY, handleCurrentEditingSession, handleModeSwitch } from './chatActions.js';
 import { EditorContextKeys } from '../../../../../editor/common/editorContextKeys.js';
 import { IRemoteCodingAgentsService } from '../../../remoteCodingAgents/common/remoteCodingAgentsService.js';
+import { ChatRequestParser } from '../../common/chatRequestParser.js';
+import { MarkdownString } from '../../../../../base/common/htmlContent.js';
 
 export interface IVoiceChatExecuteActionContext {
 	readonly disableTimeout?: boolean;
@@ -228,9 +230,6 @@ class ToggleChatModeAction extends Action2 {
 		context.chatWidget.input.setChatMode2(switchToMode);
 
 		if (chatModeCheck.needToClearSession) {
-			if (context.chatWidget.viewModel?.editing) {
-				context.chatWidget.input.dispose();
-			}
 			await commandService.executeCommand(ACTION_ID_NEW_CHAT);
 		}
 	}
@@ -470,18 +469,18 @@ export class CreateRemoteAgentJobAction extends Action2 {
 
 		super({
 			id: CreateRemoteAgentJobAction.ID,
-			title: localize2('actions.chat.createRemoteJob', "Create Remote Job"),
+			title: localize2('actions.chat.createRemoteJob', "Push to Coding Agent"),
 			icon: Codicon.cloudUpload,
 			precondition,
 			toggled: {
 				condition: ChatContextKeys.remoteJobCreating,
 				icon: Codicon.sync,
-				tooltip: localize('remoteJobCreating', "Remote job is being created"),
+				tooltip: localize('remoteJobCreating', "Pushing to Coding Agent"),
 			},
 			menu: {
 				id: MenuId.ChatExecute,
 				group: 'navigation',
-				order: 0,
+				order: 3.9,
 				when: ChatContextKeys.hasRemoteCodingAgent
 			}
 		});
@@ -512,17 +511,40 @@ export class CreateRemoteAgentJobAction extends Action2 {
 			widget.setInput();
 
 			const chatModel = widget.viewModel?.model;
+			if (!chatModel) {
+				return;
+			}
 			const chatRequests = chatModel.getRequests();
-			const agents = remoteCodingAgent.getAvailableAgents();
 			const defaultAgent = chatAgentService.getDefaultAgent(ChatAgentLocation.Panel);
 
-			const agent = agents[0]; // TODO: We just pick the first one for testing
+			// Complete implementation of adding request back into chat stream
+			const instantiationService = accessor.get(IInstantiationService);
+
+			// Parse the request text to create a structured request
+			const requestParser = instantiationService.createInstance(ChatRequestParser);
+			const parsedRequest = requestParser.parseChatRequest(session, userPrompt, ChatAgentLocation.Panel);
+
+			// Add the request to the model first
+			const addedRequest = chatModel.addRequest(
+				parsedRequest,
+				{ variables: [] },
+				0,
+				defaultAgent,
+			);
+
+			const agents = remoteCodingAgent.getAvailableAgents();
+			const agent = agents[0]; // TODO: We just pick the first one for now
 			if (!agent) {
 				return;
 			}
 
 			let summary: string | undefined;
 			if (defaultAgent && chatRequests.length > 0) {
+				chatModel.acceptResponseProgress(addedRequest, {
+					kind: 'progressMessage',
+					content: new MarkdownString(localize('analyzingChatHistory', "Analyzing chat history"))
+				});
+
 				const historyEntries: IChatAgentHistoryEntry[] = chatRequests
 					.filter(req => req.response) // Only include completed requests
 					.map(req => ({
@@ -542,10 +564,27 @@ export class CreateRemoteAgentJobAction extends Action2 {
 
 				summary = await chatAgentService.getChatSummary(defaultAgent.id, historyEntries, CancellationToken.None);
 			}
-			await commandService.executeCommand(agent.command, {
-				userPrompt,
-				summary: summary || `Chat session with ${chatRequests.length} messages`
+
+			// Show progress for job creation
+			chatModel.acceptResponseProgress(addedRequest, {
+				kind: 'progressMessage',
+				content: new MarkdownString(localize('creatingRemoteJob', "Pushing state to coding agent"))
 			});
+
+			// Execute the remote command
+			const resultMarkdown: string | undefined = await commandService.executeCommand(agent.command, {
+				userPrompt,
+				summary: summary || userPrompt
+			});
+
+			let content = new MarkdownString(resultMarkdown, true);
+			if (!resultMarkdown) {
+				content = new MarkdownString(localize('remoteAgentError', "Coding agent session cancelled."));
+			}
+
+			chatModel.acceptResponseProgress(addedRequest, { content, kind: 'markdownContent' });
+			chatModel.setResponse(addedRequest, {});
+			chatModel.completeResponse(addedRequest);
 		} finally {
 			remoteJobCreatingKey.set(false);
 		}
@@ -709,12 +748,22 @@ export class CancelEdit extends Action2 {
 			title: localize2('interactive.cancelEdit.label', "Cancel Edit"),
 			f1: false,
 			category: CHAT_CATEGORY,
+			icon: Codicon.x,
+			menu: [
+				{
+					id: MenuId.ChatMessageTitle,
+					group: 'navigation',
+					order: 1,
+					when: ContextKeyExpr.and(ChatContextKeys.isRequest, ChatContextKeys.currentlyEditing, ContextKeyExpr.equals(`config.${ChatConfiguration.EditRequests}`, 'input'))
+				}
+			],
 			keybinding: {
 				primary: KeyCode.Escape,
 				when: ContextKeyExpr.and(ChatContextKeys.inChatInput,
 					EditorContextKeys.hoverVisible.toNegated(),
 					EditorContextKeys.hasNonEmptySelection.toNegated(),
-					EditorContextKeys.hasMultipleSelections.toNegated()),
+					EditorContextKeys.hasMultipleSelections.toNegated(),
+					ContextKeyExpr.or(ChatContextKeys.currentlyEditing, ChatContextKeys.currentlyEditingInput)),
 				weight: KeybindingWeight.EditorContrib - 5
 			}
 		});
@@ -728,7 +777,7 @@ export class CancelEdit extends Action2 {
 		if (!widget) {
 			return;
 		}
-		widget.input.dispose();
+		widget.finishedEditing();
 	}
 }
 
