@@ -3,38 +3,31 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { ChatModeKind } from '../../../../constants.js';
-import { PromptEnumMetadata } from './base/enum.js';
 import { FrontMatterRecord, FrontMatterToken } from '../../../codecs/base/frontMatterCodec/tokens/index.js';
+import { PromptStringMetadata } from './base/string.js';
 
 /**
  * Name of the metadata record in the prompt header.
  */
-const RECORD_NAME = 'mode';
+const RECORD_NAME = 'model';
 
-/**
- * Prompt `mode` metadata record inside the prompt header.
- */
-export class PromptModeMetadata extends PromptEnumMetadata<ChatModeKind> {
+export class PromptModelMetadata extends PromptStringMetadata {
+	public override get recordName(): string {
+		return RECORD_NAME;
+	}
+
 	constructor(
 		recordToken: FrontMatterRecord,
 		languageId: string,
 	) {
-		super(
-			[ChatModeKind.Ask, ChatModeKind.Edit, ChatModeKind.Agent],
-			RECORD_NAME,
-			recordToken,
-			languageId,
-		);
+		super(RECORD_NAME, recordToken, languageId);
 	}
 
 	/**
 	 * Check if a provided front matter token is a metadata record
-	 * with name equal to `mode`.
+	 * with name equal to `description`.
 	 */
-	public static isModeRecord(
-		token: FrontMatterToken,
-	): boolean {
+	public static isModelRecord(token: FrontMatterToken): boolean {
 		if ((token instanceof FrontMatterRecord) === false) {
 			return false;
 		}
