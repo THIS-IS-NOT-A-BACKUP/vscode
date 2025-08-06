@@ -262,12 +262,20 @@ export interface IChatElicitationRequest {
 	message: string | IMarkdownString;
 	acceptButtonLabel: string;
 	rejectButtonLabel: string;
-	originMessage?: string | IMarkdownString;
+	subtitle?: string | IMarkdownString;
+	source?: { type: 'mcp'; definitionId: string };
 	state: 'pending' | 'accepted' | 'rejected';
 	acceptedResult?: Record<string, unknown>;
 	accept(): Promise<void>;
 	reject(): Promise<void>;
 	onDidRequestHide: Event<void>;
+}
+
+export interface IChatThinkingPart {
+	kind: 'thinking';
+	value: string;
+	id?: string;
+	metadata?: string;
 }
 
 export interface IChatTerminalToolInvocationData {
@@ -390,6 +398,7 @@ export type IChatProgress =
 	| IChatPullRequestContent
 	| IChatUndoStop
 	| IChatPrepareToolInvocationPart
+	| IChatThinkingPart
 	| IChatTaskSerialized
 	| IChatElicitationRequest;
 
