@@ -288,6 +288,18 @@ export interface IChatTerminalToolInvocationData {
 	/** Message for model recommending the use of an alternative tool */
 	alternativeRecommendation?: string;
 	language: string;
+	terminalToolSessionId?: string;
+	autoApproveInfo?: IMarkdownString;
+}
+
+/**
+ * @deprecated This is the old API shape, we should support this for a while before removing it so
+ * we don't break existing chats
+ */
+export interface ILegacyChatTerminalToolInvocationData {
+	kind: 'terminal';
+	command: string;
+	language: string;
 }
 
 export interface IChatToolInputInvocationData {
@@ -297,7 +309,7 @@ export interface IChatToolInputInvocationData {
 
 export interface IChatToolInvocation {
 	presentation: IPreparedToolInvocation['presentation'];
-	toolSpecificData?: IChatTerminalToolInvocationData | IChatToolInputInvocationData | IChatExtensionsContent | IChatPullRequestContent | IChatTodoListContent;
+	toolSpecificData?: IChatTerminalToolInvocationData | ILegacyChatTerminalToolInvocationData | IChatToolInputInvocationData | IChatExtensionsContent | IChatPullRequestContent | IChatTodoListContent;
 	/** Presence of this property says that confirmation is required */
 	confirmationMessages?: IToolConfirmationMessages;
 	confirmed: DeferredPromise<boolean>;
