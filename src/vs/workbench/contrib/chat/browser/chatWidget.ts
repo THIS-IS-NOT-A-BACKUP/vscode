@@ -961,7 +961,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 
 				// Optional: recent chat history above welcome content when enabled
 				const showHistory = this.configurationService.getValue<boolean>(ChatConfiguration.EmptyStateHistoryEnabled);
-				if (showHistory) {
+				if (showHistory && !this._lockedToCodingAgent) {
 					this.renderWelcomeHistorySection();
 				}
 
@@ -996,7 +996,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			const container = dom.append(historyRoot, $('.chat-welcome-history'));
 			const header = dom.append(container, $('.chat-welcome-history-header'));
 			const headerTitle = dom.append(header, $('.chat-welcome-history-header-title'));
-			headerTitle.textContent = localize('chat.history.title', 'Chat History');
+			headerTitle.textContent = localize('chat.history.title', 'History');
 			const headerActions = dom.append(header, $('.chat-welcome-history-header-actions'));
 
 			const items = await this.chatService.getHistory();
@@ -1225,7 +1225,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 				},
 				{
 					icon: Codicon.newFolder,
-					label: localize('chatWidget.suggestedPrompts.newProject', "Create project"),
+					label: localize('chatWidget.suggestedPrompts.newProject', "Create Project"),
 					prompt: localize('chatWidget.suggestedPrompts.newProjectPrompt', "Create a #new Hello World project in TypeScript"),
 				}
 			];
@@ -1233,12 +1233,12 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			return [
 				{
 					icon: Codicon.debugAlt,
-					label: localize('chatWidget.suggestedPrompts.buildWorkspace', "Build workspace"),
+					label: localize('chatWidget.suggestedPrompts.buildWorkspace', "Build Workspace"),
 					prompt: localize('chatWidget.suggestedPrompts.buildWorkspacePrompt', "How do I build this workspace?"),
 				},
 				{
 					icon: Codicon.gear,
-					label: localize('chatWidget.suggestedPrompts.findConfig', "Show project config"),
+					label: localize('chatWidget.suggestedPrompts.findConfig', "Show Config"),
 					prompt: localize('chatWidget.suggestedPrompts.findConfigPrompt', "Where is the configuration for this project defined?"),
 				}
 			];
@@ -2165,7 +2165,8 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			parseResult = await this.promptsService.resolvePromptSlashCommand(agentSlashPromptPart.slashPromptCommand, CancellationToken.None);
 			if (parseResult) {
 				// add the prompt file to the context, but not sticky
-				requestInput.attachedContext.insertFirst(toPromptFileVariableEntry(parseResult.uri, PromptFileVariableKind.PromptFile, undefined, true));
+				const toolReferences = this.toolsService.toToolReferences(parseResult.variableReferences);
+				requestInput.attachedContext.insertFirst(toPromptFileVariableEntry(parseResult.uri, PromptFileVariableKind.PromptFile, undefined, true, toolReferences));
 
 				// remove the slash command from the input
 				requestInput.input = this.parsedInput.parts.filter(part => !(part instanceof ChatRequestSlashPromptPart)).map(part => part.text).join('').trim();
