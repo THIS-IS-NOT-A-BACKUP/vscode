@@ -13,7 +13,7 @@ import { URI } from '../../../../base/common/uri.js';
 import { IRelaxedExtensionDescription } from '../../../../platform/extensions/common/extensions.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 import { IEditableData } from '../../../common/views.js';
-import { IChatAgentRequest } from './chatAgents.js';
+import { IChatAgentAttachmentCapabilities, IChatAgentRequest } from './chatAgents.js';
 import { IChatProgress } from './chatService.js';
 
 export const enum ChatSessionStatus {
@@ -48,10 +48,12 @@ export interface IChatSessionsExtensionPoint {
 	readonly description: string;
 	readonly extensionDescription: IRelaxedExtensionDescription;
 	readonly when?: string;
-	readonly capabilities?: {
-		supportsFileAttachments?: boolean;
-		supportsToolAttachments?: boolean;
-	};
+	readonly icon?: string;
+	readonly welcomeTitle?: string;
+	readonly welcomeMessage?: string;
+	readonly welcomeTips?: string;
+	readonly inputPlaceholder?: string;
+	readonly capabilities?: IChatAgentAttachmentCapabilities;
 	readonly commands?: IChatSessionCommandContribution[];
 }
 export interface IChatSessionItem {
@@ -124,6 +126,18 @@ export interface IChatSessionsService {
 	getAllChatSessionContributions(): IChatSessionsExtensionPoint[];
 	canResolveItemProvider(chatSessionType: string): Promise<boolean>;
 	getAllChatSessionItemProviders(): IChatSessionItemProvider[];
+	getIconForSessionType(chatSessionType: string): ThemeIcon | undefined;
+	getWelcomeTitleForSessionType(chatSessionType: string): string | undefined;
+	getWelcomeMessageForSessionType(chatSessionType: string): string | undefined;
+	/**
+	 * Get the input placeholder for a specific session type
+	 */
+	getInputPlaceholderForSessionType(chatSessionType: string): string | undefined;
+
+	/**
+	 * Get the welcome tips for a specific session type
+	 */
+	getWelcomeTipsForSessionType(chatSessionType: string): string | undefined;
 	provideNewChatSessionItem(chatSessionType: string, options: {
 		request: IChatAgentRequest;
 		metadata?: any;
@@ -158,6 +172,11 @@ export interface IChatSessionsService {
 
 	getSessionOption(chatSessionType: string, sessionId: string, optionId: string): string | undefined;
 	setSessionOption(chatSessionType: string, sessionId: string, optionId: string, value: string): boolean;
+
+	/**
+	 * Get the capabilities for a specific session type
+	 */
+	getCapabilitiesForSessionType(chatSessionType: string): IChatAgentAttachmentCapabilities | undefined;
 }
 
 export const IChatSessionsService = createDecorator<IChatSessionsService>('chatSessionsService');
