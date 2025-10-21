@@ -78,7 +78,7 @@ import { ILanguageModelToolsService, IToolData, ToolSet } from '../common/langua
 import { ComputeAutomaticInstructions } from '../common/promptSyntax/computeAutomaticInstructions.js';
 import { PromptsConfig } from '../common/promptSyntax/config/config.js';
 import { PromptsType } from '../common/promptSyntax/promptTypes.js';
-import { IHandOff, ParsedPromptFile, PromptHeader } from '../common/promptSyntax/service/newPromptsParser.js';
+import { IHandOff, ParsedPromptFile, PromptHeader } from '../common/promptSyntax/promptFileParser.js';
 import { IPromptsService } from '../common/promptSyntax/service/promptsService.js';
 import { handleModeSwitch } from './actions/chatActions.js';
 import { ChatTreeItem, ChatViewId, IChatAcceptInputOptions, IChatAccessibilityService, IChatCodeBlockInfo, IChatFileTreeInfo, IChatListItemRendererOptions, IChatWidget, IChatWidgetService, IChatWidgetViewContext, IChatWidgetViewOptions } from './chat.js';
@@ -1092,7 +1092,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			let welcomeContent: IChatViewWelcomeContent;
 			const defaultAgent = this.chatAgentService.getDefaultAgent(this.location, this.input.currentModeKind);
 			let additionalMessage = defaultAgent?.metadata.additionalWelcomeMessage;
-			if (!additionalMessage) {
+			if (!additionalMessage && !this._lockedAgent) {
 				additionalMessage = this._getGenerateInstructionsMessage();
 			}
 			if (this.shouldShowChatSetup()) {
@@ -1715,6 +1715,12 @@ export class ChatWidget extends Disposable implements IChatWidget {
 	}
 
 	private renderChatSuggestNextWidget(): void {
+		// Skip rendering in coding agent sessions
+		if (this.isLockedToCodingAgent) {
+			this.chatSuggestNextWidget.hide();
+			return;
+		}
+
 		const items = this.viewModel?.getItems() ?? [];
 		if (!items.length) {
 			return;
@@ -2640,11 +2646,9 @@ export class ChatWidget extends Disposable implements IChatWidget {
 
 			const isUserQuery = !query;
 
-			if (!this.viewModel.editing) {
-				// process the prompt command
-				await this._applyPromptFileIfSet(requestInputs);
-				await this._autoAttachInstructions(requestInputs);
-			}
+			// process the prompt command
+			await this._applyPromptFileIfSet(requestInputs);
+			await this._autoAttachInstructions(requestInputs);
 
 			if (this.viewOptions.enableWorkingSet !== undefined && this.input.currentModeKind === ChatModeKind.Edit && !this.chatService.edits2Enabled) {
 				const uniqueWorkingSetEntries = new ResourceSet(); // NOTE: this is used for bookkeeping so the UI can avoid rendering references in the UI that are already shown in the working set
@@ -2957,7 +2961,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		this.agentInInput.set(!!currentAgent);
 	}
 
-	private async _applyPromptMetadata({ mode, tools, model }: PromptHeader, requestInput: IChatRequestInputOptions): Promise<void> {
+	private async _applyPromptMetadata({ agent: mode, tools, model }: PromptHeader, requestInput: IChatRequestInputOptions): Promise<void> {
 
 		const currentMode = this.input.currentModeObs.get();
 
@@ -2965,7 +2969,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			mode = ChatModeKind.Agent;
 		}
 
-		// switch to appropriate chat mode if needed
+		// switch to appropriate agent if needed
 		if (mode && mode !== currentMode.name) {
 			// Find the mode object to get its kind
 			const chatMode = this.chatModeService.findModeByName(mode);
