@@ -5,7 +5,7 @@
 
 import * as os from 'os';
 import * as path from 'path';
-import { Command, commands, Disposable, MessageOptions, Position, QuickPickItem, Range, SourceControlResourceState, TextDocumentShowOptions, TextEditor, Uri, ViewColumn, window, workspace, WorkspaceEdit, WorkspaceFolder, TimelineItem, env, Selection, TextDocumentContentProvider, InputBoxValidationSeverity, TabInputText, TabInputTextMerge, QuickPickItemKind, TextDocument, LogOutputChannel, l10n, Memento, UIKind, QuickInputButton, ThemeIcon, SourceControlHistoryItem, SourceControl, InputBoxValidationMessage, Tab, TabInputNotebook, QuickInputButtonLocation, languages, } from 'vscode';
+import { Command, commands, Disposable, MessageOptions, Position, QuickPickItem, Range, SourceControlResourceState, TextDocumentShowOptions, TextEditor, Uri, ViewColumn, window, workspace, WorkspaceEdit, WorkspaceFolder, TimelineItem, env, Selection, TextDocumentContentProvider, InputBoxValidationSeverity, TabInputText, TabInputTextMerge, QuickPickItemKind, TextDocument, LogOutputChannel, l10n, Memento, UIKind, QuickInputButton, ThemeIcon, SourceControlHistoryItem, SourceControl, InputBoxValidationMessage, Tab, TabInputNotebook, QuickInputButtonLocation, languages } from 'vscode';
 import TelemetryReporter from '@vscode/extension-telemetry';
 import { uniqueNamesGenerator, adjectives, animals, colors, NumberDictionary } from '@joaomoreno/unique-names-generator';
 import { ForcePushMode, GitErrorCodes, RefType, Status, CommitOptions, RemoteSourcePublisher, Remote, Branch, Ref } from './api/git';
@@ -116,7 +116,7 @@ class RefItem implements QuickPickItem {
 			case RefType.Head:
 				return `refs/heads/${this.ref.name}`;
 			case RefType.RemoteHead:
-				return `refs/remotes/${this.ref.remote}/${this.ref.name}`;
+				return `refs/remotes/${this.ref.name}`;
 			case RefType.Tag:
 				return `refs/tags/${this.ref.name}`;
 		}
@@ -3107,6 +3107,65 @@ export class CommandCenter {
 		const refName = historyItemRef.name.substring(index + 1);
 
 		await this._deleteBranch(repository, remoteName, refName, { remote: true });
+	}
+
+	@command('git.graph.compareRef', { repository: true })
+	async compareBranch(repository: Repository, historyItem?: SourceControlHistoryItem): Promise<void> {
+		if (!repository || !historyItem) {
+			return;
+		}
+
+		const config = workspace.getConfiguration('git');
+		const showRefDetails = config.get<boolean>('showReferenceDetails') === true;
+
+		const getRefPicks = async () => {
+			const refs = await repository.getRefs({ includeCommitDetails: showRefDetails });
+			const processors = [
+				new RefProcessor(RefType.Head, BranchItem),
+				new RefProcessor(RefType.RemoteHead, BranchItem),
+				new RefProcessor(RefType.Tag, BranchItem)
+			];
+
+			const itemsProcessor = new RefItemsProcessor(repository, processors);
+			return itemsProcessor.processRefs(refs);
+		};
+
+		const placeHolder = l10n.t('Select a reference to compare with');
+		const sourceRef = await this.pickRef(getRefPicks(), placeHolder);
+
+		if (!(sourceRef instanceof BranchItem) || !sourceRef.ref.commit) {
+			return;
+		}
+
+		if (historyItem.id === sourceRef.ref.commit) {
+			window.showInformationMessage(l10n.t('The selected references are the same.'));
+			return;
+		}
+
+		try {
+			const sourceCommit = sourceRef.ref.commit;
+			const changes = await repository.diffTrees(sourceCommit, historyItem.id);
+
+			if (changes.length === 0) {
+				window.showInformationMessage(l10n.t('The selected references have no differences.'));
+				return;
+			}
+
+			const resources = changes.map(change => toMultiFileDiffEditorUris(change, sourceCommit, historyItem.id));
+			const title = `${sourceRef.ref.name ?? sourceCommit} ↔ ${historyItem.references?.[0].name ?? historyItem.id}`;
+			const multiDiffSourceUri = Uri.from({
+				scheme: 'git-ref-compare',
+				path: `${repository.root}/${sourceCommit}..${historyItem.id}`
+			});
+
+			await commands.executeCommand('_workbench.openMultiDiffEditor', {
+				multiDiffSourceUri,
+				title,
+				resources
+			});
+		} catch (err) {
+			throw new Error(l10n.t('Failed to compare references: {0}', err.message ?? err));
+		}
 	}
 
 	@command('git.deleteRemoteBranch', { repository: true })

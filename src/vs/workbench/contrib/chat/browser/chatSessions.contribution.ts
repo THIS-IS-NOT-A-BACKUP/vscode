@@ -29,7 +29,7 @@ import { ExtensionsRegistry } from '../../../services/extensions/common/extensio
 import { ChatEditorInput } from '../browser/chatEditorInput.js';
 import { IChatAgentAttachmentCapabilities, IChatAgentData, IChatAgentRequest, IChatAgentService } from '../common/chatAgents.js';
 import { ChatContextKeys } from '../common/chatContextKeys.js';
-import { ChatSession, ChatSessionStatus, IChatSessionContentProvider, IChatSessionItem, IChatSessionItemProvider, IChatSessionProviderOptionGroup, IChatSessionsExtensionPoint, IChatSessionsService, SessionOptionsChangedCallback } from '../common/chatSessionsService.js';
+import { IChatSession, ChatSessionStatus, IChatSessionContentProvider, IChatSessionItem, IChatSessionItemProvider, IChatSessionProviderOptionGroup, IChatSessionsExtensionPoint, IChatSessionsService, SessionOptionsChangedCallback } from '../common/chatSessionsService.js';
 import { AGENT_SESSIONS_VIEWLET_ID, ChatAgentLocation, ChatModeKind } from '../common/constants.js';
 import { CHAT_CATEGORY } from './actions/chatActions.js';
 import { IChatEditorOptions } from './chatEditor.js';
@@ -201,7 +201,7 @@ class ContributedChatSessionData implements IDisposable {
 	}
 
 	constructor(
-		readonly session: ChatSession,
+		readonly session: IChatSession,
 		readonly chatSessionType: string,
 		readonly resource: URI,
 		readonly options: Record<string, string> | undefined,
@@ -323,7 +323,7 @@ export class ChatSessionsService extends Disposable implements IChatSessionsServ
 
 	private async updateInProgressStatus(chatSessionType: string): Promise<void> {
 		try {
-			const items = await this.provideChatSessionItems(chatSessionType, CancellationToken.None);
+			const items = await this.getChatSessionItems(chatSessionType, CancellationToken.None);
 			const inProgress = items.filter(item => item.status === ChatSessionStatus.InProgress);
 			this.reportInProgress(chatSessionType, inProgress.length);
 		} catch (error) {
@@ -640,7 +640,7 @@ export class ChatSessionsService extends Disposable implements IChatSessionsServ
 		});
 	}
 
-	async canResolveItemProvider(chatViewType: string): Promise<boolean> {
+	async hasChatSessionItemProvider(chatViewType: string): Promise<boolean> {
 		await this._extensionService.whenInstalledExtensionsRegistered();
 		const resolvedType = this._resolveToPrimaryType(chatViewType);
 		if (resolvedType) {
@@ -677,8 +677,17 @@ export class ChatSessionsService extends Disposable implements IChatSessionsServ
 		return this._contentProviders.has(chatSessionResource.scheme);
 	}
 
-	public async provideChatSessionItems(chatSessionType: string, token: CancellationToken): Promise<IChatSessionItem[]> {
-		if (!(await this.canResolveItemProvider(chatSessionType))) {
+	async getAllChatSessionItems(token: CancellationToken): Promise<Array<{ readonly chatSessionType: string; readonly items: IChatSessionItem[] }>> {
+		return Promise.all(Array.from(this.getAllChatSessionContributions(), async contrib => {
+			return {
+				chatSessionType: contrib.type,
+				items: await this.getChatSessionItems(contrib.type, token)
+			};
+		}));
+	}
+
+	private async getChatSessionItems(chatSessionType: string, token: CancellationToken): Promise<IChatSessionItem[]> {
+		if (!(await this.hasChatSessionItemProvider(chatSessionType))) {
 			return [];
 		}
 
@@ -755,11 +764,11 @@ export class ChatSessionsService extends Disposable implements IChatSessionsServ
 	 * @param token A cancellation token
 	 * @returns A session ID for the newly created session
 	 */
-	public async provideNewChatSessionItem(chatSessionType: string, options: {
+	public async getNewChatSessionItem(chatSessionType: string, options: {
 		request: IChatAgentRequest;
 		metadata?: any;
 	}, token: CancellationToken): Promise<IChatSessionItem> {
-		if (!(await this.canResolveItemProvider(chatSessionType))) {
+		if (!(await this.hasChatSessionItemProvider(chatSessionType))) {
 			throw Error(`Cannot find provider for ${chatSessionType}`);
 		}
 
@@ -778,7 +787,7 @@ export class ChatSessionsService extends Disposable implements IChatSessionsServ
 		return chatSessionItem;
 	}
 
-	public async provideChatSessionContent(sessionResource: URI, token: CancellationToken): Promise<ChatSession> {
+	public async getOrCreateChatSession(sessionResource: URI, token: CancellationToken): Promise<IChatSession> {
 		if (!(await this.canResolveChatSession(sessionResource))) {
 			throw Error(`Can not find provider for ${sessionResource}`);
 		}
