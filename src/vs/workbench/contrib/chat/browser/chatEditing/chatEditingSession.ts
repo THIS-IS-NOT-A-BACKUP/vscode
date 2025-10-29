@@ -13,7 +13,7 @@ import { Disposable, DisposableStore, dispose } from '../../../../../base/common
 import { ResourceMap } from '../../../../../base/common/map.js';
 import { autorun, IObservable, IReader, ITransaction, observableValue, transaction } from '../../../../../base/common/observable.js';
 import { isEqual } from '../../../../../base/common/resources.js';
-import { Mutable } from '../../../../../base/common/types.js';
+import { hasKey, Mutable } from '../../../../../base/common/types.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { IBulkEditService } from '../../../../../editor/browser/services/bulkEditService.js';
 import { Range } from '../../../../../editor/common/core/range.js';
@@ -26,6 +26,7 @@ import { localize } from '../../../../../nls.js';
 import { AccessibilitySignal, IAccessibilitySignalService } from '../../../../../platform/accessibilitySignal/browser/accessibilitySignalService.js';
 import { EditorActivation } from '../../../../../platform/editor/common/editor.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
+import { ILogService } from '../../../../../platform/log/common/log.js';
 import { DiffEditorInput } from '../../../../common/editor/diffEditorInput.js';
 import { IEditorGroupsService } from '../../../../services/editor/common/editorGroupsService.js';
 import { IEditorService } from '../../../../services/editor/common/editorService.js';
@@ -131,6 +132,7 @@ export class ChatEditingSession extends Disposable implements IChatEditingSessio
 		@IChatService private readonly _chatService: IChatService,
 		@INotebookService private readonly _notebookService: INotebookService,
 		@IAccessibilitySignalService private readonly _accessibilitySignalService: IAccessibilitySignalService,
+		@ILogService private readonly _logService: ILogService,
 	) {
 		super();
 		this._timeline = this._instantiationService.createInstance(
@@ -315,11 +317,25 @@ export class ChatEditingSession extends Disposable implements IChatEditingSessio
 
 		const applicableEntries = this._entriesObs.get()
 			.filter(e => uris.length === 0 || uris.some(u => isEqual(u, e.modifiedURI)))
-			.filter(e => !e.isCurrentlyBeingModifiedBy.get());
+			.filter(e => !e.isCurrentlyBeingModifiedBy.get())
+			.filter(e => e.state.get() === ModifiedFileEntryState.Modified);
 
-		for (const entry of applicableEntries) {
-			await entry[action]();
+		if (applicableEntries.length === 0) {
+			return 0;
 		}
+
+		// Perform all I/O operations in parallel, each resolving to a state transition callback
+		const method = action === 'accept' ? 'acceptDeferred' : 'rejectDeferred';
+		const transitionCallbacks = await Promise.all(
+			applicableEntries.map(entry => entry[method]().catch(err => {
+				this._logService.error(`Error calling ${method} on entry ${entry.modifiedURI}`, err);
+			}))
+		);
+
+		// Execute all state transitions atomically in a single transaction
+		transaction(tx => {
+			transitionCallbacks.forEach(callback => callback?.(tx));
+		});
 
 		return applicableEntries.length;
 	}
@@ -456,7 +472,7 @@ export class ChatEditingSession extends Disposable implements IChatEditingSessio
 
 	private async _recordEditOperations(entry: AbstractChatEditingModifiedFileEntry, resource: URI, edits: (TextEdit | ICellEditOperation)[], responseModel: IChatResponseModel): Promise<void> {
 		// Determine if these are text edits or notebook edits
-		const isNotebookEdits = edits.length > 0 && 'cells' in edits[0];
+		const isNotebookEdits = edits.length > 0 && hasKey(edits[0], { cells: true });
 
 		if (isNotebookEdits) {
 			// Record notebook edit operation
