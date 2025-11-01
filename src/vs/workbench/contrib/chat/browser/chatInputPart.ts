@@ -184,15 +184,15 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 
 	readonly selectedToolsModel: ChatSelectedTools;
 
-	public getAttachedContext(sessionId: string) {
+	public getAttachedContext(sessionResource: URI) {
 		const contextArr = new ChatRequestVariableSet();
 		contextArr.add(...this.attachmentModel.attachments);
 		return contextArr;
 	}
 
-	public getAttachedAndImplicitContext(sessionId: string): ChatRequestVariableSet {
+	public getAttachedAndImplicitContext(sessionResource: URI): ChatRequestVariableSet {
 
-		const contextArr = this.getAttachedContext(sessionId);
+		const contextArr = this.getAttachedContext(sessionResource);
 
 		if ((this.implicitContext?.enabled && this.implicitContext?.value) || (isLocation(this.implicitContext?.value) && this.configurationService.getValue<boolean>('chat.implicitContext.suggestedContext'))) {
 			const implicitChatVariables = this.implicitContext.toBaseEntries();
@@ -840,10 +840,10 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		}
 		if (verbose) {
 			return kbLabel
-				? localize('actions.chat.accessibiltyHelp', "Chat Input {0}{1} Press Enter to send out the request. Use {2} for Chat Accessibility Help.", modelInfo, modeLabel, kbLabel)
-				: localize('chatInput.accessibilityHelpNoKb', "Chat Input {0}{1} Press Enter to send out the request. Use the Chat Accessibility Help command for more information.", modelInfo, modeLabel);
+				? localize('actions.chat.accessibiltyHelp', "Chat Input {0}{1} Press Enter to send out the request. Use {2} for Chat Accessibility Help.", modeLabel, modelInfo, kbLabel)
+				: localize('chatInput.accessibilityHelpNoKb', "Chat Input {0}{1} Press Enter to send out the request. Use the Chat Accessibility Help command for more information.", modeLabel, modelInfo);
 		} else {
-			return localize('chatInput.accessibilityHelp', "Chat Input {0}{1}.", modelInfo, modeLabel);
+			return localize('chatInput.accessibilityHelp', "Chat Input {0}{1}.", modeLabel, modelInfo);
 		}
 	}
 
