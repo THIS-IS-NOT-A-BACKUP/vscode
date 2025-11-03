@@ -671,27 +671,19 @@ export default tseslint.config(
 			'src/vs/editor/contrib/find/browser/findWidgetSearchHistory.ts',
 			'src/vs/editor/contrib/find/browser/replaceWidgetHistory.ts',
 			'src/vs/editor/contrib/folding/browser/folding.ts',
-			'src/vs/editor/contrib/format/browser/format.ts',
 			'src/vs/editor/contrib/gotoSymbol/browser/goToCommands.ts',
 			'src/vs/editor/contrib/gotoSymbol/browser/symbolNavigation.ts',
 			'src/vs/editor/contrib/hover/browser/hoverActions.ts',
 			'src/vs/editor/contrib/inlineCompletions/browser/structuredLogger.ts',
 			'src/vs/editor/contrib/inlineCompletions/browser/utils.ts',
 			'src/vs/editor/contrib/smartSelect/browser/smartSelect.ts',
-			'src/vs/editor/contrib/snippet/browser/snippetParser.ts',
 			'src/vs/editor/contrib/stickyScroll/browser/stickyScrollModelProvider.ts',
-			'src/vs/editor/contrib/suggest/browser/suggest.ts',
-			'src/vs/editor/contrib/suggest/browser/suggestAlternatives.ts',
-			'src/vs/editor/contrib/suggest/browser/suggestCommitCharacters.ts',
-			'src/vs/editor/contrib/suggest/browser/suggestController.ts',
 			'src/vs/editor/contrib/unicodeHighlighter/browser/unicodeHighlighter.ts',
 			'src/vs/editor/contrib/wordHighlighter/browser/wordHighlighter.ts',
 			'src/vs/editor/standalone/common/monarch/monarchCommon.ts',
 			'src/vs/editor/standalone/common/monarch/monarchCompile.ts',
 			'src/vs/editor/standalone/common/monarch/monarchLexer.ts',
 			'src/vs/editor/standalone/common/monarch/monarchTypes.ts',
-			'src/vs/editor/contrib/gotoSymbol/browser/peek/referencesController.ts',
-			'src/vs/editor/contrib/gotoSymbol/browser/peek/referencesWidget.ts',
 			'src/vs/editor/contrib/inlineCompletions/browser/controller/commands.ts',
 			'src/vs/editor/contrib/inlineCompletions/browser/model/inlineCompletionsModel.ts',
 			'src/vs/editor/contrib/inlineCompletions/browser/model/typingSpeed.ts',
@@ -741,19 +733,8 @@ export default tseslint.config(
 			'src/vs/workbench/api/common/extHostTreeViews.ts',
 			'src/vs/workbench/api/common/extHostTypeConverters.ts',
 			'src/vs/workbench/api/common/extHostTypes.ts',
-			'src/vs/workbench/api/common/extHostTypes/diagnostic.ts',
 			'src/vs/workbench/api/common/extHostTypes/es5ClassCompat.ts',
 			'src/vs/workbench/api/common/extHostTypes/location.ts',
-			'src/vs/workbench/api/common/extHostTypes/markdownString.ts',
-			'src/vs/workbench/api/common/extHostTypes/notebooks.ts',
-			'src/vs/workbench/api/common/extHostTypes/position.ts',
-			'src/vs/workbench/api/common/extHostTypes/range.ts',
-			'src/vs/workbench/api/common/extHostTypes/selection.ts',
-			'src/vs/workbench/api/common/extHostTypes/snippetString.ts',
-			'src/vs/workbench/api/common/extHostTypes/snippetTextEdit.ts',
-			'src/vs/workbench/api/common/extHostTypes/symbolInformation.ts',
-			'src/vs/workbench/api/common/extHostTypes/textEdit.ts',
-			'src/vs/workbench/api/common/extHostTypes/workspaceEdit.ts',
 			'src/vs/workbench/api/common/extHostWebview.ts',
 			'src/vs/workbench/api/common/extHostWebviewMessaging.ts',
 			'src/vs/workbench/api/common/extHostWebviewPanels.ts',
@@ -1480,6 +1461,34 @@ export default tseslint.config(
 				{
 					'selector': `MemberExpression[object.name='document'][property.name='execCommand']`,
 					'message': 'Use <targetWindow>.document.execCommand to support multi-window scenarios. Resolve targetWindow with DOM.getWindow(element) or DOM.getActiveWindow() or use the predefined mainWindow constant.'
+				},
+				{
+					'selector': 'CallExpression[callee.property.name=\'querySelector\']',
+					'message': 'querySelector should not be used as relying on selectors is very fragile. Use dom.ts h() to build your elements and access them directly.'
+				},
+				{
+					'selector': 'CallExpression[callee.property.name=\'querySelectorAll\']',
+					'message': 'querySelectorAll should not be used as relying on selectors is very fragile. Use dom.ts h() to build your elements and access them directly.'
+				},
+				{
+					'selector': 'CallExpression[callee.property.name=\'getElementById\']',
+					'message': 'getElementById should not be used as relying on selectors is very fragile. Use dom.ts h() to build your elements and access them directly.'
+				},
+				{
+					'selector': 'CallExpression[callee.property.name=\'getElementsByClassName\']',
+					'message': 'getElementsByClassName should not be used as relying on selectors is very fragile. Use dom.ts h() to build your elements and access them directly.'
+				},
+				{
+					'selector': 'CallExpression[callee.property.name=\'getElementsByTagName\']',
+					'message': 'getElementsByTagName should not be used as relying on selectors is very fragile. Use dom.ts h() to build your elements and access them directly.'
+				},
+				{
+					'selector': 'CallExpression[callee.property.name=\'getElementsByName\']',
+					'message': 'getElementsByName should not be used as relying on selectors is very fragile. Use dom.ts h() to build your elements and access them directly.'
+				},
+				{
+					'selector': 'CallExpression[callee.property.name=\'getElementsByTagNameNS\']',
+					'message': 'getElementsByTagNameNS should not be used as relying on selectors is very fragile. Use dom.ts h() to build your elements and access them directly.'
 				}
 			],
 			'no-restricted-globals': [
@@ -1640,145 +1649,6 @@ export default tseslint.config(
 				{
 					'name': 'visualViewport',
 					'message': 'Use <targetWindow>.visualViewport to support multi-window scenarios. Resolve targetWindow with DOM.getWindow(element) or DOM.getActiveWindow() or use the predefined mainWindow constant.'
-				}
-			]
-		}
-	},
-	// browser/electron-browser layer
-	{
-		files: [
-			'src/**/{browser,electron-browser}/**/*.ts'
-		],
-		ignores: [
-			// Base
-			'src/vs/base/browser/dom.ts',
-			'src/vs/base/browser/markdownRenderer.ts',
-			'src/vs/base/browser/ui/button/button.ts',
-			'src/vs/base/browser/ui/dialog/dialog.ts',
-			'src/vs/base/browser/ui/iconLabel/iconLabel.ts',
-			'src/vs/base/browser/ui/list/listWidget.ts',
-			'src/vs/base/browser/ui/sash/sash.ts',
-			'src/vs/base/browser/ui/splitview/paneview.ts',
-			// Code
-			'src/vs/code/browser/workbench/workbench.ts',
-			// Editor
-			'src/vs/editor/browser/controller/editContext/native/debugEditContext.ts',
-			'src/vs/editor/browser/widget/markdownRenderer/browser/editorMarkdownCodeBlockRenderer.ts',
-			'src/vs/editor/contrib/documentSymbols/browser/outlineModel.ts',
-			'src/vs/editor/contrib/find/browser/findWidget.ts',
-			'src/vs/editor/contrib/hover/browser/contentHoverWidget.ts',
-			'src/vs/editor/contrib/hover/browser/glyphHoverWidget.ts',
-			'src/vs/editor/contrib/inlineCompletions/browser/view/inlineEdits/inlineEditsViews/debugVisualization.ts',
-			'src/vs/editor/contrib/parameterHints/browser/parameterHintsWidget.ts',
-			'src/vs/editor/test/browser/controller/imeRecorder.ts',
-			// Platform
-			'src/vs/platform/actionWidget/browser/actionList.ts',
-			'src/vs/platform/dnd/browser/dnd.ts',
-			'src/vs/platform/quickinput/browser/quickInputList.ts',
-			// Workbench
-			'src/vs/workbench/browser/actions/listCommands.ts',
-			'src/vs/workbench/browser/layout.ts',
-			'src/vs/workbench/browser/parts/titlebar/titlebarPart.ts',
-			'src/vs/workbench/browser/parts/views/treeView.ts',
-			'src/vs/workbench/browser/style.ts',
-			'src/vs/workbench/contrib/chat/browser/actions/chatAccessibilityActions.ts',
-			'src/vs/workbench/contrib/chat/browser/actions/chatCopyActions.ts',
-			'src/vs/workbench/contrib/chat/browser/agentSessions/agentSessionsViewer.ts',
-			'src/vs/workbench/contrib/chat/browser/chatAttachmentWidgets.ts',
-			'src/vs/workbench/contrib/chat/browser/chatContentMarkdownRenderer.ts',
-			'src/vs/workbench/contrib/chat/browser/chatContentParts/chatAttachmentsContentPart.ts',
-			'src/vs/workbench/contrib/chat/browser/chatContentParts/chatChangesSummaryPart.ts',
-			'src/vs/workbench/contrib/chat/browser/chatContentParts/chatMarkdownContentPart.ts',
-			'src/vs/workbench/contrib/chat/browser/chatContentParts/chatMcpServersInteractionContentPart.ts',
-			'src/vs/workbench/contrib/chat/browser/chatContentParts/chatMultiDiffContentPart.ts',
-			'src/vs/workbench/contrib/chat/browser/chatContentParts/chatReferencesContentPart.ts',
-			'src/vs/workbench/contrib/chat/browser/chatContentParts/chatThinkingContentPart.ts',
-			'src/vs/workbench/contrib/chat/browser/chatContentParts/toolInvocationParts/chatTerminalToolProgressPart.ts',
-			'src/vs/workbench/contrib/chat/browser/chatEditing/simpleBrowserEditorOverlay.ts',
-			'src/vs/workbench/contrib/chat/browser/chatEditor.ts',
-			'src/vs/workbench/contrib/chat/browser/chatInlineAnchorWidget.ts',
-			'src/vs/workbench/contrib/chat/browser/chatInputPart.ts',
-			'src/vs/workbench/contrib/chat/browser/chatMarkdownDecorationsRenderer.ts',
-			'src/vs/workbench/contrib/chat/browser/chatSessions/view/sessionsTreeRenderer.ts',
-			'src/vs/workbench/contrib/chat/browser/viewsWelcome/chatViewWelcomeController.ts',
-			'src/vs/workbench/contrib/codeEditor/browser/emptyTextEditorHint/emptyTextEditorHint.ts',
-			'src/vs/workbench/contrib/codeEditor/browser/suggestEnabledInput/suggestEnabledInput.ts',
-			'src/vs/workbench/contrib/comments/browser/commentsTreeViewer.ts',
-			'src/vs/workbench/contrib/files/browser/views/explorerView.ts',
-			'src/vs/workbench/contrib/files/browser/views/explorerViewer.ts',
-			'src/vs/workbench/contrib/files/browser/views/openEditorsView.ts',
-			'src/vs/workbench/contrib/issue/browser/baseIssueReporterService.ts',
-			'src/vs/workbench/contrib/issue/browser/issueReporterService.ts',
-			'src/vs/workbench/contrib/issue/electron-browser/issueReporterService.ts',
-			'src/vs/workbench/contrib/languageStatus/browser/languageStatus.ts',
-			'src/vs/workbench/contrib/markdown/browser/markedKatexSupport.ts',
-			'src/vs/workbench/contrib/markers/browser/markersTable.ts',
-			'src/vs/workbench/contrib/notebook/browser/contrib/troubleshoot/layout.ts',
-			'src/vs/workbench/contrib/notebook/browser/view/cellParts/cellDragRenderer.ts',
-			'src/vs/workbench/contrib/notebook/browser/view/cellParts/cellExecution.ts',
-			'src/vs/workbench/contrib/preferences/browser/settingsEditor2.ts',
-			'src/vs/workbench/contrib/preferences/browser/settingsTree.ts',
-			'src/vs/workbench/contrib/processExplorer/browser/processExplorerControl.ts',
-			'src/vs/workbench/contrib/scm/browser/scmHistoryViewPane.ts',
-			'src/vs/workbench/contrib/scm/browser/scmRepositoryRenderer.ts',
-			'src/vs/workbench/contrib/scm/browser/scmViewPane.ts',
-			'src/vs/workbench/contrib/search/browser/searchResultsView.ts',
-			'src/vs/workbench/contrib/search/browser/searchWidget.ts',
-			'src/vs/workbench/contrib/splash/browser/partsSplash.ts',
-			'src/vs/workbench/contrib/terminal/browser/terminalTabsList.ts',
-			'src/vs/workbench/contrib/terminal/browser/xterm/decorationAddon.ts',
-			'src/vs/workbench/contrib/terminal/browser/xterm/xtermTerminal.ts',
-			'src/vs/workbench/contrib/terminalContrib/commandGuide/browser/terminal.commandGuide.contribution.ts',
-			'src/vs/workbench/contrib/terminalContrib/stickyScroll/browser/terminalStickyScrollOverlay.ts',
-			'src/vs/workbench/contrib/terminalContrib/suggest/browser/terminal.suggest.contribution.ts',
-			'src/vs/workbench/contrib/terminalContrib/suggest/browser/terminalSuggestAddon.ts',
-			'src/vs/workbench/contrib/testing/test/browser/testObjectTree.ts',
-			'src/vs/workbench/contrib/webview/electron-browser/webviewCommands.ts',
-			'src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.ts',
-			'src/vs/workbench/contrib/welcomeWalkthrough/browser/walkThroughPart.ts',
-			'src/vs/workbench/services/driver/browser/driver.ts',
-			'src/vs/workbench/services/extensionManagement/browser/builtinExtensionsScannerService.ts',
-			'src/vs/workbench/services/themes/browser/workbenchThemeService.ts',
-			// Tests
-			'**/*.test.ts',
-			'**/*.integrationTest.ts'
-		],
-		languageOptions: {
-			parser: tseslint.parser,
-		},
-		plugins: {
-			'local': pluginLocal,
-		},
-		rules: {
-			'no-restricted-syntax': [
-				'warn',
-				{
-					'selector': 'CallExpression[callee.property.name=\'querySelector\']',
-					'message': 'querySelector should not be used. Use dom.ts h() to build your elements and access them directly.'
-				},
-				{
-					'selector': 'CallExpression[callee.property.name=\'querySelectorAll\']',
-					'message': 'querySelectorAll should not be used. Use dom.ts h() to build your elements and access them directly.'
-				},
-				{
-					'selector': 'CallExpression[callee.property.name=\'getElementById\']',
-					'message': 'getElementById should not be used. Use dom.ts h() to build your elements and access them directly.'
-				},
-				{
-					'selector': 'CallExpression[callee.property.name=\'getElementsByClassName\']',
-					'message': 'getElementsByClassName should not be used. Use dom.ts h() to build your elements and access them directly.'
-				},
-				{
-					'selector': 'CallExpression[callee.property.name=\'getElementsByTagName\']',
-					'message': 'getElementsByTagName should not be used. Use dom.ts h() to build your elements and access them directly.'
-				},
-				{
-					'selector': 'CallExpression[callee.property.name=\'getElementsByName\']',
-					'message': 'getElementsByName should not be used. Use dom.ts h() to build your elements and access them directly.'
-				},
-				{
-					'selector': 'CallExpression[callee.property.name=\'getElementsByTagNameNS\']',
-					'message': 'getElementsByTagNameNS should not be used. Use dom.ts h() to build your elements and access them directly.'
 				}
 			]
 		}
