@@ -95,6 +95,10 @@ export function isCellTextEditOperation(value: unknown): value is ICellTextEditO
 	return !!candidate && !!candidate.edit && !!candidate.uri && URI.isUri(candidate.uri);
 }
 
+export function isCellTextEditOperationArray(value: ICellTextEditOperation[] | ICellEditOperation[]): value is ICellTextEditOperation[] {
+	return value.some(isCellTextEditOperation);
+}
+
 export interface ICellTextEditOperation {
 	edit: TextEdit;
 	uri: URI;
@@ -102,7 +106,7 @@ export interface ICellTextEditOperation {
 
 export interface IChatNotebookEditGroup {
 	uri: URI;
-	edits: (ICellTextEditOperation | ICellEditOperation)[];
+	edits: (ICellTextEditOperation[] | ICellEditOperation[])[];
 	state?: IChatTextEditGroupState;
 	kind: 'notebookEditGroup';
 	done: boolean | undefined;
@@ -1506,10 +1510,12 @@ export class ChatModel extends Disposable implements IChatModel {
 		});
 	}
 
-	startEditingSession(isGlobalEditingSession?: boolean): void {
-		const editingSessionPromise = isGlobalEditingSession ?
-			this.chatEditingService.startOrContinueGlobalEditingSession(this) :
-			this.chatEditingService.createEditingSession(this);
+	startEditingSession(isGlobalEditingSession?: boolean, transferFromSession?: IChatEditingSession): void {
+		const editingSessionPromise = transferFromSession
+			? this.chatEditingService.transferEditingSession(this, transferFromSession)
+			: isGlobalEditingSession ?
+				this.chatEditingService.startOrContinueGlobalEditingSession(this) :
+				this.chatEditingService.createEditingSession(this);
 		this._editingSession = new ObservablePromise(editingSessionPromise);
 		this._editingSession.promise.then(editingSession => {
 			this._store.isDisposed ? editingSession.dispose() : this._register(editingSession);

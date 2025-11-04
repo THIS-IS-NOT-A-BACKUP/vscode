@@ -268,7 +268,7 @@ configurationRegistry.registerConfiguration({
 				'**/.vscode/*.json': false,
 				'**/.git/**': false,
 				'**/{package.json,package-lock.json,server.xml,build.rs,web.config,.gitattributes,.env}': false,
-				'**/*.{csproj,fsproj,vbproj}': false,
+				'**/*.{csproj,fsproj,vbproj,vcxproj,proj,targets,props}': false,
 			},
 			markdownDescription: nls.localize('chat.tools.autoApprove.edits', "Controls whether edits made by chat are automatically approved. The default is to approve all edits except those made to certain files which have the potential to cause immediate unintended side-effects, such as `**/.vscode/*.json`.\n\nSet to `true` to automatically approve edits to matching files, `false` to always require explicit approval. The last pattern matching a given file will determine whether the edit is automatically approved."),
 			type: 'object',
@@ -697,7 +697,7 @@ configurationRegistry.registerConfiguration({
 				nls.localize('chat.agent.thinking.collapsedTools.all', "All tool calls are added into the collapsible thinking section."),
 				nls.localize('chat.agent.thinking.collapsedTools.readOnly', "Only read-only tool calls are added into the collapsible thinking section."),
 			],
-			markdownDescription: nls.localize('chat.agent.thinking.collapsedTools', "When enabled, tool calls are added into the collapsible thinking section according to the selected mode. This setting only applies when `#chat.agent.thinkingStyle#` is set to `fixedScrolling`."),
+			markdownDescription: nls.localize('chat.agent.thinking.collapsedTools', "When enabled, tool calls are added into the collapsible thinking section according to the selected mode."),
 			tags: ['experimental'],
 		},
 		'chat.disableAIFeatures': {
