@@ -1752,6 +1752,7 @@ export interface SCMArtifactGroupDto {
 	readonly id: string;
 	readonly name: string;
 	readonly icon?: UriComponents | { light: UriComponents; dark: UriComponents } | ThemeIcon;
+	readonly supportsFolders?: boolean;
 }
 
 export interface SCMArtifactDto {
@@ -3252,6 +3253,7 @@ export interface MainThreadChatStatusShape {
 }
 
 export type IChatSessionHistoryItemDto = {
+	id?: string;
 	type: 'request';
 	prompt: string;
 	participant: string;
