@@ -456,8 +456,8 @@ export class ChatWidget extends Disposable implements IChatWidget {
 				this.onDidChangeItems();
 			}
 
-			if (e.affectsConfiguration(ChatConfiguration.ChatViewWelcomeBannerEnabled)) {
-				const showWelcome = this.configurationService.getValue<boolean>(ChatConfiguration.ChatViewWelcomeBannerEnabled) !== false;
+			if (e.affectsConfiguration(ChatConfiguration.ChatViewWelcomeEnabled)) {
+				const showWelcome = this.configurationService.getValue<boolean>(ChatConfiguration.ChatViewWelcomeEnabled) !== false;
 				if (this.welcomePart.value) {
 					this.welcomePart.value.setVisible(showWelcome);
 					if (showWelcome) {
@@ -676,7 +676,9 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			this.container.style.setProperty('--vscode-chat-font-family', fontFamily);
 			this.container.style.fontSize = `${fontSize}px`;
 
-			this.tree.rerender();
+			if (this.visible) {
+				this.tree.rerender();
+			}
 		}));
 
 		this._register(this.editorOptions.onDidChange(() => this.onDidStyleChange()));
@@ -932,7 +934,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 							getAnchor: () => new StandardMouseEvent(dom.getWindow(this.welcomeMessageContainer), e)
 						});
 					});
-					this.welcomePart.value.setVisible(this.configurationService.getValue<boolean>(ChatConfiguration.ChatViewWelcomeBannerEnabled) !== false);
+					this.welcomePart.value.setVisible(this.configurationService.getValue<boolean>(ChatConfiguration.ChatViewWelcomeEnabled) !== false);
 				}
 			}
 
@@ -2075,7 +2077,9 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		const agent = this.chatAgentService.getAgent(agentId);
 		this._updateAgentCapabilitiesContextKeys(agent);
 		this.renderer.updateOptions({ restorable: false, editable: false, noFooter: true, progressMessageAtBottomOfResponse: true });
-		this.tree.rerender();
+		if (this.visible) {
+			this.tree.rerender();
+		}
 	}
 
 	unlockFromCodingAgent(): void {
@@ -2093,7 +2097,9 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		}
 		this.inputEditor.updateOptions({ placeholder: undefined });
 		this.renderer.updateOptions({ restorable: true, editable: true, noFooter: false, progressMessageAtBottomOfResponse: mode => mode !== ChatModeKind.Ask });
-		this.tree.rerender();
+		if (this.visible) {
+			this.tree.rerender();
+		}
 	}
 
 	get isLockedToCodingAgent(): boolean {
@@ -2271,6 +2277,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		});
 
 		if (!result) {
+			this.chatAccessibilityService.disposeRequest(requestId);
 			return;
 		}
 
@@ -2501,7 +2508,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			const agent = this.chatModeService.findModeByName(agentName);
 			if (agent) {
 				if (currentAgent.kind !== agent.kind) {
-					const chatModeCheck = await this.instantiationService.invokeFunction(handleModeSwitch, currentAgent.kind, agent.kind, this.viewModel?.model.getRequests().length ?? 0, this.viewModel?.model.editingSession);
+					const chatModeCheck = await this.instantiationService.invokeFunction(handleModeSwitch, currentAgent.kind, agent.kind, this.viewModel?.model.getRequests().length ?? 0, this.viewModel?.model);
 					if (!chatModeCheck) {
 						return;
 					}

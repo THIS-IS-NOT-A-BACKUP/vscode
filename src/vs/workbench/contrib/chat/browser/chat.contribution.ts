@@ -367,7 +367,7 @@ configurationRegistry.registerConfiguration({
 				mode: 'auto'
 			}
 		},
-		[ChatConfiguration.ChatViewWelcomeBannerEnabled]: {
+		[ChatConfiguration.ChatViewWelcomeEnabled]: {
 			type: 'boolean',
 			default: true,
 			description: nls.localize('chat.welcome.enabled', "Show welcome banner when chat is empty."),
@@ -785,15 +785,6 @@ configurationRegistry.registerConfiguration({
 		'chat.allowAnonymousAccess': { // TODO@bpasero remove me eventually
 			type: 'boolean',
 			description: nls.localize('chat.allowAnonymousAccess', "Controls whether anonymous access is allowed in chat."),
-			default: false,
-			tags: ['experimental'],
-			experiment: {
-				mode: 'auto'
-			}
-		},
-		'chat.signInWithAlternateScopes': { // TODO@bpasero remove me eventually
-			type: 'boolean',
-			description: nls.localize('chat.signInWithAlternateScopes', "Controls whether sign-in with alternate scopes is used."),
 			default: false,
 			tags: ['experimental'],
 			experiment: {
