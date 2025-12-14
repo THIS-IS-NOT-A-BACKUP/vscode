@@ -362,6 +362,9 @@ export class AgentSessionRenderer implements ICompressibleTreeRenderer<IAgentSes
 interface IAgentSessionSectionTemplate {
 	readonly container: HTMLElement;
 	readonly label: HTMLSpanElement;
+	readonly toolbar: MenuWorkbenchToolBar;
+	readonly contextKeyService: IContextKeyService;
+	readonly disposables: IDisposable;
 }
 
 export class AgentSessionSectionRenderer implements ICompressibleTreeRenderer<IAgentSessionSection, FuzzyScore, IAgentSessionSectionTemplate> {
@@ -370,24 +373,47 @@ export class AgentSessionSectionRenderer implements ICompressibleTreeRenderer<IA
 
 	readonly templateId = AgentSessionSectionRenderer.TEMPLATE_ID;
 
+	constructor(
+		@IInstantiationService private readonly instantiationService: IInstantiationService,
+		@IContextKeyService private readonly contextKeyService: IContextKeyService,
+	) { }
+
 	renderTemplate(container: HTMLElement): IAgentSessionSectionTemplate {
+		const disposables = new DisposableStore();
+
 		const elements = h(
 			'div.agent-session-section@container',
 			[
-				h('span.agent-session-section-label@label')
+				h('span.agent-session-section-label@label'),
+				h('div.agent-session-section-toolbar@toolbar')
 			]
 		);
+
+		const contextKeyService = disposables.add(this.contextKeyService.createScoped(elements.container));
+		const scopedInstantiationService = disposables.add(this.instantiationService.createChild(new ServiceCollection([IContextKeyService, contextKeyService])));
+		const toolbar = disposables.add(scopedInstantiationService.createInstance(MenuWorkbenchToolBar, elements.toolbar, MenuId.AgentSessionSectionToolbar, {
+			menuOptions: { shouldForwardArgs: true },
+		}));
 
 		container.appendChild(elements.container);
 
 		return {
 			container: elements.container,
 			label: elements.label,
+			toolbar,
+			contextKeyService,
+			disposables
 		};
 	}
 
 	renderElement(element: ITreeNode<IAgentSessionSection, FuzzyScore>, index: number, template: IAgentSessionSectionTemplate, details?: ITreeElementRenderDetails): void {
+
+		// Label
 		template.label.textContent = element.element.label;
+
+		// Toolbar
+		ChatContextKeys.agentSessionSection.bindTo(template.contextKeyService).set(element.element.section);
+		template.toolbar.context = element.element;
 	}
 
 	renderCompressedElements(node: ITreeNode<ICompressedTreeNode<IAgentSessionSection>, FuzzyScore>, index: number, templateData: IAgentSessionSectionTemplate, details?: ITreeElementRenderDetails): void {
@@ -399,7 +425,7 @@ export class AgentSessionSectionRenderer implements ICompressibleTreeRenderer<IA
 	}
 
 	disposeTemplate(templateData: IAgentSessionSectionTemplate): void {
-		// noop
+		templateData.disposables.dispose();
 	}
 }
 
@@ -477,6 +503,12 @@ export interface IAgentSessionsFilter {
 	readonly groupResults?: () => boolean | undefined;
 
 	/**
+	 * A callback to notify the filter about the label of the
+	 * first section when grouping is enabled.
+	 */
+	notifyFirstGroupLabel?(label: string | undefined): void;
+
+	/**
 	 * A callback to notify the filter about the number of
 	 * results after filtering.
 	 */
@@ -490,118 +522,156 @@ export interface IAgentSessionsFilter {
 
 export class AgentSessionsDataSource implements IAsyncDataSource<IAgentSessionsModel, AgentSessionListItem> {
 
-	private static readonly RECENT_THRESHOLD = 5 * 24 * 60 * 60 * 1000;
-
 	constructor(
 		private readonly filter: IAgentSessionsFilter | undefined,
 		private readonly sorter: ITreeSorter<IAgentSession>,
 	) { }
 
 	hasChildren(element: IAgentSessionsModel | AgentSessionListItem): boolean {
-		return isAgentSessionsModel(element);
+
+		// Sessions model
+		if (isAgentSessionsModel(element)) {
+			return true;
+		}
+
+		// Sessions	section
+		else if (isAgentSessionSection(element)) {
+			return element.sessions.length > 0;
+		}
+
+		// Session element
+		else {
+			return false;
+		}
 	}
 
 	getChildren(element: IAgentSessionsModel | AgentSessionListItem): Iterable<AgentSessionListItem> {
-		if (!isAgentSessionsModel(element)) {
+
+		// Sessions model
+		if (isAgentSessionsModel(element)) {
+
+			// Apply filter if configured
+			let filteredSessions = element.sessions.filter(session => !this.filter?.exclude(session));
+
+			// Apply sorter unless we group into sections or we are to limit results
+			const limitResultsCount = this.filter?.limitResults?.();
+			if (!this.filter?.groupResults?.() || typeof limitResultsCount === 'number') {
+				filteredSessions.sort(this.sorter.compare.bind(this.sorter));
+			}
+
+			// Apply limiter if configured (requires sorting)
+			if (typeof limitResultsCount === 'number') {
+				filteredSessions = filteredSessions.slice(0, limitResultsCount);
+			}
+
+			// Callback results count
+			this.filter?.notifyResults?.(filteredSessions.length);
+
+			// Group sessions into sections if enabled
+			if (this.filter?.groupResults?.()) {
+				return this.groupSessionsIntoSections(filteredSessions);
+			}
+
+			// Otherwise return flat sorted list
+			return filteredSessions;
+		}
+
+		// Sessions	section
+		else if (isAgentSessionSection(element)) {
+			return element.sessions;
+		}
+
+		// Session element
+		else {
 			return [];
 		}
-
-		// Apply filter if configured
-		let filteredSessions = element.sessions.filter(session => !this.filter?.exclude(session));
-
-		// Apply sorter unless we group into sections or we are to limit results
-		const limitResultsCount = this.filter?.limitResults?.();
-		if (!this.filter?.groupResults?.() || typeof limitResultsCount === 'number') {
-			filteredSessions.sort(this.sorter.compare.bind(this.sorter));
-		}
-
-		// Apply limiter if configured (requires sorting)
-		if (typeof limitResultsCount === 'number') {
-			filteredSessions = filteredSessions.slice(0, limitResultsCount);
-		}
-
-		// Callback results count
-		this.filter?.notifyResults?.(filteredSessions.length);
-
-		// Group sessions into sections if enabled
-		if (this.filter?.groupResults?.()) {
-			return this.groupSessionsIntoSections(filteredSessions);
-		}
-
-		// Otherwise return flat sorted list
-		return filteredSessions;
 	}
 
 	private groupSessionsIntoSections(sessions: IAgentSession[]): AgentSessionListItem[] {
 		const result: AgentSessionListItem[] = [];
 
-		const now = Date.now();
-		const recent = now - AgentSessionsDataSource.RECENT_THRESHOLD;
+		const sortedSessions = sessions.sort(this.sorter.compare.bind(this.sorter));
+		const groupedSessions = groupAgentSessions(sortedSessions);
 
-		const activeSessions: IAgentSession[] = [];
-		const recentSessions: IAgentSession[] = [];
-		const archivedSessions: IAgentSession[] = [];
-		const oldSessions: IAgentSession[] = [];
+		let isFirstSection = true;
+		let firstSectionLabel: string | undefined;
+		for (const { sessions, section, label } of groupedSessions.values()) {
+			if (sessions.length === 0) {
+				continue;
+			}
 
-		for (const session of sessions) {
-			if (isSessionInProgressStatus(session.status)) {
-				activeSessions.push(session);
-			} else if (session.isArchived()) {
-				archivedSessions.push(session);
-			} else {
-				const sessionTime = session.timing.endTime || session.timing.startTime;
-				if (sessionTime < recent) {
-					oldSessions.push(session);
-				} else {
-					recentSessions.push(session);
-				}
+			// First section: add sessions directly without a parent node
+			if (isFirstSection) {
+				result.push(...sessions);
+				isFirstSection = false;
+				firstSectionLabel = label;
+			}
+
+			// Subsequent sections: add as parent nodes with children
+			else {
+				result.push({ section, label, sessions });
 			}
 		}
 
-		// Sort each group
-		activeSessions.sort(this.sorter.compare.bind(this.sorter));
-		recentSessions.sort(this.sorter.compare.bind(this.sorter));
-		oldSessions.sort(this.sorter.compare.bind(this.sorter));
-		archivedSessions.sort(this.sorter.compare.bind(this.sorter));
-
-		// Active Sessions
-		result.push(...activeSessions);
-
-		// Recent Sessions
-		if (recentSessions.length > 0) {
-			if (result.length > 0) {
-				result.push({
-					section: AgentSessionSection.Recent,
-					label: localize('agentSessions.recentSection', "Recent")
-				});
-			}
-			result.push(...recentSessions);
-		}
-
-		// Old Sessions
-		if (oldSessions.length > 0) {
-			if (result.length > 0) {
-				result.push({
-					section: AgentSessionSection.Old,
-					label: localize('agentSessions.oldSection', "Older")
-				});
-			}
-			result.push(...oldSessions);
-		}
-
-		// AArchived Sessions7
-		if (archivedSessions.length > 0) {
-			if (result.length > 0) {
-				result.push({
-					section: AgentSessionSection.Archived,
-					label: localize('agentSessions.archivedSection', "Archived")
-				});
-			}
-			result.push(...archivedSessions);
-		}
+		// Notify the first section label
+		this.filter?.notifyFirstGroupLabel?.(firstSectionLabel);
 
 		return result;
 	}
+}
+
+const DAY_THRESHOLD = 24 * 60 * 60 * 1000;
+const WEEK_THRESHOLD = 7 * DAY_THRESHOLD;
+
+export const AgentSessionSectionLabels = {
+	[AgentSessionSection.Active]: localize('agentSessions.activeSection', "Active"),
+	[AgentSessionSection.Today]: localize('agentSessions.todaySection', "Today"),
+	[AgentSessionSection.Yesterday]: localize('agentSessions.yesterdaySection', "Yesterday"),
+	[AgentSessionSection.Week]: localize('agentSessions.weekSection', "Week"),
+	[AgentSessionSection.Older]: localize('agentSessions.olderSection', "Older"),
+	[AgentSessionSection.Archived]: localize('agentSessions.archivedSection', "Archived"),
+};
+
+export function groupAgentSessions(sessions: IAgentSession[]): Map<AgentSessionSection, IAgentSessionSection> {
+	const now = Date.now();
+	const startOfToday = new Date(now).setHours(0, 0, 0, 0);
+	const startOfYesterday = startOfToday - DAY_THRESHOLD;
+	const weekThreshold = now - WEEK_THRESHOLD;
+
+	const activeSessions: IAgentSession[] = [];
+	const todaySessions: IAgentSession[] = [];
+	const yesterdaySessions: IAgentSession[] = [];
+	const weekSessions: IAgentSession[] = [];
+	const olderSessions: IAgentSession[] = [];
+	const archivedSessions: IAgentSession[] = [];
+
+	for (const session of sessions) {
+		if (isSessionInProgressStatus(session.status)) {
+			activeSessions.push(session);
+		} else if (session.isArchived()) {
+			archivedSessions.push(session);
+		} else {
+			const sessionTime = session.timing.endTime || session.timing.startTime;
+			if (sessionTime >= startOfToday) {
+				todaySessions.push(session);
+			} else if (sessionTime >= startOfYesterday) {
+				yesterdaySessions.push(session);
+			} else if (sessionTime >= weekThreshold) {
+				weekSessions.push(session);
+			} else {
+				olderSessions.push(session);
+			}
+		}
+	}
+
+	return new Map<AgentSessionSection, IAgentSessionSection>([
+		[AgentSessionSection.Active, { section: AgentSessionSection.Active, label: AgentSessionSectionLabels[AgentSessionSection.Active], sessions: activeSessions }],
+		[AgentSessionSection.Today, { section: AgentSessionSection.Today, label: AgentSessionSectionLabels[AgentSessionSection.Today], sessions: todaySessions }],
+		[AgentSessionSection.Yesterday, { section: AgentSessionSection.Yesterday, label: AgentSessionSectionLabels[AgentSessionSection.Yesterday], sessions: yesterdaySessions }],
+		[AgentSessionSection.Week, { section: AgentSessionSection.Week, label: AgentSessionSectionLabels[AgentSessionSection.Week], sessions: weekSessions }],
+		[AgentSessionSection.Older, { section: AgentSessionSection.Older, label: AgentSessionSectionLabels[AgentSessionSection.Older], sessions: olderSessions }],
+		[AgentSessionSection.Archived, { section: AgentSessionSection.Archived, label: AgentSessionSectionLabels[AgentSessionSection.Archived], sessions: archivedSessions }],
+	]);
 }
 
 export class AgentSessionsIdentityProvider implements IIdentityProvider<IAgentSessionsModel | AgentSessionListItem> {
