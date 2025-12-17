@@ -375,13 +375,12 @@ configurationRegistry.registerConfiguration({
 		},
 		[ChatConfiguration.ChatViewSessionsOrientation]: {
 			type: 'string',
-			enum: ['auto', 'stacked', 'sideBySide'],
+			enum: ['stacked', 'sideBySide'],
 			enumDescriptions: [
-				nls.localize('chat.viewSessions.orientation.auto', "Automatically determine the orientation based on available space."),
-				nls.localize('chat.viewSessions.orientation.stacked', "Display sessions vertically stacked unless a chat session is visible."),
-				nls.localize('chat.viewSessions.orientation.sideBySide', "Display sessions side by side if space is sufficient.")
+				nls.localize('chat.viewSessions.orientation.stacked', "Display chat sessions vertically stacked above the chat input unless a chat session is visible."),
+				nls.localize('chat.viewSessions.orientation.sideBySide', "Display chat sessions side by side if space is sufficient, otherwise fallback to stacked above the chat input unless a chat session is visible.")
 			],
-			default: 'auto',
+			default: 'sideBySide',
 			description: nls.localize('chat.viewSessions.orientation', "Controls the orientation of the chat agent sessions view when it is shown alongside the chat."),
 		},
 		[ChatConfiguration.ChatViewTitleEnabled]: {
@@ -816,7 +815,7 @@ configurationRegistry.registerConfiguration({
 		[ChatConfiguration.RestoreLastPanelSession]: { // TODO@bpasero review this setting later
 			type: 'boolean',
 			description: nls.localize('chat.restoreLastPanelSession', "Controls whether the last session is restored in panel after restart."),
-			default: true,
+			default: false,
 			tags: ['experimental'],
 			experiment: {
 				mode: 'auto'
