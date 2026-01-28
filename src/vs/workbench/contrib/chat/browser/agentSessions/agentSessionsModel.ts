@@ -17,11 +17,14 @@ import { URI, UriComponents } from '../../../../../base/common/uri.js';
 import { localize } from '../../../../../nls.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { ILogService, LogLevel } from '../../../../../platform/log/common/log.js';
+import { IProductService } from '../../../../../platform/product/common/productService.js';
 import { Registry } from '../../../../../platform/registry/common/platform.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
+import { IChatEntitlementService } from '../../../../services/chat/common/chatEntitlementService.js';
 import { ILifecycleService } from '../../../../services/lifecycle/common/lifecycle.js';
 import { Extensions, IOutputChannelRegistry, IOutputService } from '../../../../services/output/common/output.js';
 import { ChatSessionStatus as AgentSessionStatus, IChatSessionFileChange, IChatSessionFileChange2, IChatSessionItem, IChatSessionsExtensionPoint, IChatSessionsService } from '../../common/chatSessionsService.js';
+import { IChatWidgetService } from '../chat.js';
 import { AgentSessionProviders, getAgentSessionProvider, getAgentSessionProviderIcon, getAgentSessionProviderName } from './agentSessions.js';
 
 //#region Interfaces, Types
@@ -206,6 +209,8 @@ function statusToString(status: AgentSessionStatus): string {
 
 class AgentSessionsLogger extends Disposable {
 
+	private isChannelRegistered = false;
+
 	constructor(
 		private readonly getSessionsData: () => {
 			sessions: Iterable<IInternalAgentSession>;
@@ -213,19 +218,28 @@ class AgentSessionsLogger extends Disposable {
 		},
 		@ILogService private readonly logService: ILogService,
 		@IOutputService private readonly outputService: IOutputService,
+		@IChatEntitlementService private readonly chatEntitlementService: IChatEntitlementService
 	) {
 		super();
 
-		this.registerOutputChannel();
+		this.updateChannelRegistration();
 		this.registerListeners();
 	}
 
-	private registerOutputChannel(): void {
-		Registry.as<IOutputChannelRegistry>(Extensions.OutputChannels).registerChannel({
-			id: agentSessionsOutputChannelId,
-			label: agentSessionsOutputChannelLabel,
-			log: false
-		});
+	private updateChannelRegistration(): void {
+		const chatDisabled = this.chatEntitlementService.sentiment.hidden;
+
+		if (chatDisabled && this.isChannelRegistered) {
+			Registry.as<IOutputChannelRegistry>(Extensions.OutputChannels).removeChannel(agentSessionsOutputChannelId);
+			this.isChannelRegistered = false;
+		} else if (!chatDisabled && !this.isChannelRegistered) {
+			Registry.as<IOutputChannelRegistry>(Extensions.OutputChannels).registerChannel({
+				id: agentSessionsOutputChannelId,
+				label: agentSessionsOutputChannelLabel,
+				log: false
+			});
+			this.isChannelRegistered = true;
+		}
 	}
 
 	private registerListeners(): void {
@@ -233,6 +247,10 @@ class AgentSessionsLogger extends Disposable {
 			if (level === LogLevel.Trace) {
 				this.logAllStatsIfTrace('Log level changed to trace');
 			}
+		}));
+
+		this._register(this.chatEntitlementService.onDidChangeSentiment(() => {
+			this.updateChannelRegistration();
 		}));
 	}
 
@@ -376,6 +394,8 @@ export class AgentSessionsModel extends Disposable implements IAgentSessionsMode
 		@ILifecycleService private readonly lifecycleService: ILifecycleService,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@IStorageService private readonly storageService: IStorageService,
+		@IProductService private readonly productService: IProductService,
+		@IChatWidgetService private readonly chatWidgetService: IChatWidgetService
 	) {
 		super();
 
@@ -397,8 +417,9 @@ export class AgentSessionsModel extends Disposable implements IAgentSessionsMode
 		));
 		this.logger.logAllStatsIfTrace('Loaded cached sessions');
 
-		this.registerListeners();
+		this.runMarkAllReadMigrationOnce(); // TODO@bpasero remove this in the future
 
+		this.registerListeners();
 	}
 
 	private registerListeners(): void {
@@ -547,12 +568,6 @@ export class AgentSessionsModel extends Disposable implements IAgentSessionsMode
 
 	//#region States
 
-	// In order to reduce the amount of unread sessions a user will
-	// see after updating to 1.107, we specify a fixed date that a
-	// session needs to be created after to be considered unread unless
-	// the user has explicitly marked it as read.
-	private static readonly READ_STATE_INITIAL_DATE = Date.UTC(2025, 11 /* December */, 8);
-
 	private readonly sessionStates: ResourceMap<IAgentSessionState>;
 
 	private isArchived(session: IInternalAgentSessionData): boolean {
@@ -584,20 +599,84 @@ export class AgentSessionsModel extends Disposable implements IAgentSessionsMode
 			return true; // archived sessions are always read
 		}
 
-		const readDate = this.sessionStates.get(session.resource)?.read;
+		const readDate = this.sessionStates.get(session.resource)?.read ?? 0;
 
-		return (readDate ?? AgentSessionsModel.READ_STATE_INITIAL_DATE) >= (session.timing.lastRequestEnded ?? session.timing.lastRequestStarted ?? session.timing.created);
-	}
-
-	private setRead(session: IInternalAgentSessionData, read: boolean): void {
-		if (read === this.isRead(session)) {
-			return; // no change
+		// Install a heuristic to reduce false positives: a user might observe
+		// the output of a session and quickly click on another session before
+		// it is finished. Strictly speaking the session is unread, but we
+		// allow a certain threshold of time to count as read to accommodate.
+		if (readDate >= this.sessionTimeForReadStateTracking(session) - 2000) {
+			return true;
 		}
 
-		const state = this.sessionStates.get(session.resource) ?? { archived: false, read: 0 };
-		this.sessionStates.set(session.resource, { ...state, read: read ? Date.now() : 0 });
+		// Never consider a session as unread if its connected to a widget
+		return !!this.chatWidgetService.getWidgetBySessionResource(session.resource);
+	}
 
-		this._onDidChangeSessions.fire();
+	private sessionTimeForReadStateTracking(session: IInternalAgentSessionData): number {
+		return session.timing.lastRequestEnded ?? session.timing.lastRequestStarted ?? session.timing.created;
+	}
+
+	private setRead(session: IInternalAgentSessionData, read: boolean, skipEvent?: boolean): void {
+		const state = this.sessionStates.get(session.resource) ?? { archived: false, read: 0 };
+
+		let newRead: number;
+		if (read) {
+			newRead = Math.max(Date.now(), this.sessionTimeForReadStateTracking(session));
+
+			if (state.read >= newRead) {
+				return; // already read with a sufficient timestamp
+			}
+		} else {
+			newRead = 0;
+			if (state.read === 0) {
+				return; // already unread
+			}
+		}
+
+		this.sessionStates.set(session.resource, { ...state, read: newRead });
+
+		if (!skipEvent) {
+			this._onDidChangeSessions.fire();
+		}
+	}
+
+	private static readonly MARK_ALL_READ_MIGRATION_KEY = 'agentSessions.markAllReadMigration';
+	private static readonly MARK_ALL_READ_MIGRATION_VERSION = 1;
+
+	private migrationCompleted = false;
+
+	private runMarkAllReadMigrationOnce(): void {
+		if (this.migrationCompleted) {
+			return;
+		}
+
+		const storedVersion = this.storageService.getNumber(AgentSessionsModel.MARK_ALL_READ_MIGRATION_KEY, StorageScope.WORKSPACE, 0);
+		if (storedVersion >= AgentSessionsModel.MARK_ALL_READ_MIGRATION_VERSION) {
+			this.migrationCompleted = true;
+			return; // migration already completed for this version
+		}
+
+		this.logger.logIfTrace(`Running mark-all-read migration from version ${storedVersion} to ${AgentSessionsModel.MARK_ALL_READ_MIGRATION_VERSION}`);
+
+		const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+		for (const session of this._sessions.values()) {
+			if (!this.isRead(session)) {
+				let markRead = true;
+				if (this.productService.quality === 'stable' && this.sessionTimeForReadStateTracking(session) >= sevenDaysAgo) {
+					markRead = false; // for stable, preserve state for up to 1 week ago
+				}
+
+				if (markRead) {
+					this.setRead(session, true, true /* skipEvent */);
+				}
+			}
+		}
+
+		// Store the migration version
+		this.storageService.store(AgentSessionsModel.MARK_ALL_READ_MIGRATION_KEY, AgentSessionsModel.MARK_ALL_READ_MIGRATION_VERSION, StorageScope.WORKSPACE, StorageTarget.MACHINE);
+
+		this.migrationCompleted = true;
 	}
 
 	//#endregion
