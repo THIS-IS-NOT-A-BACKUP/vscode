@@ -321,10 +321,9 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 					: undefined;
 				const selectedValue = defaultOption?.value;
 
-				if (question.allowFreeformInput) {
-					return selectedValue !== undefined ? { selectedValue, freeformValue: undefined } : undefined;
-				}
-				return selectedValue;
+				// Note: Freeform input is always shown regardless of the `allowFreeformInput` API property.
+				// The property is kept for backwards compatibility but is no longer used.
+				return selectedValue !== undefined ? { selectedValue, freeformValue: undefined } : undefined;
 			}
 
 			case 'multiSelect': {
@@ -336,10 +335,9 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 					.map(opt => opt.value)
 					.filter(v => v !== undefined) ?? [];
 
-				if (question.allowFreeformInput) {
-					return selectedValues.length > 0 ? { selectedValues, freeformValue: undefined } : undefined;
-				}
-				return selectedValues;
+				// Note: Freeform input is always shown regardless of the `allowFreeformInput` API property.
+				// The property is kept for backwards compatibility but is no longer used.
+				return selectedValues.length > 0 ? { selectedValues, freeformValue: undefined } : undefined;
 			}
 
 			default:
@@ -494,8 +492,9 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 
 		this._radioInputs.set(question.id, radioInputs);
 
-		// Add freeform input if allowed
-		if (question.allowFreeformInput) {
+		// Note: Freeform input is always shown regardless of the `allowFreeformInput` API property.
+		// The property is kept for backwards compatibility but is no longer used.
+		{
 			const freeformContainer = dom.$('.chat-question-freeform');
 			const freeformLabelId = `freeform-label-${question.id}`;
 			const freeformLabel = dom.$('.chat-question-freeform-label');
@@ -511,6 +510,24 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 			if (previousFreeform !== undefined) {
 				freeformTextarea.value = previousFreeform;
 			}
+
+			this._inputBoxes.add(dom.addDisposableListener(freeformTextarea, dom.EventType.KEY_DOWN, (e: KeyboardEvent) => {
+				const event = new StandardKeyboardEvent(e);
+				if (event.keyCode === KeyCode.Enter && !event.shiftKey && freeformTextarea.value.trim()) {
+					e.preventDefault();
+					e.stopPropagation();
+					this.handleNext();
+				}
+			}));
+
+			// uncheck radio when there is text
+			this._inputBoxes.add(dom.addDisposableListener(freeformTextarea, dom.EventType.INPUT, () => {
+				if (freeformTextarea.value.trim()) {
+					for (const radio of radioInputs) {
+						radio.checked = false;
+					}
+				}
+			}));
 
 			freeformContainer.appendChild(freeformTextarea);
 			container.appendChild(freeformContainer);
@@ -568,8 +585,9 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 
 		this._checkboxInputs.set(question.id, checkboxInputs);
 
-		// Add freeform input if allowed
-		if (question.allowFreeformInput) {
+		// Note: Freeform input is always shown regardless of the `allowFreeformInput` API property.
+		// The property is kept for backwards compatibility but is no longer used.
+		{
 			const freeformContainer = dom.$('.chat-question-freeform');
 			const freeformLabelId = `freeform-label-${question.id}`;
 			const freeformLabel = dom.$('.chat-question-freeform-label');
@@ -585,6 +603,17 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 			if (previousFreeform !== undefined) {
 				freeformTextarea.value = previousFreeform;
 			}
+
+			this._inputBoxes.add(dom.addDisposableListener(freeformTextarea, dom.EventType.KEY_DOWN, (e: KeyboardEvent) => {
+				const event = new StandardKeyboardEvent(e);
+				if (event.keyCode === KeyCode.Enter && !event.shiftKey && freeformTextarea.value.trim()) {
+					e.preventDefault();
+					e.stopPropagation();
+					this.handleNext();
+				}
+			}));
+
+			// For multiSelect, both checkboxes and freeform input are combined, so don't uncheck on input
 
 			freeformContainer.appendChild(freeformTextarea);
 			container.appendChild(freeformContainer);
@@ -622,17 +651,16 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 					selectedValue = defaultOption?.value;
 				}
 
-				// Include freeform value if allowed
-				if (question.allowFreeformInput) {
-					const freeformTextarea = this._freeformTextareas.get(question.id);
-					const freeformValue = freeformTextarea?.value !== '' ? freeformTextarea?.value : undefined;
-					if (freeformValue || selectedValue !== undefined) {
-						return { selectedValue, freeformValue };
-					}
-					return undefined;
+				// Note: Freeform input is always shown regardless of the `allowFreeformInput` API property.
+				// The property is kept for backwards compatibility but is no longer used.
+				// For singleSelect, if freeform value is provided, use only that (ignore selected value).
+				const freeformTextarea = this._freeformTextareas.get(question.id);
+				const freeformValue = freeformTextarea?.value !== '' ? freeformTextarea?.value : undefined;
+				if (freeformValue || selectedValue !== undefined) {
+					// if there is text in freeform, don't include selected
+					return { selectedValue: freeformValue ? undefined : selectedValue, freeformValue };
 				}
-
-				return selectedValue;
+				return undefined;
 			}
 
 			case 'multiSelect': {
@@ -661,17 +689,15 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 					finalSelectedValues = defaultValues?.filter(v => v !== undefined) || [];
 				}
 
-				// Include freeform value if allowed
-				if (question.allowFreeformInput) {
-					const freeformTextarea = this._freeformTextareas.get(question.id);
-					const freeformValue = freeformTextarea?.value !== '' ? freeformTextarea?.value : undefined;
-					if (freeformValue || finalSelectedValues.length > 0) {
-						return { selectedValues: finalSelectedValues, freeformValue };
-					}
-					return undefined;
+				// Note: Freeform input is always shown regardless of the `allowFreeformInput` API property.
+				// The property is kept for backwards compatibility but is no longer used.
+				// For multiSelect, include both selected values and freeform input together.
+				const freeformTextarea = this._freeformTextareas.get(question.id);
+				const freeformValue = freeformTextarea?.value !== '' ? freeformTextarea?.value : undefined;
+				if (freeformValue || finalSelectedValues.length > 0) {
+					return { selectedValues: finalSelectedValues, freeformValue };
 				}
-
-				return finalSelectedValues;
+				return undefined;
 			}
 
 			default:

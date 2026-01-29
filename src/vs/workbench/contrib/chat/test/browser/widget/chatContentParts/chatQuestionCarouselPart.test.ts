@@ -396,7 +396,9 @@ suite('ChatQuestionCarouselPart', () => {
 
 			widget.skip();
 			assert.ok(submittedAnswers instanceof Map);
-			assert.strictEqual(submittedAnswers?.get('q1'), 'value_b');
+			const answer = submittedAnswers?.get('q1') as { selectedValue: unknown; freeformValue: unknown };
+			assert.strictEqual(answer.selectedValue, 'value_b');
+			assert.strictEqual(answer.freeformValue, undefined);
 		});
 
 		test('skip returns default values for multiSelect questions', () => {
@@ -417,11 +419,12 @@ suite('ChatQuestionCarouselPart', () => {
 
 			widget.skip();
 			assert.ok(submittedAnswers instanceof Map);
-			const values = submittedAnswers?.get('q1') as unknown[];
-			assert.ok(Array.isArray(values));
-			assert.strictEqual(values.length, 2);
-			assert.ok(values.includes('value_a'));
-			assert.ok(values.includes('value_c'));
+			const answer = submittedAnswers?.get('q1') as { selectedValues: unknown[]; freeformValue: unknown };
+			assert.ok(Array.isArray(answer.selectedValues));
+			assert.strictEqual(answer.selectedValues.length, 2);
+			assert.ok(answer.selectedValues.includes('value_a'));
+			assert.ok(answer.selectedValues.includes('value_c'));
+			assert.strictEqual(answer.freeformValue, undefined);
 		});
 
 		test('skip returns defaults for multiple questions', () => {
@@ -442,7 +445,9 @@ suite('ChatQuestionCarouselPart', () => {
 			widget.skip();
 			assert.ok(submittedAnswers instanceof Map);
 			assert.strictEqual(submittedAnswers?.get('q1'), 'text default');
-			assert.strictEqual(submittedAnswers?.get('q2'), 'first_value');
+			const answer = submittedAnswers?.get('q2') as { selectedValue: unknown; freeformValue: unknown };
+			assert.strictEqual(answer.selectedValue, 'first_value');
+			assert.strictEqual(answer.freeformValue, undefined);
 		});
 
 		test('skip returns empty map when no defaults are provided', () => {

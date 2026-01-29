@@ -220,7 +220,7 @@ export const terminalChatAgentToolsConfiguration: IStringDictionary<IConfigurati
 			// - `-m`, `-M`: Prevent branch renaming
 			// - `--force`: Generally dangerous
 			'/^git(\\s+(-C\\s+\\S+|--no-pager))*\\s+branch\\b/': true,
-			'/^git(\\s+(-C\\s+\\S+|--no-pager))*\\s+branch\\b.*-(d|D|m|M|-delete|-force)\\b/': false,
+			'/^git(\\s+(-C\\s+\\S+|--no-pager))*\\s+branch\\b.*\\s-(d|D|m|M|-delete|-force)\\b/': false,
 
 			// docker - readonly sub-commands
 			'/^docker\\s+(ps|images|info|version|inspect|logs|top|stats|port|diff|search|events)\\b/': true,
@@ -293,12 +293,12 @@ export const terminalChatAgentToolsConfiguration: IStringDictionary<IConfigurati
 			// column
 			// - `-c`: We block excessive columns that could lead to memory exhaustion.
 			column: true,
-			'/^column\\b.*-c\\s+[0-9]{4,}/': false,
+			'/^column\\b.*\\s-c\\s+[0-9]{4,}/': false,
 
 			// date
 			// -s|--set: Sets the system clock
 			date: true,
-			'/^date\\b.*(-s|--set)\\b/': false,
+			'/^date\\b.*\\s(-s|--set)\\b/': false,
 
 			// find
 			// - `-delete`: Deletes files or directories.
@@ -306,13 +306,13 @@ export const terminalChatAgentToolsConfiguration: IStringDictionary<IConfigurati
 			// - `-fprint`/`fprintf`/`fls`: Writes files.
 			// - `-ok`/`-okdir`: Like exec but with a confirmation.
 			find: true,
-			'/^find\\b.*-(delete|exec|execdir|fprint|fprintf|fls|ok|okdir)\\b/': false,
+			'/^find\\b.*\\s-(delete|exec|execdir|fprint|fprintf|fls|ok|okdir)\\b/': false,
 
 			// rg (ripgrep)
 			// - `--pre`: Executes arbitrary command as preprocessor for every file searched.
 			// - `--hostname-bin`: Executes arbitrary command to get hostname.
 			rg: true,
-			'/^rg\\b.*(--pre|--hostname-bin)\\b/': false,
+			'/^rg\\b.*\\s(--pre|--hostname-bin)\\b/': false,
 
 			// sed
 			// - `-e`/`--expression`: Add the commands in script to the set of commands to be run
@@ -328,7 +328,7 @@ export const terminalChatAgentToolsConfiguration: IStringDictionary<IConfigurati
 			// - In-place editing (`-i`, `-I`, `--in-place`) is detected and blocked via file write
 			//   detection if necessary
 			sed: true,
-			'/^sed\\b.*(-[a-zA-Z]*(e|f)[a-zA-Z]*|--expression|--file)\\b/': false,
+			'/^sed\\b.*\\s(-[a-zA-Z]*(e|f)[a-zA-Z]*|--expression|--file)\\b/': false,
 			'/^sed\\b.*s\\/.*\\/.*\\/[ew]/': false,
 			'/^sed\\b.*;W/': false,
 
@@ -338,13 +338,13 @@ export const terminalChatAgentToolsConfiguration: IStringDictionary<IConfigurati
 			// - `-S`: Memory exhaustion is possible (`sort -S 100G file`), we allow possible denial
 			//   of service.
 			sort: true,
-			'/^sort\\b.*-(o|S)\\b/': false,
+			'/^sort\\b.*\\s-(o|S)\\b/': false,
 
 			// tree
 			// - `-o`: Output redirection can write files (`tree -o /etc/something file`) which are
 			//   blocked currently
 			tree: true,
-			'/^tree\\b.*-o\\b/': false,
+			'/^tree\\b.*\\s-o\\b/': false,
 
 			// xxd
 			// - Only allow flags and a single input file as it's difficult to parse the outfile
