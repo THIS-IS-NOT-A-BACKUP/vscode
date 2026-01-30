@@ -13,9 +13,8 @@ import { hasKey } from '../../../../../../base/common/types.js';
 import { localize } from '../../../../../../nls.js';
 import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
 import { IMarkdownRendererService } from '../../../../../../platform/markdown/browser/markdownRenderer.js';
-import { defaultButtonStyles, defaultInputBoxStyles } from '../../../../../../platform/theme/browser/defaultStyles.js';
+import { defaultButtonStyles } from '../../../../../../platform/theme/browser/defaultStyles.js';
 import { Button } from '../../../../../../base/browser/ui/button/button.js';
-import { InputBox } from '../../../../../../base/browser/ui/inputbox/inputBox.js';
 import { IChatQuestion, IChatQuestionCarousel } from '../../../common/chatService/chatService.js';
 import { IChatContentPart, IChatContentPartRenderContext } from './chatContentParts.js';
 import { ChatQueryTitlePart } from './chatConfirmationWidget.js';
@@ -47,7 +46,7 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 
 	private _isSkipped = false;
 
-	private readonly _textInputBoxes: Map<string, InputBox> = new Map();
+	private readonly _textInputTextareas: Map<string, HTMLTextAreaElement> = new Map();
 	private readonly _radioInputs: Map<string, HTMLInputElement[]> = new Map();
 	private readonly _checkboxInputs: Map<string, HTMLInputElement[]> = new Map();
 	private readonly _freeformTextareas: Map<string, HTMLTextAreaElement> = new Map();
@@ -233,7 +232,7 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 		// Dispose interactive UI disposables (header, nav buttons, etc.)
 		this._interactiveUIStore.clear();
 		this._inputBoxes.clear();
-		this._textInputBoxes.clear();
+		this._textInputTextareas.clear();
 		this._radioInputs.clear();
 		this._checkboxInputs.clear();
 		this._freeformTextareas.clear();
@@ -352,7 +351,7 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 
 		// Clear previous input boxes and stale references
 		this._inputBoxes.clear();
-		this._textInputBoxes.clear();
+		this._textInputTextareas.clear();
 		this._radioInputs.clear();
 		this._checkboxInputs.clear();
 		this._freeformTextareas.clear();
@@ -423,24 +422,55 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 		}
 	}
 
+	/**
+	 * Sets up auto-resize behavior for a textarea element.
+	 * @returns A function that triggers the resize manually (useful for initial sizing).
+	 */
+	private setupTextareaAutoResize(textarea: HTMLTextAreaElement): () => void {
+		const autoResize = () => {
+			textarea.style.height = 'auto';
+			textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
+			this._onDidChangeHeight.fire();
+		};
+		this._inputBoxes.add(dom.addDisposableListener(textarea, dom.EventType.INPUT, autoResize));
+		return autoResize;
+	}
+
 	private renderTextInput(container: HTMLElement, question: IChatQuestion): void {
-		const inputBox = this._inputBoxes.add(new InputBox(container, undefined, {
-			placeholder: localize('chat.questionCarousel.enterText', 'Enter your answer'),
-			inputBoxStyles: defaultInputBoxStyles,
-		}));
+		const textarea = dom.$<HTMLTextAreaElement>('textarea.chat-question-text-textarea');
+		textarea.placeholder = localize('chat.questionCarousel.enterText', 'Enter your answer');
+		textarea.rows = 1;
+		textarea.setAttribute('aria-label', question.title);
 
 		// Restore previous answer if exists
 		const previousAnswer = this._answers.get(question.id);
 		if (previousAnswer !== undefined) {
-			inputBox.value = String(previousAnswer);
+			textarea.value = String(previousAnswer);
 		} else if (question.defaultValue !== undefined) {
-			inputBox.value = String(question.defaultValue);
+			textarea.value = String(question.defaultValue);
 		}
 
-		this._textInputBoxes.set(question.id, inputBox);
+		// Setup auto-resize behavior
+		const autoResize = this.setupTextareaAutoResize(textarea);
+
+		// Handle Enter to submit (Shift+Enter for newline)
+		this._inputBoxes.add(dom.addDisposableListener(textarea, dom.EventType.KEY_DOWN, (e: KeyboardEvent) => {
+			const event = new StandardKeyboardEvent(e);
+			if (event.keyCode === KeyCode.Enter && !event.shiftKey && textarea.value.trim()) {
+				e.preventDefault();
+				e.stopPropagation();
+				this.handleNext();
+			}
+		}));
+
+		container.appendChild(textarea);
+		this._textInputTextareas.set(question.id, textarea);
 
 		// Focus on input when rendered using proper DOM scheduling
-		this._inputBoxes.add(dom.runAtThisOrScheduleAtNextAnimationFrame(dom.getWindow(inputBox.element), () => inputBox.focus()));
+		this._inputBoxes.add(dom.runAtThisOrScheduleAtNextAnimationFrame(dom.getWindow(textarea), () => {
+			textarea.focus();
+			autoResize();
+		}));
 	}
 
 	private renderSingleSelect(container: HTMLElement, question: IChatQuestion): void {
@@ -520,6 +550,9 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 				}
 			}));
 
+			// Setup auto-resize behavior
+			const autoResize = this.setupTextareaAutoResize(freeformTextarea);
+
 			// uncheck radio when there is text
 			this._inputBoxes.add(dom.addDisposableListener(freeformTextarea, dom.EventType.INPUT, () => {
 				if (freeformTextarea.value.trim()) {
@@ -532,6 +565,11 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 			freeformContainer.appendChild(freeformTextarea);
 			container.appendChild(freeformContainer);
 			this._freeformTextareas.set(question.id, freeformTextarea);
+
+			// Resize textarea if it has restored content
+			if (previousFreeform !== undefined) {
+				this._inputBoxes.add(dom.runAtThisOrScheduleAtNextAnimationFrame(dom.getWindow(freeformTextarea), () => autoResize()));
+			}
 		}
 	}
 
@@ -613,11 +651,19 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 				}
 			}));
 
+			// Setup auto-resize behavior
+			const autoResize = this.setupTextareaAutoResize(freeformTextarea);
+
 			// For multiSelect, both checkboxes and freeform input are combined, so don't uncheck on input
 
 			freeformContainer.appendChild(freeformTextarea);
 			container.appendChild(freeformContainer);
 			this._freeformTextareas.set(question.id, freeformTextarea);
+
+			// Resize textarea if it has restored content
+			if (previousFreeform !== undefined) {
+				this._inputBoxes.add(dom.runAtThisOrScheduleAtNextAnimationFrame(dom.getWindow(freeformTextarea), () => autoResize()));
+			}
 		}
 	}
 
@@ -629,8 +675,8 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 
 		switch (question.type) {
 			case 'text': {
-				const inputBox = this._textInputBoxes.get(question.id);
-				return inputBox?.value ?? question.defaultValue;
+				const textarea = this._textInputTextareas.get(question.id);
+				return textarea?.value ?? question.defaultValue;
 			}
 
 			case 'singleSelect': {

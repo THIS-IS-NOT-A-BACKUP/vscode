@@ -96,8 +96,8 @@ suite('ChatQuestionCarouselPart', () => {
 
 			const inputContainer = widget.domNode.querySelector('.chat-question-input-container');
 			assert.ok(inputContainer);
-			const inputBox = inputContainer?.querySelector('.monaco-inputbox');
-			assert.ok(inputBox, 'Should have an input box for text questions');
+			const textarea = inputContainer?.querySelector('textarea.chat-question-text-textarea');
+			assert.ok(textarea, 'Should have a textarea for text questions');
 		});
 
 		test('renders radio buttons for singleSelect type questions', () => {
