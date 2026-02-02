@@ -26,7 +26,7 @@ import { setup as setupLocalizationTests } from './areas/workbench/localization.
 import { setup as setupLaunchTests } from './areas/workbench/launch.test';
 import { setup as setupTerminalTests } from './areas/terminal/terminal.test';
 import { setup as setupTaskTests } from './areas/task/task.test';
-import { setup as setupChatTests } from './areas/chat/chat.test';
+import { setup as setupChatTests } from './areas/chat/chatDisabled.test';
 import { setup as setupChatAnonymousTests } from './areas/chat/chatAnonymous.test';
 import { setup as setupAccessibilityTests } from './areas/accessibility/accessibility.test';
 

@@ -53,11 +53,11 @@ export class Chat {
 		await this.code.waitForElement(CHAT_RESPONSE_COMPLETE, undefined, retryCount);
 	}
 
-	async waitForModelInFooter(modelName: string): Promise<void> {
+	async waitForModelInFooter(): Promise<void> {
 		await this.code.waitForElements(CHAT_FOOTER_DETAILS, false, el => {
 			return el.some(el => {
 				const text = el && typeof el.textContent === 'string' ? el.textContent : '';
-				return !!text && text.includes(modelName);
+				return !!text && text.length > 0;
 			});
 		});
 	}

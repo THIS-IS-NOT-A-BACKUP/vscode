@@ -42,7 +42,7 @@ import { IAgentSession } from '../../chat/browser/agentSessions/agentSessionsMod
 import { AgentSessionsWelcomeEditorOptions, AgentSessionsWelcomeInput, AgentSessionsWelcomeWorkspaceKind } from './agentSessionsWelcomeInput.js';
 import { IChatService } from '../../chat/common/chatService/chatService.js';
 import { IChatModel } from '../../chat/common/model/chatModel.js';
-import { ChatViewId, ChatViewPaneTarget, IChatWidgetService, ISessionTypePickerDelegate, IWorkspacePickerDelegate, IWorkspacePickerItem } from '../../chat/browser/chat.js';
+import { ChatViewId, IChatWidgetService, ISessionTypePickerDelegate, IWorkspacePickerDelegate, IWorkspacePickerItem } from '../../chat/browser/chat.js';
 import { ChatSessionPosition, getResourceForNewChatSession } from '../../chat/browser/chatSessions/chatSessions.contribution.js';
 import { IChatEntitlementService } from '../../../services/chat/common/chatEntitlementService.js';
 import { AgentSessionsControl, IAgentSessionsControlOptions } from '../../chat/browser/agentSessions/agentSessionsControl.js';
@@ -134,7 +134,7 @@ export class AgentSessionsWelcomePage extends EditorPane {
 	private walkthroughs: IResolvedWalkthrough[] = [];
 	private _selectedSessionProvider: AgentSessionProviders = AgentSessionProviders.Local;
 	private _selectedWorkspace: IWorkspacePickerItem | undefined;
-	private _recentWorkspaces: Array<IRecentWorkspace | IRecentFolder> = [];
+	private _recentTrustedWorkspaces: Array<IRecentWorkspace | IRecentFolder> = [];
 	private _isEmptyWorkspace: boolean = false;
 	private _workspaceKind: AgentSessionsWelcomeWorkspaceKind = 'empty';
 
@@ -216,17 +216,8 @@ export class AgentSessionsWelcomePage extends EditorPane {
 		// Detect empty workspace and fetch recent workspaces
 		this._isEmptyWorkspace = this.workspaceContextService.getWorkbenchState() === WorkbenchState.EMPTY;
 		if (this._isEmptyWorkspace) {
-			const recentlyOpened = await this.workspacesService.getRecentlyOpened();
-			const trustInfoPromises = recentlyOpened.workspaces.map(async ws => {
-				const uri = isRecentWorkspace(ws) ? ws.workspace.configPath : ws.folderUri;
-				const trustInfo = await this.workspaceTrustManagementService.getUriTrustInfo(uri);
-				return { workspace: ws, trusted: trustInfo.trusted };
-			});
-			const trustInfoResults = await Promise.all(trustInfoPromises);
-			const filteredWorkspaces = trustInfoResults
-				.filter(result => result.trusted)
-				.map(result => result.workspace);
-			this._recentWorkspaces = filteredWorkspaces.slice(0, MAX_REPO_PICKS);
+			const recentlyOpened = await this.getRecentlyOpenedWorkspaces(true);
+			this._recentTrustedWorkspaces = recentlyOpened.slice(0, MAX_REPO_PICKS);
 		}
 
 		// Get walkthroughs
@@ -237,7 +228,7 @@ export class AgentSessionsWelcomePage extends EditorPane {
 		append(header, $('h1.product-name', {}, this.productService.nameLong));
 
 		const startEntries = append(header, $('.agentSessionsWelcome-startEntries'));
-		this.buildStartEntries(startEntries);
+		await this.buildStartEntries(startEntries);
 
 		// Chat input section
 		const chatSection = append(this.contentContainer, $('.agentSessionsWelcome-chatSection'));
@@ -267,10 +258,14 @@ export class AgentSessionsWelcomePage extends EditorPane {
 		this.scrollableElement?.scanDomNode();
 	}
 
-	private buildStartEntries(container: HTMLElement): void {
+	private async buildStartEntries(container: HTMLElement): Promise<void> {
+		const workspaces = await this.getRecentlyOpenedWorkspaces(false);
+		const openEntry = workspaces.length > 0
+			? { icon: Codicon.folderOpened, label: localize('openRecent', "Open Recent..."), command: 'workbench.action.openRecent' }
+			: { icon: Codicon.folderOpened, label: localize('openFolder', "Open Folder..."), command: 'workbench.action.files.openFolder' };
 		const entries = [
-			{ icon: Codicon.folderOpened, label: localize('openRecent', "Open Recent..."), command: 'workbench.action.openRecent' },
-			{ icon: Codicon.newFile, label: localize('newFile', "New file..."), command: 'workbench.action.files.newUntitledFile' },
+			openEntry,
+			{ icon: Codicon.newFile, label: localize('newFile', "New file..."), command: 'welcome.showNewFileEntries' },
 			{ icon: Codicon.repoClone, label: localize('cloneRepo', "Clone Git Repository..."), command: 'git.clone' },
 		];
 
@@ -334,7 +329,7 @@ export class AgentSessionsWelcomePage extends EditorPane {
 		const onDidChangeSelectedWorkspace = this.contentDisposables.add(new Emitter<IWorkspacePickerItem | undefined>());
 		const onDidChangeWorkspaces = this.contentDisposables.add(new Emitter<void>());
 		const workspacePickerDelegate: IWorkspacePickerDelegate | undefined = this._isEmptyWorkspace ? {
-			getWorkspaces: () => this._recentWorkspaces.map(w => ({
+			getWorkspaces: () => this._recentTrustedWorkspaces.map(w => ({
 				uri: this.getWorkspaceUri(w),
 				label: this.getWorkspaceLabel(w),
 				isFolder: isRecentFolder(w),
@@ -469,7 +464,7 @@ export class AgentSessionsWelcomePage extends EditorPane {
 		);
 
 		// Find the workspace to determine if it's a folder or workspace file
-		const workspace = this._recentWorkspaces.find(w =>
+		const workspace = this._recentTrustedWorkspaces.find(w =>
 			this.getWorkspaceUri(w).toString() === this._selectedWorkspace?.uri.toString());
 
 		if (workspace) {
@@ -904,7 +899,7 @@ export class AgentSessionsWelcomePage extends EditorPane {
 		}
 		// Now proceed with opening chat and maximizing
 		if (sessionResource) {
-			await this.chatWidgetService.openSession(sessionResource, ChatViewPaneTarget);
+			await this.chatWidgetService.openSession(sessionResource);
 		} else {
 			await this.commandService.executeCommand('workbench.action.chat.open');
 		}
@@ -928,6 +923,20 @@ export class AgentSessionsWelcomePage extends EditorPane {
 		}
 
 		super.dispose();
+	}
+
+	private async getRecentlyOpenedWorkspaces(onlyTrusted: boolean = false): Promise<Array<IRecentWorkspace | IRecentFolder>> {
+		const workspaces = await this.workspacesService.getRecentlyOpened();
+		const trustInfoPromises = workspaces.workspaces.map(async ws => {
+			const uri = isRecentWorkspace(ws) ? ws.workspace.configPath : ws.folderUri;
+			const trustInfo = await this.workspaceTrustManagementService.getUriTrustInfo(uri);
+			return { workspace: ws, trusted: trustInfo.trusted };
+		});
+		const trustInfoResults = await Promise.all(trustInfoPromises);
+		const filteredWorkspaces = trustInfoResults
+			.filter(result => onlyTrusted ? result.trusted : true)
+			.map(result => result.workspace);
+		return filteredWorkspaces;
 	}
 }
 

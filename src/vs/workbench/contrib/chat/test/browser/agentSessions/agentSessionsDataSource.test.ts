@@ -73,11 +73,12 @@ suite('sessionDateFromNow', () => {
 
 	test('returns fromNow result for today', () => {
 		const now = Date.now();
-		// A time from today (5 minutes ago)
-		const fiveMinutesAgo = now - 5 * 60 * 1000;
-		const result = sessionDateFromNow(fiveMinutesAgo);
+		const startOfToday = new Date(now).setHours(0, 0, 0, 0);
+		// A time from today - guaranteed to be after startOfToday
+		const fiveMinutesAfterMidnight = startOfToday + 5 * 60 * 1000;
+		const result = sessionDateFromNow(fiveMinutesAfterMidnight);
 		// Should return a time ago string, not "1 day ago" or "2 days ago"
-		assert.ok(result.includes('min') || result.includes('sec') || result === 'now', `Expected minutes/seconds ago or now, got: ${result}`);
+		assert.ok(result.includes('min') || result.includes('sec') || result.includes('hr') || result === 'now', `Expected minutes/seconds/hours ago or now, got: ${result}`);
 	});
 
 	test('returns fromNow result for three or more days ago', () => {
