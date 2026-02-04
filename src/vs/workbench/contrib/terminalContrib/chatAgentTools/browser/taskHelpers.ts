@@ -240,7 +240,7 @@ export async function collectTerminalResults(
 			isActive: isActive ? () => isActive(terminalTask) : undefined,
 			instance,
 			dependencyTasks,
-			sessionId: invocationContext.sessionId
+			sessionResource: invocationContext.sessionResource
 		};
 
 		// For tasks with problem matchers, wait until the task becomes busy before creating the output monitor

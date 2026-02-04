@@ -794,7 +794,7 @@ export class RunInTerminalTool extends Disposable implements IToolImpl {
 						OutputMonitor,
 						{
 							instance: toolTerminal.instance,
-							sessionId: invocation.context?.sessionId,
+							sessionResource: chatSessionResource,
 							getOutput: (marker?: IXtermMarker) => execution.getOutput(marker ?? startMarker)
 						},
 						undefined,

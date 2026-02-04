@@ -34,6 +34,10 @@ import { PromptFileParser, ParsedPromptFile, PromptHeaderAttributes } from '../p
 import { IAgentInstructions, IAgentSource, IChatPromptSlashCommand, ICustomAgent, IExtensionPromptPath, ILocalPromptPath, IPromptPath, IPromptsService, IAgentSkill, IUserPromptPath, PromptsStorage, ExtensionAgentSourceType, CUSTOM_AGENT_PROVIDER_ACTIVATION_EVENT, INSTRUCTIONS_PROVIDER_ACTIVATION_EVENT, IPromptFileContext, IPromptFileResource, PROMPT_FILE_PROVIDER_ACTIVATION_EVENT, SKILL_PROVIDER_ACTIVATION_EVENT, IPromptDiscoveryInfo, IPromptFileDiscoveryResult, ICustomAgentVisibility } from './promptsService.js';
 import { Delayer } from '../../../../../../base/common/async.js';
 import { Schemas } from '../../../../../../base/common/network.js';
+import { IChatRequestHooks, IHookCommand, HookType } from '../hookSchema.js';
+import { parseHooksFromFile } from '../hookCompatibility.js';
+import { IWorkspaceContextService } from '../../../../../../platform/workspace/common/workspace.js';
+import { IPathService } from '../../../../../services/path/common/pathService.js';
 
 /**
  * Error thrown when a skill file is missing the required name attribute.
@@ -88,6 +92,11 @@ export class PromptsService extends Disposable implements IPromptsService {
 	private readonly cachedSlashCommands: CachedPromise<readonly IChatPromptSlashCommand[]>;
 
 	/**
+	 * Cached hooks. Invalidated when hook files change.
+	 */
+	private readonly cachedHooks: CachedPromise<IChatRequestHooks | undefined>;
+
+	/**
 	 * Cache for parsed prompt files keyed by URI.
 	 * The number in the returned tuple is textModel.getVersionId(), which is an internal VS Code counter that increments every time the text model's content changes.
 	 */
@@ -114,6 +123,7 @@ export class PromptsService extends Disposable implements IPromptsService {
 		[PromptsType.instructions]: new ResourceMap<Promise<IExtensionPromptPath>>(),
 		[PromptsType.agent]: new ResourceMap<Promise<IExtensionPromptPath>>(),
 		[PromptsType.skill]: new ResourceMap<Promise<IExtensionPromptPath>>(),
+		[PromptsType.hook]: new ResourceMap<Promise<IExtensionPromptPath>>(),
 	};
 
 	constructor(
@@ -128,6 +138,8 @@ export class PromptsService extends Disposable implements IPromptsService {
 		@IStorageService private readonly storageService: IStorageService,
 		@IExtensionService private readonly extensionService: IExtensionService,
 		@ITelemetryService private readonly telemetryService: ITelemetryService,
+		@IWorkspaceContextService private readonly workspaceService: IWorkspaceContextService,
+		@IPathService private readonly pathService: IPathService,
 	) {
 		super();
 
@@ -146,6 +158,14 @@ export class PromptsService extends Disposable implements IPromptsService {
 			(token) => this.computePromptSlashCommands(token),
 			() => Event.any(this.getFileLocatorEvent(PromptsType.prompt), Event.filter(modelChangeEvent, e => e.promptType === PromptsType.prompt))
 		));
+
+		this.cachedHooks = this._register(new CachedPromise(
+			(token) => this.computeHooks(token),
+			() => this.getFileLocatorEvent(PromptsType.hook)
+		));
+
+		// Hack: Subscribe to activate caching (CachedPromise only caches when onDidChange has listeners)
+		this._register(this.cachedHooks.onDidChange(() => { }));
 	}
 
 	private getFileLocatorEvent(type: PromptsType): Event<void> {
@@ -341,11 +361,15 @@ export class PromptsService extends Disposable implements IPromptsService {
 			.map(result => result.value);
 
 		const activationEvent = this.getProviderActivationEvent(type);
+		if (!activationEvent) {
+			// No provider activation event for this type (e.g., hooks)
+			return contributedFiles;
+		}
 		const providerFiles = await this.listFromProviders(type, activationEvent, token);
 		return [...contributedFiles, ...providerFiles];
 	}
 
-	private getProviderActivationEvent(type: PromptsType): string {
+	private getProviderActivationEvent(type: PromptsType): string | undefined {
 		switch (type) {
 			case PromptsType.agent:
 				return CUSTOM_AGENT_PROVIDER_ACTIVATION_EVENT;
@@ -355,6 +379,8 @@ export class PromptsService extends Disposable implements IPromptsService {
 				return PROMPT_FILE_PROVIDER_ACTIVATION_EVENT;
 			case PromptsType.skill:
 				return SKILL_PROVIDER_ACTIVATION_EVENT;
+			case PromptsType.hook:
+				return undefined; // hooks don't have extension providers
 		}
 	}
 
@@ -364,6 +390,13 @@ export class PromptsService extends Disposable implements IPromptsService {
 		if (type === PromptsType.agent) {
 			const folders = await this.fileLocator.getAgentSourceFolders();
 			for (const uri of folders) {
+				result.push({ uri, storage: PromptsStorage.local, type });
+			}
+		} else if (type === PromptsType.hook) {
+			// For hooks, return the Copilot hooks folder for creating new hooks
+			// (Claude paths are read-only and not included here)
+			const hooksFolders = await this.fileLocator.getHookSourceFolders();
+			for (const uri of hooksFolders) {
 				result.push({ uri, storage: PromptsStorage.local, type });
 			}
 		} else {
@@ -845,6 +878,81 @@ export class PromptsService extends Disposable implements IPromptsService {
 			skippedParseFailed
 		});
 
+		return result;
+	}
+
+	public getHooks(token: CancellationToken): Promise<IChatRequestHooks | undefined> {
+		return this.cachedHooks.get(token);
+	}
+
+	private async computeHooks(token: CancellationToken): Promise<IChatRequestHooks | undefined> {
+		const hookFiles = await this.listPromptFiles(PromptsType.hook, token);
+
+		if (hookFiles.length === 0) {
+			this.logger.trace('[PromptsService] No hook files found.');
+			return undefined;
+		}
+
+		this.logger.trace(`[PromptsService] Found ${hookFiles.length} hook file(s).`);
+
+		// Get user home for tilde expansion
+		const userHomeUri = await this.pathService.userHome();
+		const userHome = userHomeUri.scheme === Schemas.file ? userHomeUri.fsPath : userHomeUri.path;
+
+		// Get workspace root for resolving relative cwd paths
+		const workspaceFolder = this.workspaceService.getWorkspace().folders[0];
+		const workspaceRootUri = workspaceFolder?.uri;
+
+		const collectedHooks: Record<HookType, IHookCommand[]> = {
+			[HookType.SessionStart]: [],
+			[HookType.UserPromptSubmitted]: [],
+			[HookType.PreToolUse]: [],
+			[HookType.PostToolUse]: [],
+			[HookType.PostToolUseFailure]: [],
+			[HookType.SubagentStart]: [],
+			[HookType.SubagentStop]: [],
+			[HookType.Stop]: [],
+		};
+
+		for (const hookFile of hookFiles) {
+			try {
+				const content = await this.fileService.readFile(hookFile.uri);
+				const json = JSON.parse(content.value.toString());
+
+				// Use format-aware parsing that handles Copilot, Claude, and Cursor formats
+				const { format, hooks } = parseHooksFromFile(hookFile.uri, json, workspaceRootUri, userHome);
+
+				for (const [hookType, { hooks: commands }] of hooks) {
+					for (const command of commands) {
+						collectedHooks[hookType].push(command);
+						this.logger.trace(`[PromptsService] Collected ${hookType} hook from ${hookFile.uri} (format: ${format})`);
+					}
+				}
+			} catch (error) {
+				this.logger.warn(`[PromptsService] Failed to parse hook file: ${hookFile.uri}`, error);
+			}
+		}
+
+		// Check if any hooks were collected
+		const hasHooks = Object.values(collectedHooks).some(arr => arr.length > 0);
+		if (!hasHooks) {
+			this.logger.trace('[PromptsService] No valid hooks collected.');
+			return undefined;
+		}
+
+		// Build the result, only including hook types that have entries
+		const result: IChatRequestHooks = {
+			...(collectedHooks[HookType.SessionStart].length > 0 && { sessionStart: collectedHooks[HookType.SessionStart] }),
+			...(collectedHooks[HookType.UserPromptSubmitted].length > 0 && { userPromptSubmitted: collectedHooks[HookType.UserPromptSubmitted] }),
+			...(collectedHooks[HookType.PreToolUse].length > 0 && { preToolUse: collectedHooks[HookType.PreToolUse] }),
+			...(collectedHooks[HookType.PostToolUse].length > 0 && { postToolUse: collectedHooks[HookType.PostToolUse] }),
+			...(collectedHooks[HookType.PostToolUseFailure].length > 0 && { postToolUseFailure: collectedHooks[HookType.PostToolUseFailure] }),
+			...(collectedHooks[HookType.SubagentStart].length > 0 && { subagentStart: collectedHooks[HookType.SubagentStart] }),
+			...(collectedHooks[HookType.SubagentStop].length > 0 && { subagentStop: collectedHooks[HookType.SubagentStop] }),
+			...(collectedHooks[HookType.Stop].length > 0 && { stop: collectedHooks[HookType.Stop] }),
+		};
+
+		this.logger.trace(`[PromptsService] Collected hooks: ${JSON.stringify(Object.keys(result))}`);
 		return result;
 	}
 

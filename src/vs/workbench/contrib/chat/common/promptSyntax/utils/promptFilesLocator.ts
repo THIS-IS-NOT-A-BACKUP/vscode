@@ -12,7 +12,7 @@ import { getPromptFileLocationsConfigKey, isTildePath, PromptsConfig } from '../
 import { basename, dirname, isEqualOrParent, joinPath } from '../../../../../../base/common/resources.js';
 import { IWorkspaceContextService } from '../../../../../../platform/workspace/common/workspace.js';
 import { IConfigurationService } from '../../../../../../platform/configuration/common/configuration.js';
-import { COPILOT_CUSTOM_INSTRUCTIONS_FILENAME, AGENTS_SOURCE_FOLDER, getPromptFileExtension, getPromptFileType, LEGACY_MODE_FILE_EXTENSION, getCleanPromptName, AGENT_FILE_EXTENSION, getPromptFileDefaultLocations, SKILL_FILENAME, IPromptSourceFolder, DEFAULT_AGENT_SOURCE_FOLDERS, IResolvedPromptFile, IResolvedPromptSourceFolder, PromptFileSource } from '../config/promptFileLocations.js';
+import { COPILOT_CUSTOM_INSTRUCTIONS_FILENAME, AGENTS_SOURCE_FOLDER, getPromptFileExtension, getPromptFileType, LEGACY_MODE_FILE_EXTENSION, getCleanPromptName, AGENT_FILE_EXTENSION, getPromptFileDefaultLocations, SKILL_FILENAME, IPromptSourceFolder, DEFAULT_AGENT_SOURCE_FOLDERS, DEFAULT_HOOK_FILE_PATHS, IResolvedPromptFile, IResolvedPromptSourceFolder, PromptFileSource, HOOKS_SOURCE_FOLDER } from '../config/promptFileLocations.js';
 import { PromptsType } from '../promptTypes.js';
 import { IWorkbenchEnvironmentService } from '../../../../../services/environment/common/environmentService.js';
 import { Schemas } from '../../../../../../base/common/network.js';
@@ -116,12 +116,19 @@ export class PromptFilesLocator {
 		const defaultFolders = getPromptFileDefaultLocations(type);
 
 		for (const sourceFolder of defaultFolders) {
+			let folderPath: URI;
 			if (sourceFolder.storage === PromptsStorage.local) {
 				for (const workspaceFolder of folders) {
-					result.push(joinPath(workspaceFolder.uri, sourceFolder.path));
+					folderPath = joinPath(workspaceFolder.uri, sourceFolder.path);
+					// For hooks, the paths are file paths, so get the parent directory
+					result.push(type === PromptsType.hook ? dirname(folderPath) : folderPath);
 				}
 			} else if (sourceFolder.storage === PromptsStorage.user) {
-				result.push(joinPath(userHome, sourceFolder.path));
+				// For tilde paths, strip the ~/ prefix before joining with userHome
+				const relativePath = isTildePath(sourceFolder.path) ? sourceFolder.path.substring(2) : sourceFolder.path;
+				folderPath = joinPath(userHome, relativePath);
+				// For hooks, the paths are file paths, so get the parent directory
+				result.push(type === PromptsType.hook ? dirname(folderPath) : folderPath);
 			}
 		}
 
@@ -191,6 +198,15 @@ export class PromptFilesLocator {
 	public async getAgentSourceFolders(): Promise<readonly URI[]> {
 		const userHome = await this.pathService.userHome();
 		return this.toAbsoluteLocations(PromptsType.agent, DEFAULT_AGENT_SOURCE_FOLDERS, userHome).map(l => l.uri);
+	}
+
+	/**
+	 * Gets the hook source folders for creating new hooks.
+	 * Returns only the Copilot hooks folder (.github/hooks) since Claude paths are read-only.
+	 */
+	public async getHookSourceFolders(): Promise<readonly URI[]> {
+		const { folders } = this.workspaceService.getWorkspace();
+		return folders.map(folder => joinPath(folder.uri, HOOKS_SOURCE_FOLDER));
 	}
 
 	/**
@@ -328,9 +344,18 @@ export class PromptFilesLocator {
 		const configuredLocations = PromptsConfig.promptSourceFolders(this.configService, type);
 		if (type === PromptsType.agent) {
 			configuredLocations.push(...DEFAULT_AGENT_SOURCE_FOLDERS);
+		} else if (type === PromptsType.hook) {
+			configuredLocations.push(...DEFAULT_HOOK_FILE_PATHS);
 		}
 
 		const absoluteLocations = this.toAbsoluteLocations(type, configuredLocations, undefined);
+
+		// For hooks, the paths are file paths (e.g., '.github/hooks/hooks.json'), not folder paths.
+		// We need to watch the parent directories of these files.
+		if (type === PromptsType.hook) {
+			return absoluteLocations.map((location) => ({ parent: dirname(location.uri) }));
+		}
+
 		return absoluteLocations.map((location) => firstNonGlobParentAndPattern(location.uri));
 	}
 

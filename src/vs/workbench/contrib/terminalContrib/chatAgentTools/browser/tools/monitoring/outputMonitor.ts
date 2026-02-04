@@ -11,6 +11,7 @@ import { Emitter, Event } from '../../../../../../../base/common/event.js';
 import { MarkdownString } from '../../../../../../../base/common/htmlContent.js';
 import { Disposable, MutableDisposable, type IDisposable } from '../../../../../../../base/common/lifecycle.js';
 import { isObject, isString } from '../../../../../../../base/common/types.js';
+import { URI } from '../../../../../../../base/common/uri.js';
 import { localize } from '../../../../../../../nls.js';
 import { ExtensionIdentifier } from '../../../../../../../platform/extensions/common/extensions.js';
 import { IChatWidgetService } from '../../../../../chat/browser/chat.js';
@@ -27,7 +28,6 @@ import { getTextResponseFromStream } from './utils.js';
 import { IConfigurationService } from '../../../../../../../platform/configuration/common/configuration.js';
 import { TerminalChatAgentToolsSettingId } from '../../../common/terminalChatAgentToolsConfiguration.js';
 import { ITerminalService } from '../../../../../terminal/browser/terminal.js';
-import { LocalChatSessionUri } from '../../../../../chat/common/model/chatUri.js';
 import { ITerminalLogService } from '../../../../../../../platform/terminal/common/terminal.js';
 
 export interface IOutputMonitor extends Disposable {
@@ -568,7 +568,7 @@ export class OutputMonitor extends Disposable implements IOutputMonitor {
 		const focusTerminalSelection = Symbol('focusTerminalSelection');
 		const { promise: userPrompt, part } = this._createElicitationPart<boolean | typeof focusTerminalSelection>(
 			token,
-			execution.sessionId,
+			execution.sessionResource,
 			new MarkdownString(localize('poll.terminal.inputRequest', "The terminal is awaiting input.")),
 			new MarkdownString(localize('poll.terminal.requireInput', "{0}\nPlease provide the required input to the terminal.\n\n", confirmationPrompt.prompt)),
 			'',
@@ -634,7 +634,7 @@ export class OutputMonitor extends Disposable implements IOutputMonitor {
 		let instanceDisposedDisposable: IDisposable = Disposable.None;
 		const { promise: userPrompt, part } = this._createElicitationPart<string | boolean | typeof focusTerminalSelection | undefined>(
 			token,
-			execution.sessionId,
+			execution.sessionResource,
 			new MarkdownString(localize('poll.terminal.confirmRequired', "The terminal is awaiting input.")),
 			new MarkdownString(localize('poll.terminal.confirmRunDetail', "{0}\n Do you want to send `{1}`{2} followed by `Enter` to the terminal?", confirmationPrompt.prompt, suggestedOptionValue, isString(suggestedOption) ? '' : suggestedOption.description ? ' (' + suggestedOption.description + ')' : '')),
 			'',
@@ -719,7 +719,7 @@ export class OutputMonitor extends Disposable implements IOutputMonitor {
 	// attach additional listeners (e.g., onDidRequestHide) or compose with other promises.
 	private _createElicitationPart<T>(
 		token: CancellationToken,
-		sessionId: string | undefined,
+		sessionResource: URI | undefined,
 		title: MarkdownString,
 		detail: MarkdownString,
 		subtitle: string,
@@ -729,7 +729,7 @@ export class OutputMonitor extends Disposable implements IOutputMonitor {
 		onReject?: () => MaybePromise<T | undefined>,
 		moreActions?: IAction[] | undefined
 	): { promise: Promise<T | undefined>; part: ChatElicitationRequestPart } {
-		const chatModel = sessionId && this._chatService.getSession(LocalChatSessionUri.forSession(sessionId));
+		const chatModel = sessionResource && this._chatService.getSession(sessionResource);
 		if (!(chatModel instanceof ChatModel)) {
 			throw new Error('No model');
 		}

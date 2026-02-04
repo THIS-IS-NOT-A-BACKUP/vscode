@@ -140,7 +140,7 @@ export class AgentSessionsWelcomePage extends EditorPane {
 
 	// Telemetry tracking
 	private _openedAt: number = 0;
-	private _closedBy: string = 'unknown';
+	private _closedBy?: string;
 	private _storedInput: AgentSessionsWelcomeInput | undefined;
 
 	constructor(
@@ -202,9 +202,27 @@ export class AgentSessionsWelcomePage extends EditorPane {
 
 	override async setInput(input: AgentSessionsWelcomeInput, options: AgentSessionsWelcomeEditorOptions | undefined, context: IEditorOpenContext, token: CancellationToken): Promise<void> {
 		this._storedInput = input;
+		this._openedAt = Date.now();
 		await super.setInput(input, options, context, token);
 		this._workspaceKind = input.workspaceKind ?? 'empty';
 		await this.buildContent();
+	}
+
+	override clearInput(): void {
+		// Send closed telemetry when the editor is closed
+		if (this._openedAt > 0) {
+			const visibleDurationMs = Date.now() - this._openedAt;
+			this.telemetryService.publicLog2<AgentSessionsWelcomeClosedEvent, AgentSessionsWelcomeClosedClassification>(
+				'agentSessionsWelcome.closed',
+				{
+					visibleDurationMs,
+					closedBy: this._closedBy ?? 'disposed'
+				}
+			);
+			this._openedAt = 0;
+			this._closedBy = undefined;
+		}
+		super.clearInput();
 	}
 
 	private async buildContent(): Promise<void> {
@@ -577,9 +595,9 @@ export class AgentSessionsWelcomePage extends EditorPane {
 			trackActiveEditorSession: () => false,
 			source: 'welcomeView',
 			notifySessionOpened: () => {
-				this._closedBy = 'sessionClicked';
 				const isProjectionEnabled = this.configurationService.getValue<boolean>(ChatConfiguration.AgentSessionProjectionEnabled);
 				if (!isProjectionEnabled) {
+					this._closedBy = 'sessionClicked';
 					this.revealMaximizedChat();
 				}
 			}
@@ -895,22 +913,6 @@ export class AgentSessionsWelcomePage extends EditorPane {
 		if (chatViewLocation === ViewContainerLocation.AuxiliaryBar) {
 			this.layoutService.setAuxiliaryBarMaximized(true);
 		}
-	}
-
-	override dispose(): void {
-		// Send closed telemetry before disposing
-		if (this._openedAt > 0) {
-			const visibleDurationMs = Date.now() - this._openedAt;
-			this.telemetryService.publicLog2<AgentSessionsWelcomeClosedEvent, AgentSessionsWelcomeClosedClassification>(
-				'agentSessionsWelcome.closed',
-				{
-					visibleDurationMs,
-					closedBy: this._closedBy
-				}
-			);
-		}
-
-		super.dispose();
 	}
 
 	private async getRecentlyOpenedWorkspaces(onlyTrusted: boolean = false): Promise<Array<IRecentWorkspace | IRecentFolder>> {

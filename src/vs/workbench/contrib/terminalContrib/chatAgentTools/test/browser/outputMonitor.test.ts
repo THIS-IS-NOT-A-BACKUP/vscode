@@ -7,8 +7,7 @@ import * as assert from 'assert';
 import { detectsGenericPressAnyKeyPattern, detectsInputRequiredPattern, detectsNonInteractiveHelpPattern, detectsVSCodeTaskFinishMessage, OutputMonitor } from '../../browser/tools/monitoring/outputMonitor.js';
 import { CancellationTokenSource } from '../../../../../../base/common/cancellation.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
-import { ITerminalInstance } from '../../../../terminal/browser/terminal.js';
-import { IPollingResult, OutputMonitorState } from '../../browser/tools/monitoring/types.js';
+import { IExecution, IPollingResult, OutputMonitorState } from '../../browser/tools/monitoring/types.js';
 import { TestInstantiationService } from '../../../../../../platform/instantiation/test/common/instantiationServiceMock.js';
 import { ILanguageModelsService } from '../../../../chat/common/languageModels.js';
 import { IChatService } from '../../../../chat/common/chatService/chatService.js';
@@ -24,7 +23,7 @@ import { isNumber } from '../../../../../../base/common/types.js';
 suite('OutputMonitor', () => {
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
 	let monitor: OutputMonitor;
-	let execution: { getOutput: () => string; isActive?: () => Promise<boolean>; instance: Pick<ITerminalInstance, 'instanceId' | 'sendText' | 'onData' | 'onDidInputData' | 'focus' | 'registerMarker' | 'onDisposed'>; sessionId: string };
+	let execution: IExecution;
 	let cts: CancellationTokenSource;
 	let instantiationService: TestInstantiationService;
 	let sendTextCalled: boolean;
@@ -46,7 +45,7 @@ suite('OutputMonitor', () => {
 				// eslint-disable-next-line local/code-no-any-casts
 				registerMarker: () => ({ id: 1 } as any)
 			},
-			sessionId: '1'
+			sessionResource: LocalChatSessionUri.forSession('1')
 		};
 		instantiationService = new TestInstantiationService();
 
