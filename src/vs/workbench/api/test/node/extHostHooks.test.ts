@@ -9,7 +9,8 @@ import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/c
 import { NullLogService } from '../../../../platform/log/common/log.js';
 import { NodeExtHostHooks } from '../../node/extHostHooksNode.js';
 import { IHookCommandDto, MainThreadHooksShape } from '../../common/extHost.protocol.js';
-import { IHookResult, HookResultKind } from '../../../contrib/chat/common/hooksExecutionService.js';
+import { HookCommandResultKind } from '../../../contrib/chat/common/hooks/hooksCommandTypes.js';
+import { IHookResult } from '../../../contrib/chat/common/hooks/hooksTypes.js';
 import { IExtHostRpcService } from '../../common/extHostRpcService.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 
@@ -57,7 +58,7 @@ suite.skip('ExtHostHooks', () => {
 		const hookCommand = createHookCommandDto('echo "hello world"');
 		const result = await hooksService.$runHookCommand(hookCommand, undefined, CancellationToken.None);
 
-		assert.strictEqual(result.kind, HookResultKind.Success);
+		assert.strictEqual(result.kind, HookCommandResultKind.Success);
 		assert.strictEqual((result.result as string).trim(), 'hello world');
 	});
 
@@ -65,7 +66,7 @@ suite.skip('ExtHostHooks', () => {
 		const hookCommand = createHookCommandDto('echo \'{"key": "value"}\'');
 		const result = await hooksService.$runHookCommand(hookCommand, undefined, CancellationToken.None);
 
-		assert.strictEqual(result.kind, HookResultKind.Success);
+		assert.strictEqual(result.kind, HookCommandResultKind.Success);
 		assert.deepStrictEqual(result.result, { key: 'value' });
 	});
 
@@ -73,14 +74,14 @@ suite.skip('ExtHostHooks', () => {
 		const hookCommand = createHookCommandDto('exit 1');
 		const result = await hooksService.$runHookCommand(hookCommand, undefined, CancellationToken.None);
 
-		assert.strictEqual(result.kind, HookResultKind.Error);
+		assert.strictEqual(result.kind, HookCommandResultKind.Error);
 	});
 
 	test('$runHookCommand captures stderr on failure', async () => {
 		const hookCommand = createHookCommandDto('echo "error message" >&2 && exit 1');
 		const result = await hooksService.$runHookCommand(hookCommand, undefined, CancellationToken.None);
 
-		assert.strictEqual(result.kind, HookResultKind.Error);
+		assert.strictEqual(result.kind, HookCommandResultKind.Error);
 		assert.strictEqual((result.result as string).trim(), 'error message');
 	});
 
@@ -89,7 +90,7 @@ suite.skip('ExtHostHooks', () => {
 		const input = { tool: 'bash', args: { command: 'ls' } };
 		const result = await hooksService.$runHookCommand(hookCommand, input, CancellationToken.None);
 
-		assert.strictEqual(result.kind, HookResultKind.Success);
+		assert.strictEqual(result.kind, HookCommandResultKind.Success);
 		assert.deepStrictEqual(result.result, input);
 	});
 
@@ -97,14 +98,14 @@ suite.skip('ExtHostHooks', () => {
 		const hookCommand = createHookCommandDto('/nonexistent/command/that/does/not/exist');
 		const result = await hooksService.$runHookCommand(hookCommand, undefined, CancellationToken.None);
 
-		assert.strictEqual(result.kind, HookResultKind.Error);
+		assert.strictEqual(result.kind, HookCommandResultKind.Error);
 	});
 
 	test('$runHookCommand uses custom environment variables', async () => {
 		const hookCommand = createHookCommandDto('echo $MY_VAR', { env: { MY_VAR: 'custom_value' } });
 		const result = await hooksService.$runHookCommand(hookCommand, undefined, CancellationToken.None);
 
-		assert.strictEqual(result.kind, HookResultKind.Success);
+		assert.strictEqual(result.kind, HookCommandResultKind.Success);
 		assert.strictEqual((result.result as string).trim(), 'custom_value');
 	});
 
@@ -112,7 +113,7 @@ suite.skip('ExtHostHooks', () => {
 		const hookCommand = createHookCommandDto('pwd', { cwd: URI.file('/tmp') });
 		const result = await hooksService.$runHookCommand(hookCommand, undefined, CancellationToken.None);
 
-		assert.strictEqual(result.kind, HookResultKind.Success);
+		assert.strictEqual(result.kind, HookCommandResultKind.Success);
 		// The result should contain /tmp or /private/tmp (macOS symlink)
 		assert.ok((result.result as string).includes('tmp'));
 	});

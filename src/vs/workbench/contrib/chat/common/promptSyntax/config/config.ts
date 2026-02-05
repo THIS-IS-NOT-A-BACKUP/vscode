@@ -96,6 +96,11 @@ export namespace PromptsConfig {
 	export const USE_NESTED_AGENT_MD = 'chat.useNestedAgentsMdFiles';
 
 	/**
+	 * Configuration key for the CLAUDE.md.
+	 */
+	export const USE_CLAUDE_MD = 'chat.useClaudeMdFile';
+
+	/**
 	 * Configuration key for agent skills usage.
 	 */
 	export const USE_AGENT_SKILLS = 'chat.useAgentSkills';

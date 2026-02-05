@@ -18,7 +18,7 @@ suite('HookClaudeCompat', () => {
 		});
 
 		test('resolves UserPromptSubmit', () => {
-			assert.strictEqual(resolveClaudeHookType('UserPromptSubmit'), HookType.UserPromptSubmitted);
+			assert.strictEqual(resolveClaudeHookType('UserPromptSubmit'), HookType.UserPromptSubmit);
 		});
 
 		test('returns undefined for unknown type', () => {
@@ -35,12 +35,8 @@ suite('HookClaudeCompat', () => {
 			assert.strictEqual(getClaudeHookTypeName(HookType.PreToolUse), 'PreToolUse');
 		});
 
-		test('gets UserPromptSubmit for HookType.UserPromptSubmitted', () => {
-			assert.strictEqual(getClaudeHookTypeName(HookType.UserPromptSubmitted), 'UserPromptSubmit');
-		});
-
-		test('returns undefined for HookType.PostToolUseFailure (not supported)', () => {
-			assert.strictEqual(getClaudeHookTypeName(HookType.PostToolUseFailure), undefined);
+		test('gets UserPromptSubmit for HookType.UserPromptSubmit', () => {
+			assert.strictEqual(getClaudeHookTypeName(HookType.UserPromptSubmit), 'UserPromptSubmit');
 		});
 	});
 
@@ -206,21 +202,6 @@ suite('HookClaudeCompat', () => {
 				const entry = result.get(HookType.PreToolUse)!;
 				assert.strictEqual(entry.hooks.length, 1);
 				assert.strictEqual(entry.hooks[0].command, 'echo "no type"');
-			});
-		});
-
-		suite('hook type name mapping', () => {
-			test('maps UserPromptSubmit to UserPromptSubmitted', () => {
-				const json = {
-					hooks: {
-						UserPromptSubmit: [{ type: 'command', command: 'echo "submitted"' }]
-					}
-				};
-
-				const result = parseClaudeHooks(json, workspaceRoot, userHome);
-
-				assert.ok(result.has(HookType.UserPromptSubmitted));
-				assert.strictEqual(result.get(HookType.UserPromptSubmitted)!.originalId, 'UserPromptSubmit');
 			});
 		});
 

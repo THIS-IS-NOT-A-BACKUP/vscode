@@ -14,14 +14,13 @@ import { untildify } from '../../../../../base/common/labels.js';
  * Enum of available hook types that can be configured in hooks.json
  */
 export enum HookType {
-	SessionStart = 'sessionStart',
-	UserPromptSubmitted = 'userPromptSubmitted',
-	PreToolUse = 'preToolUse',
-	PostToolUse = 'postToolUse',
-	PostToolUseFailure = 'postToolUseFailure',
-	SubagentStart = 'subagentStart',
-	SubagentStop = 'subagentStop',
-	Stop = 'stop',
+	SessionStart = 'SessionStart',
+	UserPromptSubmit = 'UserPromptSubmit',
+	PreToolUse = 'PreToolUse',
+	PostToolUse = 'PostToolUse',
+	SubagentStart = 'SubagentStart',
+	SubagentStop = 'SubagentStop',
+	Stop = 'Stop',
 }
 
 /**
@@ -39,9 +38,9 @@ export const HOOK_TYPES = [
 		description: nls.localize('hookType.sessionStart.description', "Executed when a new agent session begins or when resuming an existing session.")
 	},
 	{
-		id: HookType.UserPromptSubmitted,
-		label: nls.localize('hookType.userPromptSubmitted.label', "User Prompt Submitted"),
-		description: nls.localize('hookType.userPromptSubmitted.description', "Executed when the user submits a prompt to the agent.")
+		id: HookType.UserPromptSubmit,
+		label: nls.localize('hookType.userPromptSubmit.label', "User Prompt Submit"),
+		description: nls.localize('hookType.userPromptSubmit.description', "Executed when the user submits a prompt to the agent.")
 	},
 	{
 		id: HookType.PreToolUse,
@@ -52,11 +51,6 @@ export const HOOK_TYPES = [
 		id: HookType.PostToolUse,
 		label: nls.localize('hookType.postToolUse.label', "Post-Tool Use"),
 		description: nls.localize('hookType.postToolUse.description', "Executed after a tool completes execution successfully.")
-	},
-	{
-		id: HookType.PostToolUseFailure,
-		label: nls.localize('hookType.postToolUseFailure.label', "Post-Tool Use Failure"),
-		description: nls.localize('hookType.postToolUseFailure.description', "Executed after a tool completes execution with a failure.")
 	},
 	{
 		id: HookType.SubagentStart,
@@ -98,10 +92,9 @@ export interface IHookCommand {
  */
 export interface IChatRequestHooks {
 	readonly [HookType.SessionStart]?: readonly IHookCommand[];
-	readonly [HookType.UserPromptSubmitted]?: readonly IHookCommand[];
+	readonly [HookType.UserPromptSubmit]?: readonly IHookCommand[];
 	readonly [HookType.PreToolUse]?: readonly IHookCommand[];
 	readonly [HookType.PostToolUse]?: readonly IHookCommand[];
-	readonly [HookType.PostToolUseFailure]?: readonly IHookCommand[];
 	readonly [HookType.SubagentStart]?: readonly IHookCommand[];
 	readonly [HookType.SubagentStop]?: readonly IHookCommand[];
 	readonly [HookType.Stop]?: readonly IHookCommand[];
@@ -176,37 +169,33 @@ export const hookFileSchema: IJSONSchema = {
 		hooks: {
 			type: 'object',
 			description: nls.localize('hookFile.hooks', 'Hook definitions organized by type.'),
-			additionalProperties: false,
+			additionalProperties: true,
 			properties: {
-				sessionStart: {
+				SessionStart: {
 					...hookArraySchema,
 					description: nls.localize('hookFile.sessionStart', 'Executed when a new agent session begins or when resuming an existing session. Use to initialize environments, log session starts, validate project state, or set up temporary resources.')
 				},
-				userPromptSubmitted: {
+				UserPromptSubmit: {
 					...hookArraySchema,
-					description: nls.localize('hookFile.userPromptSubmitted', 'Executed when the user submits a prompt to the agent. Use to log user requests for auditing and usage analysis.')
+					description: nls.localize('hookFile.userPromptSubmit', 'Executed when the user submits a prompt to the agent. Use to log user requests for auditing and usage analysis.')
 				},
-				preToolUse: {
+				PreToolUse: {
 					...hookArraySchema,
 					description: nls.localize('hookFile.preToolUse', 'Executed before the agent uses any tool (such as bash, edit, view). This is the most powerful hook as it can approve or deny tool executions. Use to block dangerous commands, enforce security policies, require approval for sensitive operations, or log tool usage.')
 				},
-				postToolUse: {
+				PostToolUse: {
 					...hookArraySchema,
 					description: nls.localize('hookFile.postToolUse', 'Executed after a tool completes execution successfully. Use to log execution results, track usage statistics, generate audit trails, or monitor performance.')
 				},
-				postToolUseFailure: {
-					...hookArraySchema,
-					description: nls.localize('hookFile.postToolUseFailure', 'Executed after a tool completes execution with a failure. Use to log errors, send failure alerts, or trigger recovery actions.')
-				},
-				subagentStart: {
+				SubagentStart: {
 					...hookArraySchema,
 					description: nls.localize('hookFile.subagentStart', 'Executed when a subagent is started. Use to log subagent spawning, track nested agent usage, or initialize subagent-specific resources.')
 				},
-				subagentStop: {
+				SubagentStop: {
 					...hookArraySchema,
 					description: nls.localize('hookFile.subagentStop', 'Executed when a subagent stops. Use to log subagent completion, cleanup subagent resources, or aggregate subagent results.')
 				},
-				stop: {
+				Stop: {
 					...hookArraySchema,
 					description: nls.localize('hookFile.stop', 'Executed when the agent session stops. Use to cleanup resources, generate final reports, or send completion notifications.')
 				}
@@ -251,40 +240,14 @@ export const HOOK_FILE_GLOB = 'hooks/hooks.json';
 
 /**
  * Normalizes a raw hook type identifier to the canonical HookType enum value.
- * Supports alternative casing and naming conventions from different tools:
- * - Claude Code: PreToolUse, PostToolUse, SessionStart, Stop, SubagentStart, SubagentStop, UserPromptSubmit
- * - GitHub Copilot: sessionStart, userPromptSubmitted, preToolUse, postToolUse, etc.
- *
- * @see https://docs.anthropic.com/en/docs/claude-code/hooks
- * @see https://docs.github.com/en/copilot/concepts/agents/coding-agent/about-hooks#types-of-hooks
+ * Only matches exact enum values. For tool-specific naming conventions (e.g., Claude, Copilot CLI),
+ * use the corresponding compat module's resolver function.
  */
-export function normalizeHookTypeId(rawHookTypeId: string): HookType | undefined {
-	// Check if it's already a canonical HookType value
+export function toHookType(rawHookTypeId: string): HookType | undefined {
 	if (Object.values(HookType).includes(rawHookTypeId as HookType)) {
 		return rawHookTypeId as HookType;
 	}
-
-	// Handle alternative names from Claude Code
-	switch (rawHookTypeId) {
-		case 'SessionStart':
-			return HookType.SessionStart;
-		case 'UserPromptSubmit':
-			return HookType.UserPromptSubmitted;
-		case 'PreToolUse':
-			return HookType.PreToolUse;
-		case 'PostToolUse':
-			return HookType.PostToolUse;
-		case 'PostToolUseFailure':
-			return HookType.PostToolUseFailure;
-		case 'SubagentStart':
-			return HookType.SubagentStart;
-		case 'SubagentStop':
-			return HookType.SubagentStop;
-		case 'Stop':
-			return HookType.Stop;
-		default:
-			return undefined;
-	}
+	return undefined;
 }
 
 /**

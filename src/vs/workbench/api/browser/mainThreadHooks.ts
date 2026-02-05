@@ -7,7 +7,9 @@ import { URI, UriComponents } from '../../../base/common/uri.js';
 import { Disposable } from '../../../base/common/lifecycle.js';
 import { extHostNamedCustomer, IExtHostContext } from '../../services/extensions/common/extHostCustomers.js';
 import { ExtHostContext, MainContext, MainThreadHooksShape } from '../common/extHost.protocol.js';
-import { HookResultKind, IHookResult, IHooksExecutionProxy, IHooksExecutionService } from '../../contrib/chat/common/hooksExecutionService.js';
+import { HookCommandResultKind, IHookCommandResult } from '../../contrib/chat/common/hooks/hooksCommandTypes.js';
+import { IHookResult } from '../../contrib/chat/common/hooks/hooksTypes.js';
+import { IHooksExecutionProxy, IHooksExecutionService } from '../../contrib/chat/common/hooks/hooksExecutionService.js';
 import { HookTypeValue, IHookCommand } from '../../contrib/chat/common/promptSyntax/hookSchema.js';
 import { CancellationToken } from '../../../base/common/cancellation.js';
 
@@ -22,10 +24,10 @@ export class MainThreadHooks extends Disposable implements MainThreadHooksShape 
 		const extHostProxy = extHostContext.getProxy(ExtHostContext.ExtHostHooks);
 
 		const proxy: IHooksExecutionProxy = {
-			runHookCommand: async (hookCommand: IHookCommand, input: unknown, token: CancellationToken): Promise<IHookResult> => {
+			runHookCommand: async (hookCommand: IHookCommand, input: unknown, token: CancellationToken): Promise<IHookCommandResult> => {
 				const result = await extHostProxy.$runHookCommand(hookCommand, input, token);
 				return {
-					kind: result.kind as HookResultKind,
+					kind: result.kind as HookCommandResultKind,
 					result: result.result
 				};
 			}

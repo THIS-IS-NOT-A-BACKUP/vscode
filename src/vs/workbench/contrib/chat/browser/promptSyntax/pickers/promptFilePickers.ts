@@ -7,7 +7,7 @@ import { localize } from '../../../../../../nls.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { Codicon } from '../../../../../../base/common/codicons.js';
 import { ThemeIcon } from '../../../../../../base/common/themables.js';
-import { IExtensionPromptPath, IPromptPath, IPromptsService, PromptsStorage } from '../../../common/promptSyntax/service/promptsService.js';
+import { AgentFileType, IExtensionPromptPath, IPromptPath, IPromptsService, PromptsStorage } from '../../../common/promptSyntax/service/promptsService.js';
 import { dirname, extUri, joinPath } from '../../../../../../base/common/resources.js';
 import { DisposableStore } from '../../../../../../base/common/lifecycle.js';
 import { IFileService } from '../../../../../../platform/files/common/files.js';
@@ -23,8 +23,6 @@ import { IInstantiationService } from '../../../../../../platform/instantiation/
 import { CancellationToken, CancellationTokenSource } from '../../../../../../base/common/cancellation.js';
 import { askForPromptSourceFolder } from './askForPromptSourceFolder.js';
 import { ILabelService } from '../../../../../../platform/label/common/label.js';
-import { IConfigurationService } from '../../../../../../platform/configuration/common/configuration.js';
-import { PromptsConfig } from '../../../common/promptSyntax/config/config.js';
 import { IProductService } from '../../../../../../platform/product/common/productService.js';
 import { PromptFileRewriter } from '../promptFileRewriter.js';
 import { isOrganizationPromptFile } from '../../../common/promptSyntax/utils/promptsServiceUtils.js';
@@ -273,7 +271,6 @@ export class PromptFilePickers {
 		@IInstantiationService private readonly _instaService: IInstantiationService,
 		@IPromptsService private readonly _promptsService: IPromptsService,
 		@ILabelService private readonly _labelService: ILabelService,
-		@IConfigurationService private readonly _configurationService: IConfigurationService,
 		@IProductService private readonly _productService: IProductService,
 	) {
 	}
@@ -401,18 +398,13 @@ export class PromptFilePickers {
 		// listPromptFilesForStorage() because that function only handles *.instructions.md files (under `.github/instructions/`, etc.)
 		let agentInstructionFiles: IPromptPath[] = [];
 		if (options.type === PromptsType.instructions) {
-			const useNestedAgentMD = this._configurationService.getValue(PromptsConfig.USE_NESTED_AGENT_MD);
-			const agentInstructionUris = [
-				...await this._promptsService.listCopilotInstructionsMDs(token),
-				...await this._promptsService.listAgentMDs(token, !!useNestedAgentMD)
-			];
-			agentInstructionFiles = agentInstructionUris.map(uri => {
-				const folderName = this._labelService.getUriLabel(dirname(uri), { relative: true });
+			const agentInstructionUris = await this._promptsService.listAgentInstructions(token);
+			agentInstructionFiles = agentInstructionUris.map(agentInstructionFile => {
+				const folderName = this._labelService.getUriLabel(dirname(agentInstructionFile.uri), { relative: true });
 				// Don't show the folder path for files under .github folder (namely, copilot-instructions.md) since that is only defined once per repo.
-				const shouldShowFolderPath = folderName?.toLowerCase() !== '.github';
 				return {
-					uri,
-					description: shouldShowFolderPath ? folderName : undefined,
+					uri: agentInstructionFile.uri,
+					description: agentInstructionFile.type !== AgentFileType.copilotInstructionsMd ? folderName : undefined,
 					storage: PromptsStorage.local,
 					type: options.type
 				} satisfies IPromptPath;

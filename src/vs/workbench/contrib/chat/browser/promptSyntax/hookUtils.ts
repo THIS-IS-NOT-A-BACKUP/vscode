@@ -5,6 +5,15 @@
 
 import { findNodeAtLocation, Node, parseTree } from '../../../../../base/common/json.js';
 import { ITextEditorSelection } from '../../../../../platform/editor/common/editor.js';
+import { URI } from '../../../../../base/common/uri.js';
+import { IPromptsService } from '../../common/promptSyntax/service/promptsService.js';
+import { PromptsType } from '../../common/promptSyntax/promptTypes.js';
+import { IFileService } from '../../../../../platform/files/common/files.js';
+import { CancellationToken } from '../../../../../base/common/cancellation.js';
+import { formatHookCommandLabel, HOOK_TYPES, HookType, IHookCommand } from '../../common/promptSyntax/hookSchema.js';
+import { parseHooksFromFile } from '../../common/promptSyntax/hookCompatibility.js';
+import * as nls from '../../../../../nls.js';
+import { ILabelService } from '../../../../../platform/label/common/label.js';
 
 /**
  * Converts an offset in content to a 1-based line and column.
@@ -101,4 +110,72 @@ export function findHookCommandSelection(content: string, hookType: string, inde
 		endLineNumber: end.line,
 		endColumn: end.column
 	};
+}
+
+/**
+ * Parsed hook information.
+ */
+export interface IParsedHook {
+	hookType: HookType;
+	hookTypeLabel: string;
+	command: IHookCommand;
+	commandLabel: string;
+	fileUri: URI;
+	filePath: string;
+	index: number;
+	/** The original hook type ID as it appears in the JSON file */
+	originalHookTypeId: string;
+}
+
+/**
+ * Parses all hook files and extracts individual hooks.
+ * This is a shared helper used by both the configure action and diagnostics.
+ */
+export async function parseAllHookFiles(
+	promptsService: IPromptsService,
+	fileService: IFileService,
+	labelService: ILabelService,
+	workspaceRootUri: URI | undefined,
+	userHome: string,
+	token: CancellationToken
+): Promise<IParsedHook[]> {
+	const hookFiles = await promptsService.listPromptFiles(PromptsType.hook, token);
+	const parsedHooks: IParsedHook[] = [];
+
+	for (const hookFile of hookFiles) {
+		try {
+			const content = await fileService.readFile(hookFile.uri);
+			const json = JSON.parse(content.value.toString());
+
+			// Use format-aware parsing
+			const { hooks } = parseHooksFromFile(hookFile.uri, json, workspaceRootUri, userHome);
+
+			for (const [hookType, { hooks: commands, originalId }] of hooks) {
+				const hookTypeMeta = HOOK_TYPES.find(h => h.id === hookType);
+				if (!hookTypeMeta) {
+					continue;
+				}
+
+				for (let i = 0; i < commands.length; i++) {
+					const command = commands[i];
+					const commandLabel = formatHookCommandLabel(command) || nls.localize('commands.hook.emptyCommand', '(empty command)');
+					parsedHooks.push({
+						hookType,
+						hookTypeLabel: hookTypeMeta.label,
+						command,
+						commandLabel,
+						fileUri: hookFile.uri,
+						filePath: labelService.getUriLabel(hookFile.uri, { relative: true }),
+						index: i,
+						originalHookTypeId: originalId
+					});
+				}
+			}
+		} catch (error) {
+			// Skip files that can't be parsed, but surface the failure for diagnostics
+			console.error('Failed to read or parse hook file', hookFile.uri.toString(), error);
+		}
+	}
+
+	return parsedHooks;
 }

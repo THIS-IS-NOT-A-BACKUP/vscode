@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as assert from 'assert';
-import { detectsGenericPressAnyKeyPattern, detectsInputRequiredPattern, detectsNonInteractiveHelpPattern, detectsVSCodeTaskFinishMessage, OutputMonitor } from '../../browser/tools/monitoring/outputMonitor.js';
+import { detectsGenericPressAnyKeyPattern, detectsInputRequiredPattern, detectsNonInteractiveHelpPattern, detectsVSCodeTaskFinishMessage, matchTerminalPromptOption, OutputMonitor } from '../../browser/tools/monitoring/outputMonitor.js';
 import { CancellationTokenSource } from '../../../../../../base/common/cancellation.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
 import { IExecution, IPollingResult, OutputMonitorState } from '../../browser/tools/monitoring/types.js';
@@ -283,6 +283,28 @@ suite('OutputMonitor', () => {
 			assert.strictEqual(detectsNonInteractiveHelpPattern('press q to quit'), true);
 			assert.strictEqual(detectsInputRequiredPattern('press u to show server url'), false);
 			assert.strictEqual(detectsNonInteractiveHelpPattern('press u to show server url'), true);
+		});
+	});
+
+	suite('matchTerminalPromptOption', () => {
+		test('matches suggested option case-insensitively', () => {
+			assert.deepStrictEqual(matchTerminalPromptOption(['Y', 'n'], 'y'), { option: 'Y', index: 0 });
+			assert.deepStrictEqual(matchTerminalPromptOption(['y', 'N'], 'n'), { option: 'N', index: 1 });
+		});
+
+		test('strips quotes and trailing punctuation', () => {
+			assert.deepStrictEqual(matchTerminalPromptOption(['Y', 'n'], '"y"'), { option: 'Y', index: 0 });
+			assert.deepStrictEqual(matchTerminalPromptOption(['yes', 'no'], 'no.'), { option: 'no', index: 1 });
+		});
+
+		test('handles bracketed options like [Y]', () => {
+			assert.deepStrictEqual(matchTerminalPromptOption(['Y', 'n'], '[y]'), { option: 'Y', index: 0 });
+			assert.deepStrictEqual(matchTerminalPromptOption(['y', 'N'], '(n)'), { option: 'N', index: 1 });
+		});
+
+		test('handles default suffixes by using first token', () => {
+			assert.deepStrictEqual(matchTerminalPromptOption(['Y', 'n'], 'Y (default)'), { option: 'Y', index: 0 });
+			assert.deepStrictEqual(matchTerminalPromptOption(['Enter'], 'Enter to continue'), { option: 'Enter', index: 0 });
 		});
 	});
 

@@ -19,7 +19,7 @@ import { Schemas } from '../../../../../../base/common/network.js';
 import { getExcludes, IFileQuery, ISearchConfiguration, ISearchService, QueryType } from '../../../../../services/search/common/search.js';
 import { CancellationToken } from '../../../../../../base/common/cancellation.js';
 import { isCancellationError } from '../../../../../../base/common/errors.js';
-import { PromptsStorage } from '../service/promptsService.js';
+import { AgentFileType, IResolvedAgentFile, PromptsStorage } from '../service/promptsService.js';
 import { IUserDataProfileService } from '../../../../../services/userDataProfile/common/userDataProfile.js';
 import { Emitter, Event } from '../../../../../../base/common/event.js';
 import { DisposableStore } from '../../../../../../base/common/lifecycle.js';
@@ -507,15 +507,16 @@ export class PromptFilesLocator {
 		return [];
 	}
 
-	public async findCopilotInstructionsMDsInWorkspace(token: CancellationToken): Promise<URI[]> {
-		const result: URI[] = [];
+	public async findCopilotInstructionsMDsInWorkspace(token: CancellationToken): Promise<IResolvedAgentFile[]> {
+		const result: IResolvedAgentFile[] = [];
 		const { folders } = this.workspaceService.getWorkspace();
 		for (const folder of folders) {
 			const file = joinPath(folder.uri, `.github/` + COPILOT_CUSTOM_INSTRUCTIONS_FILENAME);
 			try {
 				const stat = await this.fileService.stat(file);
 				if (stat.isFile) {
-					result.push(file);
+					const realPath = stat.isSymbolicLink ? await this.fileService.realpath(file) : undefined;
+					result.push({ uri: file, realPath, type: AgentFileType.copilotInstructionsMd });
 				}
 			} catch (error) {
 				this.logService.trace(`[PromptFilesLocator] Skipping copilot-instructions.md at ${file.toString()}: ${error}`);
@@ -527,12 +528,12 @@ export class PromptFilesLocator {
 	/**
 	 * Gets list of `AGENTS.md` files anywhere in the workspace.
 	 */
-	public async findAgentMDsInWorkspace(token: CancellationToken): Promise<URI[]> {
+	public async findAgentMDsInWorkspace(token: CancellationToken): Promise<IResolvedAgentFile[]> {
 		const result = await Promise.all(this.workspaceService.getWorkspace().folders.map(folder => this.findAgentMDsInFolder(folder.uri, token)));
 		return result.flat(1);
 	}
 
-	private async findAgentMDsInFolder(folder: URI, token: CancellationToken): Promise<URI[]> {
+	private async findAgentMDsInFolder(folder: URI, token: CancellationToken): Promise<IResolvedAgentFile[]> {
 		// Check if a FileSearchProvider is available for this scheme
 		if (this.searchService.schemeHasFileSearchProvider(folder.scheme)) {
 			// Use the search service if a FileSearchProvider is available
@@ -552,7 +553,13 @@ export class PromptFilesLocator {
 				if (token.isCancellationRequested) {
 					return [];
 				}
-				return searchResult.results.map(r => r.resource);
+				// Resolve real paths for duplicate detection
+				const results: IResolvedAgentFile[] = [];
+				for (const r of searchResult.results) {
+					const realPath = undefined; // We can skip realpath resolution here for performance; duplicates can be handled later if needed
+					results.push({ uri: r.resource, realPath, type: AgentFileType.agentsMd });
+				}
+				return results;
 			} catch (e) {
 				if (!isCancellationError(e)) {
 					throw e;
@@ -569,8 +576,8 @@ export class PromptFilesLocator {
 	 * Recursively traverses a folder using the file service to find AGENTS.md files.
 	 * This is used as a fallback when no FileSearchProvider is available for the scheme.
 	 */
-	private async findAgentMDsUsingFileService(folder: URI, token: CancellationToken): Promise<URI[]> {
-		const result: URI[] = [];
+	private async findAgentMDsUsingFileService(folder: URI, token: CancellationToken): Promise<IResolvedAgentFile[]> {
+		const result: IResolvedAgentFile[] = [];
 		const agentsMdFileName = 'agents.md';
 
 		const traverse = async (uri: URI): Promise<void> => {
@@ -581,7 +588,8 @@ export class PromptFilesLocator {
 			try {
 				const stat = await this.fileService.resolve(uri);
 				if (stat.isFile && stat.name.toLowerCase() === agentsMdFileName) {
-					result.push(stat.resource);
+					const realPath = stat.isSymbolicLink ? await this.fileService.realpath(stat.resource) : undefined;
+					result.push({ uri: stat.resource, realPath, type: AgentFileType.agentsMd });
 				} else if (stat.isDirectory && stat.children) {
 					// Recursively traverse subdirectories
 					for (const child of stat.children) {
@@ -599,17 +607,28 @@ export class PromptFilesLocator {
 	}
 
 	/**
-	 * Gets list of `AGENTS.md` files only at the root workspace folder(s).
+	 * Gets list of files at the root workspace folder(s).
 	 */
-	public async findAgentMDsInWorkspaceRoots(token: CancellationToken): Promise<URI[]> {
-		const result: URI[] = [];
+	public async findFilesInWorkspaceRoots(fileName: string, folder: string | undefined, type: AgentFileType, token: CancellationToken, result: IResolvedAgentFile[] = []): Promise<IResolvedAgentFile[]> {
 		const { folders } = this.workspaceService.getWorkspace();
-		const resolvedRoots = await this.fileService.resolveAll(folders.map(f => ({ resource: f.uri })));
+		if (folder) {
+			return this.findFilesInRoots(folders.map(f => joinPath(f.uri, folder)), fileName, type, token, result);
+		}
+		return this.findFilesInRoots(folders.map(f => f.uri), fileName, type, token, result);
+	}
+
+	public async findFilesInRoots(roots: URI[], fileName: string, type: AgentFileType, token: CancellationToken, result: IResolvedAgentFile[] = []): Promise<IResolvedAgentFile[]> {
+		const fileNameLower = fileName.toLowerCase();
+		const resolvedRoots = await this.fileService.resolveAll(roots.map(uri => ({ resource: uri })));
+		if (token.isCancellationRequested) {
+			return result;
+		}
 		for (const root of resolvedRoots) {
 			if (root.success && root.stat?.children) {
-				const agentMd = root.stat.children.find(c => c.isFile && c.name.toLowerCase() === 'agents.md');
-				if (agentMd) {
-					result.push(agentMd.resource);
+				const file = root.stat.children.find(c => c.isFile && c.name.toLowerCase() === fileNameLower);
+				if (file) {
+					const realPath = file.isSymbolicLink ? await this.fileService.realpath(file.resource) : undefined;
+					result.push({ uri: file.resource, realPath, type });
 				}
 			}
 		}

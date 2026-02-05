@@ -16,7 +16,8 @@ import { isToolInvocationContext, IToolInvocationContext } from '../../contrib/c
 import { IHookCommandDto, MainContext, MainThreadHooksShape } from '../common/extHost.protocol.js';
 import { IChatHookExecutionOptions, IExtHostHooks } from '../common/extHostHooks.js';
 import { IExtHostRpcService } from '../common/extHostRpcService.js';
-import { HookResultKind, IHookResult } from '../../contrib/chat/common/hooksExecutionService.js';
+import { HookCommandResultKind, IHookCommandResult } from '../../contrib/chat/common/hooks/hooksCommandTypes.js';
+import { IHookResult } from '../../contrib/chat/common/hooks/hooksTypes.js';
 import * as typeConverters from '../common/extHostTypeConverters.js';
 
 const SIGKILL_DELAY_MS = 5000;
@@ -40,26 +41,23 @@ export class NodeExtHostHooks implements IExtHostHooks {
 		const context = options.toolInvocationToken as IToolInvocationContext;
 
 		const results = await this._mainThreadProxy.$executeHook(hookType, context.sessionResource, options.input, token ?? CancellationToken.None);
-		return results.map(r => typeConverters.ChatHookResult.to({
-			kind: r.kind as HookResultKind,
-			result: r.result
-		}));
+		return results.map(r => typeConverters.ChatHookResult.to(r as IHookResult));
 	}
 
-	async $runHookCommand(hookCommand: IHookCommandDto, input: unknown, token: CancellationToken): Promise<IHookResult> {
+	async $runHookCommand(hookCommand: IHookCommandDto, input: unknown, token: CancellationToken): Promise<IHookCommandResult> {
 		this._logService.debug(`[ExtHostHooks] Running hook command: ${JSON.stringify(hookCommand)}`);
 
 		try {
 			return await this._executeCommand(hookCommand, input, token);
 		} catch (err) {
 			return {
-				kind: HookResultKind.Error,
+				kind: HookCommandResultKind.Error,
 				result: err instanceof Error ? err.message : String(err)
 			};
 		}
 	}
 
-	private _executeCommand(hook: IHookCommandDto, input: unknown, token?: CancellationToken): Promise<IHookResult> {
+	private _executeCommand(hook: IHookCommandDto, input: unknown, token?: CancellationToken): Promise<IHookCommandResult> {
 		const home = homedir();
 		const cwdUri = hook.cwd ? URI.revive(hook.cwd) : undefined;
 		const cwd = cwdUri ? cwdUri.fsPath : home;
@@ -157,10 +155,10 @@ export class NodeExtHostHooks implements IExtHostHooks {
 					} catch {
 						// Keep as string if not valid JSON
 					}
-					resolve({ kind: HookResultKind.Success, result });
+					resolve({ kind: HookCommandResultKind.Success, result });
 				} else {
 					// Error
-					resolve({ kind: HookResultKind.Error, result: stderrStr });
+					resolve({ kind: HookCommandResultKind.Error, result: stderrStr });
 				}
 			});
 

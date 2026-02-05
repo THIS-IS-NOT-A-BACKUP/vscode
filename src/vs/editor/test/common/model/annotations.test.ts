@@ -381,6 +381,13 @@ suite('Annotations Suite', () => {
 		assert.deepStrictEqual(result.map(a => a.annotation), ['1', '2', '3']);
 	});
 
+	test('getAnnotationsIntersecting 6', () => {
+		const vas = fromVisual('[1:Lorem ][2:ip][3:sum]');
+		const result = vas.getAnnotationsIntersecting(new OffsetRange(6, 6));
+		assert.strictEqual(result.length, 1);
+		assert.deepStrictEqual(result.map(a => a.annotation), ['2']);
+	});
+
 	test('applyEdit 1 - deletion within annotation', () => {
 		const result = visualizeEdit(
 			'[1:Lorem] ipsum [2:dolor] sit [3:amet]',

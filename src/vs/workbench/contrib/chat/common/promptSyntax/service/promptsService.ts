@@ -222,6 +222,32 @@ export interface IAgentSkill {
 }
 
 /**
+ * Type of agent instruction file.
+ */
+export enum AgentFileType {
+	agentsMd = 'agentsMd',
+	claudeMd = 'claudeMd',
+	copilotInstructionsMd = 'copilotInstructionsMd',
+}
+
+/**
+ * Represents a resolved agent instruction file with its real path for duplicate detection.
+ * Used by listAgentInstructions to filter out symlinks pointing to the same file.
+ */
+export interface IResolvedAgentFile {
+	readonly uri: URI;
+	/**
+	 * The real path of the file, if it is a symlink.
+	 */
+	readonly realPath: URI | undefined;
+	readonly type: AgentFileType;
+}
+
+export interface Logger {
+	logInfo(message: string): void;
+}
+
+/**
  * Reason why a prompt file was skipped during discovery.
  */
 export type PromptFileSkipReason =
@@ -343,20 +369,15 @@ export interface IPromptsService extends IDisposable {
 	getPromptLocationLabel(promptPath: IPromptPath): string;
 
 	/**
-	 * Gets list of all AGENTS.md files in the workspace.
+	 * Gets list of AGENTS.md files, including optionally nested ones from subfolders.
 	 */
-	findAgentMDsInWorkspace(token: CancellationToken): Promise<URI[]>;
+	listNestedAgentMDs(token: CancellationToken): Promise<IResolvedAgentFile[]>;
 
 	/**
-	 * Gets list of AGENTS.md files.
-	 * @param includeNested Whether to include AGENTS.md files from subfolders, or only from the root.
+	 * Gets combined list of agent instruction files (AGENTS.md, CLAUDE.md, copilot-instructions.md).
+	 * Combines results from listAgentMDs (non-nested), listClaudeMDs, and listCopilotInstructionsMDs.
 	 */
-	listAgentMDs(token: CancellationToken, includeNested: boolean): Promise<URI[]>;
-
-	/**
-	 * Gets list of .github/copilot-instructions.md files.
-	 */
-	listCopilotInstructionsMDs(token: CancellationToken): Promise<URI[]>;
+	listAgentInstructions(token: CancellationToken, logger?: Logger): Promise<IResolvedAgentFile[]>;
 
 	/**
 	 * For a chat mode file URI, return the name of the agent file that it should use.

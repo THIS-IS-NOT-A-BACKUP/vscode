@@ -45,7 +45,7 @@ import { IChatAgentMarkdownContentWithVulnerability, IChatCodeCitation, IChatCom
 import { LocalChatSessionUri } from '../../contrib/chat/common/model/chatUri.js';
 import { ChatRequestToolReferenceEntry, IChatRequestVariableEntry, isImageVariableEntry, isPromptFileVariableEntry, isPromptTextVariableEntry } from '../../contrib/chat/common/attachments/chatVariableEntries.js';
 import { ChatAgentLocation } from '../../contrib/chat/common/constants.js';
-import { HookResultKind, IHookResult } from '../../contrib/chat/common/hooksExecutionService.js';
+import { IHookResult } from '../../contrib/chat/common/hooks/hooksTypes.js';
 import { IToolInvocationContext, IToolResult, IToolResultInputOutputDetails, IToolResultOutputDetails, ToolDataSource, ToolInvocationPresentation } from '../../contrib/chat/common/tools/languageModelToolsService.js';
 import * as chatProvider from '../../contrib/chat/common/languageModels.js';
 import { IChatMessageDataPart, IChatResponseDataPart, IChatResponsePromptTsxPart, IChatResponseTextPart } from '../../contrib/chat/common/languageModels.js';
@@ -2961,6 +2961,25 @@ export namespace ChatToolInvocationPart {
 					status: todoStatusEnumToString(todo.status)
 				}))
 			};
+		} else if ('input' in data && 'output' in data && !Array.isArray(data.output)) {
+			// Convert extension API simple tool invocation data to internal format
+			return {
+				kind: 'simpleToolInvocation',
+				input: typeof data.input === 'string' ? data.input : '',
+				output: typeof data.output === 'string' ? data.output : ''
+			};
+		} else if (data && 'values' in data && Array.isArray(data.values)) {
+			// Convert extension API resources tool data to internal format
+			return {
+				kind: 'resources',
+				values: data.values.map((v: any) => {
+					if (v instanceof types.Location) {
+						return Location.from(v);
+					} else {
+						return URI.revive(v);
+					}
+				})
+			};
 		}
 		return data;
 	}
@@ -4004,10 +4023,10 @@ export namespace SourceControlInputBoxValidationType {
 export namespace ChatHookResult {
 	export function to(result: IHookResult): vscode.ChatHookResult {
 		return {
-			kind: result.kind === HookResultKind.Success
-				? types.ChatHookResultKind.Success
-				: types.ChatHookResultKind.Error,
-			result: result.result
+			stopReason: result.stopReason,
+			messageForUser: result.messageForUser,
+			output: result.output,
+			success: result.success,
 		};
 	}
 }

@@ -5,65 +5,11 @@
 
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
-import { HookType, normalizeHookTypeId, resolveHookCommand } from '../../../common/promptSyntax/hookSchema.js';
+import { resolveHookCommand } from '../../../common/promptSyntax/hookSchema.js';
 import { URI } from '../../../../../../base/common/uri.js';
 
 suite('HookSchema', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
-
-	suite('normalizeHookTypeId', () => {
-
-		suite('Claude Code hook types (PascalCase)', () => {
-			// @see https://code.claude.com/docs/en/hooks#hook-lifecycle
-
-			test('SessionStart -> sessionStart', () => {
-				assert.strictEqual(normalizeHookTypeId('SessionStart'), HookType.SessionStart);
-			});
-
-			test('UserPromptSubmit -> userPromptSubmitted', () => {
-				assert.strictEqual(normalizeHookTypeId('UserPromptSubmit'), HookType.UserPromptSubmitted);
-			});
-
-			test('PreToolUse -> preToolUse', () => {
-				assert.strictEqual(normalizeHookTypeId('PreToolUse'), HookType.PreToolUse);
-			});
-
-			test('PostToolUse -> postToolUse', () => {
-				assert.strictEqual(normalizeHookTypeId('PostToolUse'), HookType.PostToolUse);
-			});
-
-			test('PostToolUseFailure -> postToolUseFailure', () => {
-				assert.strictEqual(normalizeHookTypeId('PostToolUseFailure'), HookType.PostToolUseFailure);
-			});
-
-			test('SubagentStart -> subagentStart', () => {
-				assert.strictEqual(normalizeHookTypeId('SubagentStart'), HookType.SubagentStart);
-			});
-
-			test('SubagentStop -> subagentStop', () => {
-				assert.strictEqual(normalizeHookTypeId('SubagentStop'), HookType.SubagentStop);
-			});
-
-			test('Stop -> stop', () => {
-				assert.strictEqual(normalizeHookTypeId('Stop'), HookType.Stop);
-			});
-		});
-
-		suite('unknown hook types', () => {
-			test('unknown type returns undefined', () => {
-				assert.strictEqual(normalizeHookTypeId('unknownHook'), undefined);
-			});
-
-			test('empty string returns undefined', () => {
-				assert.strictEqual(normalizeHookTypeId(''), undefined);
-			});
-
-			test('typo returns undefined', () => {
-				assert.strictEqual(normalizeHookTypeId('sessionstart'), undefined);
-				assert.strictEqual(normalizeHookTypeId('SESSIONSTART'), undefined);
-			});
-		});
-	});
 
 	suite('resolveHookCommand', () => {
 		const workspaceRoot = URI.file('/workspace');
