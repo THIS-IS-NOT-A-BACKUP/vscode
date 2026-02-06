@@ -488,6 +488,7 @@ export async function createTocTreeForExtensionSettings(extensionService: IExten
 	const processGroupEntry = async (group: ISettingsGroup) => {
 		const flatSettings = group.sections.map(section => section.settings).flat();
 		const settings = filter ? getMatchingSettings(new Set(flatSettings), filter) : flatSettings;
+		sortSettings(settings);
 
 		const extensionId = group.extensionInfo!.id;
 		const extension = await extensionService.getExtension(extensionId);
@@ -575,6 +576,7 @@ function _resolveSettingsTree(tocData: ITOCEntry<string>, allSettings: Set<ISett
 			},
 			exclude: filter?.exclude ?? {}
 		});
+		sortSettings(settings);
 	}
 
 	if (!children && !settings) {
@@ -587,6 +589,36 @@ function _resolveSettingsTree(tocData: ITOCEntry<string>, allSettings: Set<ISett
 		children,
 		settings
 	};
+}
+
+/**
+ * Sort settings so that preview and experimental settings are deprioritized.
+ * Within each tier, sort the settings by order, then alphabetically.
+ */
+function sortSettings(settings: ISetting[]): void {
+	const SETTING_STATUS_NORMAL = 0;
+	const SETTING_STATUS_PREVIEW = 1;
+	const SETTING_STATUS_EXPERIMENTAL = 2;
+
+	const getExperimentalStatus = (setting: ISetting) => {
+		if (setting.tags?.includes('experimental')) {
+			return SETTING_STATUS_EXPERIMENTAL;
+		} else if (setting.tags?.includes('preview')) {
+			return SETTING_STATUS_PREVIEW;
+		}
+		return SETTING_STATUS_NORMAL;
+	};
+
+	settings.sort((a, b) => {
+		const experimentalStatusA = getExperimentalStatus(a);
+		const experimentalStatusB = getExperimentalStatus(b);
+		if (experimentalStatusA !== experimentalStatusB) {
+			return experimentalStatusA - experimentalStatusB;
+		}
+
+		const orderComparison = compareTwoNullableNumbers(a.order, b.order);
+		return orderComparison !== 0 ? orderComparison : a.key.localeCompare(b.key);
+	});
 }
 
 function getMatchingSettings(allSettings: Set<ISetting>, filter: ITOCFilter): ISetting[] {
@@ -637,31 +669,7 @@ function getMatchingSettings(allSettings: Set<ISetting>, filter: ITOCFilter): IS
 		}
 	});
 
-	const SETTING_STATUS_NORMAL = 0;
-	const SETTING_STATUS_PREVIEW = 1;
-	const SETTING_STATUS_EXPERIMENTAL = 2;
-
-	const getExperimentalStatus = (setting: ISetting) => {
-		if (setting.tags?.includes('experimental')) {
-			return SETTING_STATUS_EXPERIMENTAL;
-		} else if (setting.tags?.includes('preview')) {
-			return SETTING_STATUS_PREVIEW;
-		}
-		return SETTING_STATUS_NORMAL;
-	};
-
-	// Sort settings so that preview and experimental settings are deprioritized.
-	// Within each tier, sort the settings by order, then alphabetically.
-	return result.sort((a, b) => {
-		const experimentalStatusA = getExperimentalStatus(a);
-		const experimentalStatusB = getExperimentalStatus(b);
-		if (experimentalStatusA !== experimentalStatusB) {
-			return experimentalStatusA - experimentalStatusB;
-		}
-
-		const orderComparison = compareTwoNullableNumbers(a.order, b.order);
-		return orderComparison !== 0 ? orderComparison : a.key.localeCompare(b.key);
-	});
+	return result;
 }
 
 const settingPatternCache = new Map<string, RegExp>();
@@ -2419,14 +2427,14 @@ function escapeInvisibleChars(enumValue: string): string {
 export class SettingsTreeFilter implements ITreeFilter<SettingsTreeElement> {
 	constructor(
 		private viewState: ISettingsEditorViewState,
-		private filterGroups: boolean,
+		private isFilteringGroups: boolean,
 		@IWorkbenchEnvironmentService private environmentService: IWorkbenchEnvironmentService,
 	) { }
 
 	filter(element: SettingsTreeElement, parentVisibility: TreeVisibility): TreeFilterResult<void> {
 		// Filter during search
-		if (this.viewState.filterToCategory && element instanceof SettingsTreeSettingElement) {
-			if (!this.settingBelongsToCategory(element, this.viewState.filterToCategory)) {
+		if (this.viewState.categoryFilter && element instanceof SettingsTreeSettingElement) {
+			if (!this.settingContainedInGroup(element.setting, this.viewState.categoryFilter)) {
 				return false;
 			}
 		}
@@ -2442,8 +2450,8 @@ export class SettingsTreeFilter implements ITreeFilter<SettingsTreeElement> {
 		// Group with no visible children
 		if (element instanceof SettingsTreeGroupElement) {
 			// When filtering to a specific category, only show that category and its descendants
-			if (this.filterGroups && this.viewState.filterToCategory) {
-				if (!this.groupIsRelatedToCategory(element, this.viewState.filterToCategory)) {
+			if (this.isFilteringGroups && this.viewState.categoryFilter) {
+				if (!this.groupIsRelatedToCategory(element, this.viewState.categoryFilter)) {
 					return false;
 				}
 				// For groups related to the category, skip the count check and recurse
@@ -2460,7 +2468,7 @@ export class SettingsTreeFilter implements ITreeFilter<SettingsTreeElement> {
 
 		// Filtered "new extensions" button
 		if (element instanceof SettingsTreeNewExtensionsElement) {
-			if (this.viewState.tagFilters?.size || this.viewState.filterToCategory) {
+			if (this.viewState.tagFilters?.size || this.viewState.categoryFilter) {
 				return false;
 			}
 		}
@@ -2468,19 +2476,16 @@ export class SettingsTreeFilter implements ITreeFilter<SettingsTreeElement> {
 		return true;
 	}
 
-	/**
-	 * Checks if a setting element belongs to the category or any of its subcategories
-	 * by traversing up the setting's parent chain using IDs.
-	 */
-	private settingBelongsToCategory(element: SettingsTreeSettingElement, category: SettingsTreeGroupElement): boolean {
-		let parent = element.parent;
-		while (parent) {
-			if (parent.id === category.id) {
-				return true;
+	private settingContainedInGroup(setting: ISetting, group: SettingsTreeGroupElement): boolean {
+		return group.children.some(child => {
+			if (child instanceof SettingsTreeGroupElement) {
+				return this.settingContainedInGroup(setting, child);
+			} else if (child instanceof SettingsTreeSettingElement) {
+				return child.setting.key === setting.key;
+			} else {
+				return false;
 			}
-			parent = parent.parent;
-		}
-		return false;
+		});
 	}
 
 	/**
