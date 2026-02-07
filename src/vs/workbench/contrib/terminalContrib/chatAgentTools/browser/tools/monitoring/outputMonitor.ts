@@ -608,17 +608,38 @@ export class OutputMonitor extends Disposable implements IOutputMonitor {
 		], {}, token);
 
 		const suggestedOption = (await getTextResponseFromStream(response)).trim();
+		const autoReply = this._configurationService.getValue(TerminalChatAgentToolsSettingId.AutoReplyToPrompts);
+		let validOption: string;
+		let index: number;
+
 		if (!suggestedOption) {
-			return;
+			// No suggestion from LLM - fall back to first option if autoReply is enabled
+			if (autoReply) {
+				validOption = options[0];
+				index = 0;
+				this._logService.trace(`OutputMonitor: No LLM suggestion, falling back to first option: ${validOption}`);
+			} else {
+				return;
+			}
+		} else {
+			const match = matchTerminalPromptOption(confirmationPrompt.options, suggestedOption);
+			if (!match.option || match.index === -1) {
+				// LLM suggestion didn't match any option - fall back to first option if autoReply is enabled
+				if (autoReply) {
+					validOption = options[0];
+					index = 0;
+					this._logService.trace(`OutputMonitor: LLM suggestion '${suggestedOption}' didn't match options, falling back to first option: ${validOption}`);
+				} else {
+					return;
+				}
+			} else {
+				validOption = match.option;
+				index = match.index;
+			}
 		}
-		const match = matchTerminalPromptOption(confirmationPrompt.options, suggestedOption);
-		if (!match.option || match.index === -1) {
-			return;
-		}
-		const validOption = match.option;
-		const index = match.index;
+
 		let sentToTerminal = false;
-		if (this._configurationService.getValue(TerminalChatAgentToolsSettingId.AutoReplyToPrompts)) {
+		if (autoReply) {
 			await this._execution.instance.sendText(validOption, true);
 			this._outputMonitorTelemetryCounters.inputToolAutoAcceptCount++;
 			this._outputMonitorTelemetryCounters.inputToolAutoChars += validOption?.length || 0;

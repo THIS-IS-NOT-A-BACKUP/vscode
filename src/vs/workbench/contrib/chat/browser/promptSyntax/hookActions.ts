@@ -16,7 +16,7 @@ import { CancellationToken } from '../../../../../base/common/cancellation.js';
 import { IQuickInputService, IQuickPickItem, IQuickPickSeparator } from '../../../../../platform/quickinput/common/quickInput.js';
 import { IFileService } from '../../../../../platform/files/common/files.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
-import { HOOK_TYPES, HookType } from '../../common/promptSyntax/hookSchema.js';
+import { HOOK_TYPES, HookType, getEffectiveCommandFieldKey } from '../../common/promptSyntax/hookSchema.js';
 import { NEW_HOOK_COMMAND_ID } from './newPromptFileActions.js';
 import { ILabelService } from '../../../../../platform/label/common/label.js';
 import { IEditorService } from '../../../../services/editor/common/editorService.js';
@@ -24,6 +24,8 @@ import { ITextEditorSelection } from '../../../../../platform/editor/common/edit
 import { findHookCommandSelection, parseAllHookFiles, IParsedHook } from './hookUtils.js';
 import { IWorkspaceContextService } from '../../../../../platform/workspace/common/workspace.js';
 import { IPathService } from '../../../../services/path/common/pathService.js';
+import { IRemoteAgentService } from '../../../../services/remote/common/remoteAgentService.js';
+import { OS } from '../../../../../base/common/platform.js';
 
 /**
  * Action ID for the `Configure Hooks` action.
@@ -65,6 +67,11 @@ class ManageHooksAction extends Action2 {
 		const editorService = accessor.get(IEditorService);
 		const workspaceService = accessor.get(IWorkspaceContextService);
 		const pathService = accessor.get(IPathService);
+		const remoteAgentService = accessor.get(IRemoteAgentService);
+
+		// Get the remote OS (or fall back to local OS)
+		const remoteEnv = await remoteAgentService.getEnvironment();
+		const targetOS = remoteEnv?.os ?? OS;
 
 		// Get workspace root and user home for path resolution
 		const workspaceFolder = workspaceService.getWorkspace().folders[0];
@@ -77,6 +84,7 @@ class ManageHooksAction extends Action2 {
 			labelService,
 			workspaceRootUri,
 			userHome,
+			targetOS,
 			CancellationToken.None
 		);
 
@@ -147,11 +155,8 @@ class ManageHooksAction extends Action2 {
 				const entry = selected.hookEntry;
 				let selection: ITextEditorSelection | undefined;
 
-				// Determine the command field name to highlight
-				const commandFieldName = entry.command.command !== undefined ? 'command'
-					: entry.command.bash !== undefined ? 'bash'
-						: entry.command.powershell !== undefined ? 'powershell'
-							: undefined;
+				// Determine the command field name to highlight based on target platform
+				const commandFieldName = getEffectiveCommandFieldKey(entry.command, targetOS);
 
 				// Try to find the command field to highlight
 				if (commandFieldName) {

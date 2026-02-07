@@ -2352,8 +2352,9 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	outline: none;
 	border: none;
 
-	.codicon.codicon-file-media {
+	.codicon.codicon-file-media, .codicon.codicon-warning {
 		font-size: 12px;
+		margin-right: 2px;
 	}
 }
 
@@ -2875,6 +2876,42 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	.request-hover {
 		top: -17px !important;
 	}
+}
+
+/* Drag handle for reordering pending messages */
+.interactive-item-container .chat-pending-drag-handle {
+	position: absolute;
+	left: 0;
+	top: 50%;
+	transform: translateY(-50%);
+	width: 16px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	cursor: grab;
+	opacity: 0;
+	transition: opacity 0.15s;
+	color: var(--vscode-descriptionForeground);
+	margin-top: -4px; /* visually center with overlaid top controls */
+}
+
+.interactive-item-container.pending-request:hover .chat-pending-drag-handle {
+	opacity: 1;
+}
+
+/* Dragging state */
+.interactive-item-container.chat-pending-dragging {
+	opacity: 0.4;
+}
+
+/* Insertion indicator */
+.chat-pending-insert-indicator {
+	position: absolute;
+	height: 2px;
+	background: var(--vscode-focusBorder);
+	pointer-events: none;
+	z-index: 100;
+	display: none;
 }
 
 .interactive-item-container .chat-request-status {

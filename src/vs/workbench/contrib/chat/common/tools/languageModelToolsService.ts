@@ -182,6 +182,8 @@ export interface IToolInvocation {
 	toolSpecificData?: IChatTerminalToolInvocationData | IChatToolInputInvocationData | IChatExtensionsContent | IChatTodoListContent | IChatSubagentToolInvocationData | IChatSimpleToolInvocationData;
 	modelId?: string;
 	userSelectedTools?: UserSelectedTools;
+	/** The label of the custom button selected by the user during confirmation, if custom buttons were used. */
+	selectedCustomButton?: string;
 }
 
 export interface IToolInvocationContext {
@@ -198,12 +200,14 @@ export function isToolInvocationContext(obj: any): obj is IToolInvocationContext
 export interface IToolInvocationPreparationContext {
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	parameters: any;
+	toolCallId: string;
 	chatRequestId?: string;
 	/** @deprecated Use {@link chatSessionResource} instead */
 	chatSessionId?: string;
 	chatSessionResource: URI | undefined;
 	chatInteractionId?: string;
-	/** If set, tells the tool that it should include confirmmation messages. */
+	modelId?: string;
+	/** If set, tells the tool that it should include confirmation messages. */
 	forceConfirmationReason?: string;
 }
 
@@ -314,6 +318,8 @@ export interface IToolConfirmationMessages {
 	confirmResults?: boolean;
 	/** If title is not set (no confirmation needed), this reason will be shown to explain why confirmation was not needed */
 	confirmationNotNeededReason?: string | IMarkdownString;
+	/** Custom button labels to display instead of the default Allow/Skip buttons. */
+	customButtons?: string[];
 }
 
 export interface IToolConfirmationAction {

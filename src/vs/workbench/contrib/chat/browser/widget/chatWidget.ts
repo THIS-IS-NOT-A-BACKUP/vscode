@@ -719,6 +719,27 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		return this.input.focusTodoList();
 	}
 
+	focusQuestionCarousel(): boolean {
+		if (!this.input.questionCarousel) {
+			return false;
+		}
+
+		return this.input.focusQuestionCarousel();
+	}
+
+	toggleQuestionCarouselFocus(): boolean {
+		if (!this.input.questionCarousel) {
+			return false;
+		}
+
+		if (this.input.isQuestionCarouselFocused()) {
+			this.focusInput();
+			return true;
+		}
+
+		return this.input.focusQuestionCarousel();
+	}
+
 	hasInputFocus(): boolean {
 		return this.input.hasFocus();
 	}
@@ -1517,9 +1538,9 @@ export class ChatWidget extends Disposable implements IChatWidget {
 				if (request.id === currentElement.id) {
 					request.setShouldBeBlocked(false); // unblocking just this request.
 					request.attachedContext?.forEach(addToContext);
-					currentElement.variables.forEach(addToContext);
 				}
 			}
+			currentElement.variables.forEach(addToContext);
 
 			// set states
 			this.viewModel?.setEditing(currentElement);
@@ -1527,8 +1548,9 @@ export class ChatWidget extends Disposable implements IChatWidget {
 				ChatContextKeys.currentlyEditing.bindTo(item.contextKeyService).set(true);
 			}
 
+			const isEditingSentRequest = currentElement.pendingKind === undefined ? ChatContextKeys.EditingRequestType.Sent : ChatContextKeys.EditingRequestType.QueueOrSteer;
 			const isInput = this.configurationService.getValue<string>('chat.editRequests') === 'input';
-			this.inputPart?.setEditing(!!this.viewModel?.editing && isInput);
+			this.inputPart?.setEditing(!!this.viewModel?.editing && isInput, isEditingSentRequest);
 
 			if (!isInput) {
 				const rowContainer = item.rowContainer;
@@ -1536,6 +1558,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 				rowContainer.appendChild(this.inputContainer);
 				this.createInput(this.inputContainer);
 				this.input.setChatMode(this.inputPart.currentModeObs.get().id);
+				this.input.setEditing(true, isEditingSentRequest);
 			} else {
 				this.inputPart.element.classList.add('editing');
 			}
@@ -1544,7 +1567,6 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			if (currentContext.length > 0) {
 				this.input.attachmentModel.addContext(...currentContext);
 			}
-
 
 			// rerenders
 			this.inputPart.dnd.setDisabledOverlay(!isInput);
@@ -1628,8 +1650,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			this.inputPart.element.classList.remove('editing');
 		}
 		this.viewModel?.setEditing(undefined);
-
-		this.inputPart?.setEditing(!!this.viewModel?.editing && isInput);
+		this.inputPart?.setEditing(false, undefined);
 
 		this.onDidChangeItems();
 
@@ -2117,13 +2138,16 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		};
 
 		const isUserQuery = !query;
-
-		if (this.viewModel?.editing) {
-			const editingPendingRequest = this.viewModel.editing.pendingKind;
+		const isEditing = this.viewModel?.editing;
+		if (isEditing) {
+			const editingPendingRequest = this.viewModel.editing!.pendingKind;
 			if (editingPendingRequest !== undefined) {
 				const editingRequestId = this.viewModel.editing!.id;
 				this.chatService.removePendingRequest(this.viewModel.sessionResource, editingRequestId);
 				options.queue ??= editingPendingRequest;
+			} else {
+				this.chatService.cancelCurrentRequestForSession(this.viewModel.sessionResource);
+				options.queue = undefined;
 			}
 
 			this.finishedEditing(true);
@@ -2135,7 +2159,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		if (requestInProgress) {
 			options.queue ??= ChatRequestQueueKind.Queued;
 		}
-		if (!requestInProgress && !(await this.confirmPendingRequestsBeforeSend(model, options))) {
+		if (!requestInProgress && !isEditing && !(await this.confirmPendingRequestsBeforeSend(model, options))) {
 			return;
 		}
 
