@@ -365,6 +365,7 @@ class CommentingRangeDecorator {
 	}
 
 	public dispose(): void {
+		this._onDidChangeDecorationsCount.dispose();
 		this.commentingRangeDecorations = [];
 	}
 }

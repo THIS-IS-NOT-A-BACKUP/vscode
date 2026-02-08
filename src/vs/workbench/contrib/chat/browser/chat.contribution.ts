@@ -132,6 +132,7 @@ import { LanguageModelToolsConfirmationService } from './tools/languageModelTool
 import { LanguageModelToolsService, globalAutoApproveDescription } from './tools/languageModelToolsService.js';
 import './promptSyntax/promptCodingAgentActionContribution.js';
 import './promptSyntax/promptToolsCodeLensProvider.js';
+import { showConfigureHooksQuickPick } from './promptSyntax/hookActions.js';
 import { PromptUrlHandler } from './promptSyntax/promptUrlHandler.js';
 import { ConfigureToolSets, UserToolSetsContributions } from './tools/toolSetsContribution.js';
 import { ChatViewsWelcomeHandler } from './viewsWelcome/chatViewsWelcomeHandler.js';
@@ -1375,6 +1376,16 @@ class ChatSlashStaticSlashCommandsContribution extends Disposable {
 		}, async (_prompt, _progress, _history, _location, sessionResource) => {
 			agentSessionsService.getSession(sessionResource)?.setArchived(true);
 			commandService.executeCommand(ACTION_ID_NEW_CHAT);
+		}));
+		this._store.add(slashCommandService.registerSlashCommand({
+			command: 'hooks',
+			detail: nls.localize('hooks', "Configure hooks"),
+			sortText: 'z3_hooks',
+			executeImmediately: true,
+			silent: true,
+			locations: [ChatAgentLocation.Chat]
+		}, async () => {
+			await instantiationService.invokeFunction(showConfigureHooksQuickPick);
 		}));
 		this._store.add(slashCommandService.registerSlashCommand({
 			command: 'help',

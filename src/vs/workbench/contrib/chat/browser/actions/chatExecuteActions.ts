@@ -809,6 +809,9 @@ class SendToNewChatAction extends Action2 {
 			}
 		}
 
+		// Clear the input from the current session before creating a new one
+		widget.setInput('');
+
 		await widget.clear();
 		widget.acceptInput(inputBeforeClear, { storeToHistory: true });
 	}

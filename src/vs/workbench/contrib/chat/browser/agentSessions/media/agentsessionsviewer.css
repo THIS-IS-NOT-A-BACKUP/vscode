@@ -17,12 +17,6 @@
 		border-radius: 6px;
 	}
 
-	/* Hide focus outlines on mouse click, preserve for keyboard navigation */
-	&.mouse-focused .monaco-list-row.focused,
-	&.mouse-focused .monaco-list-row.focused.selected {
-		outline: none !important;
-	}
-
 	.monaco-list-row .force-no-twistie {
 		display: none !important;
 	}
@@ -74,7 +68,7 @@
 
 	/* On hover or keyboard focus: show toolbar, hide status */
 	.monaco-list-row:hover,
-	&:not(.mouse-focused) .monaco-list-row.focused {
+	.monaco-list-row.focused {
 
 		.agent-session-title-toolbar {
 			display: block;
@@ -104,7 +98,7 @@
 		.agent-session-icon-col {
 			display: flex;
 			align-items: flex-start;
-			line-height: 16px;
+			line-height: 17px;
 
 			.agent-session-icon {
 				flex-shrink: 0;
@@ -148,15 +142,15 @@
 		}
 
 		.agent-session-title-row {
-			line-height: 16px;
-			padding-bottom: 2px;
+			line-height: 17px;
+			padding-bottom: 4px;
 		}
 
 		.agent-session-details-row {
 			gap: 4px;
-			font-size: 11px;
-			line-height: 14px;
-			max-height: 14px;
+			font-size: 12px;
+			line-height: 15px;
+			max-height: 15px;
 			color: var(--vscode-disabledForeground);
 
 			.rendered-markdown {
@@ -239,7 +233,7 @@
 		}
 
 		.agent-session-title {
-			font-size: 12px;
+			font-size: 13px;
 			color: var(--vscode-descriptionForeground);
 		}
 
@@ -247,7 +241,7 @@
 			display: flex;
 			align-items: center;
 			font-variant-numeric: tabular-nums;
-			font-size: 11px;
+			font-size: 12px;
 			color: var(--vscode-disabledForeground);
 			white-space: nowrap;
 

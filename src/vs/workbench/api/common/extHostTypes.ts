@@ -3176,6 +3176,19 @@ export class McpToolInvocationContentData {
 	}
 }
 
+export class ChatSubagentToolInvocationData {
+	description?: string;
+	agentName?: string;
+	prompt?: string;
+	result?: string;
+	constructor(description?: string, agentName?: string, prompt?: string, result?: string) {
+		this.description = description;
+		this.agentName = agentName;
+		this.prompt = prompt;
+		this.result = result;
+	}
+}
+
 export class ChatResponseExternalEditPart {
 	applied: Thenable<string>;
 	didGetApplied!: (value: string) => void;
@@ -3477,7 +3490,7 @@ export enum ChatTodoStatus {
 export class ChatToolInvocationPart {
 	toolName: string;
 	toolCallId: string;
-	isError?: boolean;
+	errorMessage?: string;
 	invocationMessage?: string | vscode.MarkdownString;
 	originMessage?: string | vscode.MarkdownString;
 	pastTenseMessage?: string | vscode.MarkdownString;
@@ -3490,10 +3503,10 @@ export class ChatToolInvocationPart {
 
 	constructor(toolName: string,
 		toolCallId: string,
-		isError?: boolean) {
+		errorMessage?: string) {
 		this.toolName = toolName;
 		this.toolCallId = toolCallId;
-		this.isError = isError;
+		this.errorMessage = errorMessage;
 	}
 }
 

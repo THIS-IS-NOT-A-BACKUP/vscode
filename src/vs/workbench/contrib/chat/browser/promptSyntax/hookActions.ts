@@ -37,6 +37,138 @@ interface IHookQuickPickItem extends IQuickPickItem {
 	readonly commandId?: string;
 }
 
+/**
+ * Shows the Configure Hooks quick pick UI, allowing the user to view,
+ * open, or create hooks. Can be called from the action or slash command.
+ */
+export async function showConfigureHooksQuickPick(
+	accessor: ServicesAccessor,
+): Promise<void> {
+	const promptsService = accessor.get(IPromptsService);
+	const quickInputService = accessor.get(IQuickInputService);
+	const fileService = accessor.get(IFileService);
+	const labelService = accessor.get(ILabelService);
+	const commandService = accessor.get(ICommandService);
+	const editorService = accessor.get(IEditorService);
+	const workspaceService = accessor.get(IWorkspaceContextService);
+	const pathService = accessor.get(IPathService);
+	const remoteAgentService = accessor.get(IRemoteAgentService);
+
+	// Get the remote OS (or fall back to local OS)
+	const remoteEnv = await remoteAgentService.getEnvironment();
+	const targetOS = remoteEnv?.os ?? OS;
+
+	// Get workspace root and user home for path resolution
+	const workspaceFolder = workspaceService.getWorkspace().folders[0];
+	const workspaceRootUri = workspaceFolder?.uri;
+	const userHomeUri = await pathService.userHome();
+	const userHome = userHomeUri.fsPath ?? userHomeUri.path;
+	const hookEntries = await parseAllHookFiles(
+		promptsService,
+		fileService,
+		labelService,
+		workspaceRootUri,
+		userHome,
+		targetOS,
+		CancellationToken.None
+	);
+
+	// Build quick pick items grouped by hook type
+	const items: (IHookQuickPickItem | IQuickPickSeparator)[] = [];
+
+	// Add "New Hook..." option at the top
+	items.push({
+		label: `$(plus) ${localize('commands.new-hook.label', 'Add new hook...')}`,
+		commandId: NEW_HOOK_COMMAND_ID,
+		alwaysShow: true
+	});
+
+	// Group entries by hook type
+	const groupedByType = new Map<HookType, IParsedHook[]>();
+	for (const entry of hookEntries) {
+		const existing = groupedByType.get(entry.hookType) ?? [];
+		existing.push(entry);
+		groupedByType.set(entry.hookType, existing);
+	}
+
+	// Sort hook types by their position in HOOK_TYPES
+	const sortedHookTypes = Array.from(groupedByType.keys()).sort((a, b) => {
+		const indexA = HOOK_TYPES.findIndex(h => h.id === a);
+		const indexB = HOOK_TYPES.findIndex(h => h.id === b);
+		return indexA - indexB;
+	});
+
+	// Add entries grouped by hook type
+	for (const hookTypeId of sortedHookTypes) {
+		const entries = groupedByType.get(hookTypeId)!;
+		const hookType = HOOK_TYPES.find(h => h.id === hookTypeId)!;
+
+		items.push({
+			type: 'separator',
+			label: hookType.label
+		});
+
+		for (const entry of entries) {
+			// Use relative path from labelService for consistent display
+			const description = labelService.getUriLabel(entry.fileUri, { relative: true });
+
+			items.push({
+				label: entry.commandLabel,
+				description,
+				hookEntry: entry
+			});
+		}
+	}
+
+	// Show empty state message if no hooks found
+	if (hookEntries.length === 0) {
+		items.push({
+			type: 'separator',
+			label: localize('noHooks', "No hooks configured")
+		});
+	}
+
+	const selected = await quickInputService.pick(items, {
+		placeHolder: localize('commands.hooks.placeholder', 'Select a hook to open or add a new hook'),
+		title: localize('commands.hooks.title', 'Hooks')
+	});
+
+	if (selected) {
+		if (selected.commandId) {
+			await commandService.executeCommand(selected.commandId);
+		} else if (selected.hookEntry) {
+			const entry = selected.hookEntry;
+			let selection: ITextEditorSelection | undefined;
+
+			// Determine the command field name to highlight based on target platform
+			const commandFieldName = getEffectiveCommandFieldKey(entry.command, targetOS);
+
+			// Try to find the command field to highlight
+			if (commandFieldName) {
+				try {
+					const content = await fileService.readFile(entry.fileUri);
+					selection = findHookCommandSelection(
+						content.value.toString(),
+						entry.originalHookTypeId,
+						entry.index,
+						commandFieldName
+					);
+				} catch {
+					// Ignore errors and just open without selection
+				}
+			}
+
+			await editorService.openEditor({
+				resource: entry.fileUri,
+				options: {
+					selection,
+					pinned: false
+				}
+			});
+		}
+	}
+}
+
 class ManageHooksAction extends Action2 {
 	constructor() {
 		super({
@@ -59,129 +191,7 @@ class ManageHooksAction extends Action2 {
 	public override async run(
 		accessor: ServicesAccessor,
 	): Promise<void> {
-		const promptsService = accessor.get(IPromptsService);
-		const quickInputService = accessor.get(IQuickInputService);
-		const fileService = accessor.get(IFileService);
-		const labelService = accessor.get(ILabelService);
-		const commandService = accessor.get(ICommandService);
-		const editorService = accessor.get(IEditorService);
-		const workspaceService = accessor.get(IWorkspaceContextService);
-		const pathService = accessor.get(IPathService);
-		const remoteAgentService = accessor.get(IRemoteAgentService);
-
-		// Get the remote OS (or fall back to local OS)
-		const remoteEnv = await remoteAgentService.getEnvironment();
-		const targetOS = remoteEnv?.os ?? OS;
-
-		// Get workspace root and user home for path resolution
-		const workspaceFolder = workspaceService.getWorkspace().folders[0];
-		const workspaceRootUri = workspaceFolder?.uri;
-		const userHomeUri = await pathService.userHome();
-		const userHome = userHomeUri.fsPath ?? userHomeUri.path;
-		const hookEntries = await parseAllHookFiles(
-			promptsService,
-			fileService,
-			labelService,
-			workspaceRootUri,
-			userHome,
-			targetOS,
-			CancellationToken.None
-		);
-
-		// Build quick pick items grouped by hook type
-		const items: (IHookQuickPickItem | IQuickPickSeparator)[] = [];
-
-		// Add "New Hook..." option at the top
-		items.push({
-			label: `$(plus) ${localize('commands.new-hook.label', 'Add new hook...')}`,
-			commandId: NEW_HOOK_COMMAND_ID,
-			alwaysShow: true
-		});
-
-		// Group entries by hook type
-		const groupedByType = new Map<HookType, IParsedHook[]>();
-		for (const entry of hookEntries) {
-			const existing = groupedByType.get(entry.hookType) ?? [];
-			existing.push(entry);
-			groupedByType.set(entry.hookType, existing);
-		}
-
-		// Sort hook types by their position in HOOK_TYPES
-		const sortedHookTypes = Array.from(groupedByType.keys()).sort((a, b) => {
-			const indexA = HOOK_TYPES.findIndex(h => h.id === a);
-			const indexB = HOOK_TYPES.findIndex(h => h.id === b);
-			return indexA - indexB;
-		});
-
-		// Add entries grouped by hook type
-		for (const hookTypeId of sortedHookTypes) {
-			const entries = groupedByType.get(hookTypeId)!;
-			const hookType = HOOK_TYPES.find(h => h.id === hookTypeId)!;
-
-			items.push({
-				type: 'separator',
-				label: hookType.label
-			});
-
-			for (const entry of entries) {
-				// Use relative path from labelService for consistent display
-				const description = labelService.getUriLabel(entry.fileUri, { relative: true });
-
-				items.push({
-					label: entry.commandLabel,
-					description,
-					hookEntry: entry
-				});
-			}
-		}
-
-		// Show empty state message if no hooks found
-		if (hookEntries.length === 0) {
-			items.push({
-				type: 'separator',
-				label: localize('noHooks', "No hooks configured")
-			});
-		}
-
-		const selected = await quickInputService.pick(items, {
-			placeHolder: localize('commands.hooks.placeholder', 'Select a hook to open or add a new hook'),
-			title: localize('commands.hooks.title', 'Hooks')
-		});
-
-		if (selected) {
-			if (selected.commandId) {
-				await commandService.executeCommand(selected.commandId);
-			} else if (selected.hookEntry) {
-				const entry = selected.hookEntry;
-				let selection: ITextEditorSelection | undefined;
-
-				// Determine the command field name to highlight based on target platform
-				const commandFieldName = getEffectiveCommandFieldKey(entry.command, targetOS);
-
-				// Try to find the command field to highlight
-				if (commandFieldName) {
-					try {
-						const content = await fileService.readFile(entry.fileUri);
-						selection = findHookCommandSelection(
-							content.value.toString(),
-							entry.originalHookTypeId,
-							entry.index,
-							commandFieldName
-						);
-					} catch {
-						// Ignore errors and just open without selection
-					}
-				}
-
-				await editorService.openEditor({
-					resource: entry.fileUri,
-					options: {
-						selection,
-						pinned: false
-					}
-				});
-			}
-		}
+		return showConfigureHooksQuickPick(accessor);
 	}
 }
 

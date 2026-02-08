@@ -502,7 +502,7 @@ export class AgentSessionSectionRenderer implements ICompressibleTreeRenderer<IA
 
 export class AgentSessionsListDelegate implements IListVirtualDelegate<AgentSessionListItem> {
 
-	static readonly ITEM_HEIGHT = 40;
+	static readonly ITEM_HEIGHT = 44;
 	static readonly SECTION_HEIGHT = 26;
 
 	getHeight(element: AgentSessionListItem): number {

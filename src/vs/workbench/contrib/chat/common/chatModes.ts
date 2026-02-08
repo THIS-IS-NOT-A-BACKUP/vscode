@@ -45,7 +45,7 @@ export class ChatModeService extends Disposable implements IChatModeService {
 	private readonly agentModeDisabledByPolicy: IContextKey<boolean>;
 	private readonly _customModeInstances = new Map<string, CustomChatMode>();
 
-	private readonly _onDidChangeChatModes = new Emitter<void>();
+	private readonly _onDidChangeChatModes = this._register(new Emitter<void>());
 	public readonly onDidChangeChatModes = this._onDidChangeChatModes.event;
 
 	constructor(

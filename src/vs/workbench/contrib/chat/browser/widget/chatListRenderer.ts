@@ -103,7 +103,6 @@ import { ChatMarkdownDecorationsRenderer } from './chatContentParts/chatMarkdown
 import { ChatEditorOptions } from './chatOptions.js';
 import { ChatCodeBlockContentProvider, CodeBlockPart } from './chatContentParts/codeBlockPart.js';
 import { autorun, observableValue } from '../../../../../base/common/observable.js';
-import { RunSubagentTool } from '../../common/tools/builtinTools/runSubagentTool.js';
 import { isEqual } from '../../../../../base/common/resources.js';
 import { IChatTipService } from '../chatTipService.js';
 import { IAccessibilityService } from '../../../../../platform/accessibility/common/accessibility.js';
@@ -1450,8 +1449,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		}
 
 		// Don't pin subagent tools to thinking parts - they have their own grouping
-		const isSubagentTool = (part.kind === 'toolInvocation' || part.kind === 'toolInvocationSerialized') && (part.subAgentInvocationId || part.toolId === RunSubagentTool.Id);
-		if (isSubagentTool) {
+		if ((part.kind === 'toolInvocation' || part.kind === 'toolInvocationSerialized') && isSubagentToolInvocation(part)) {
 			return false;
 		}
 
@@ -1573,8 +1571,8 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		const lastSubagent = this.getSubagentPart(templateData.renderedParts, subagentId);
 		if (lastSubagent) {
 			// Append to existing subagent part with matching ID
-			// But skip the runSubagent tool itself - we only want child tools
-			if (toolInvocation.toolId !== RunSubagentTool.Id) {
+			// But skip the parent subagent tool itself - we only want child tools
+			if (!isParentSubagentTool(toolInvocation)) {
 				lastSubagent.appendToolInvocation(toolInvocation, codeBlockStartIndex);
 			}
 			return lastSubagent;
@@ -1593,9 +1591,9 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			this._toolInvocationCodeBlockCollection,
 			this._announcedToolProgressKeys,
 		);
-		// Don't append the runSubagent tool itself - its description is already shown in the title
+		// Don't append the parent subagent tool itself - its description is already shown in the title
 		// Only append child tools (those with subAgentInvocationId)
-		if (toolInvocation.toolId !== RunSubagentTool.Id) {
+		if (!isParentSubagentTool(toolInvocation)) {
 			subagentPart.appendToolInvocation(toolInvocation, codeBlockStartIndex);
 		}
 		return subagentPart;
@@ -1642,7 +1640,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 
 			// Check if this is subagent content
 			const isSubagentContent = (content.kind === 'toolInvocation' || content.kind === 'toolInvocationSerialized')
-				&& (content.subAgentInvocationId || content.toolId === RunSubagentTool.Id);
+				&& isSubagentToolInvocation(content);
 
 			// Finalize all subagent parts when element is complete
 			// Note: We don't finalize when non-subagent content arrives because parallel subagents may still be running
@@ -1887,7 +1885,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		}
 
 		// Check for subagent grouping before creating tool part - subagent part handles lazy creation
-		const subagentId = toolInvocation.toolId === RunSubagentTool.Id ? toolInvocation.toolCallId : toolInvocation.subAgentInvocationId;
+		const subagentId = getSubagentId(toolInvocation);
 		if (subagentId && isResponseVM(context.element) && toolInvocation.presentation !== 'hidden') {
 			return this.handleSubagentToolGrouping(toolInvocation, subagentId, context, templateData, codeBlockStartIndex);
 		}
@@ -2513,4 +2511,31 @@ export class ChatVoteDownButton extends DropdownMenuActionViewItem {
 			}
 		};
 	}
+}
+
+/**
+ * Check if a tool invocation is the parent subagent tool (the tool that spawns a subagent).
+ * A parent subagent tool has subagent toolSpecificData but no subAgentInvocationId.
+ */
+function isParentSubagentTool(invocation: IChatToolInvocation | IChatToolInvocationSerialized): boolean {
+	return invocation.toolSpecificData?.kind === 'subagent' && !invocation.subAgentInvocationId;
+}
+
+/**
+ * Get the subagent invocation ID for grouping tools.
+ * For parent subagent tools, use their toolCallId.
+ * For child tools, use their subAgentInvocationId.
+ */
+function getSubagentId(invocation: IChatToolInvocation | IChatToolInvocationSerialized): string | undefined {
+	if (isParentSubagentTool(invocation)) {
+		return invocation.toolCallId;
+	}
+	return invocation.subAgentInvocationId;
+}
+
+/**
+ * Check if a tool invocation is part of a subagent (either parent or child).
+ */
+function isSubagentToolInvocation(invocation: IChatToolInvocation | IChatToolInvocationSerialized): boolean {
+	return !!getSubagentId(invocation);
 }

@@ -852,14 +852,14 @@ export class AgentSessionsWelcomePage extends EditorPane {
 		// TODO: @osortega this is a weird way of doing this, maybe we handle the 2-colum layout in the control itself?
 		const sessionsWidth = Math.min(800, this.lastDimension.width - 80);
 		// Calculate height based on actual visible sessions (capped at MAX_SESSIONS)
-		// Use 52px per item from AgentSessionsListDelegate.ITEM_HEIGHT
+		// Use 54px per item from AgentSessionsListDelegate.ITEM_HEIGHT
 		// Give the list FULL height so virtualization renders all items
 		// CSS transforms handle the 2-column visual layout
 		const visibleSessions = Math.min(
 			this.agentSessionsService.model.sessions.filter(s => !s.isArchived()).length,
 			MAX_SESSIONS
 		);
-		const sessionsHeight = visibleSessions * 52;
+		const sessionsHeight = visibleSessions * 56;
 		this.sessionsControl.layout(sessionsHeight, sessionsWidth);
 
 		// Set margin offset for 2-column layout: actual height - visual height

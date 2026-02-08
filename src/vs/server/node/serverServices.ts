@@ -118,7 +118,7 @@ export async function setupServerServices(connectionToken: ServerConnectionToken
 	const logService = new LogService(logger, [new ServerLogger(getLogLevel(environmentService))]);
 	services.set(ILogService, logService);
 	setTimeout(() => cleanupOlderLogs(environmentService.logsHome.with({ scheme: Schemas.file }).fsPath).then(null, err => logService.error(err)), 10000);
-	logService.onDidChangeLogLevel(logLevel => log(logService, logLevel, `Log level changed to ${LogLevelToString(logService.getLevel())}`));
+	disposables.add(logService.onDidChangeLogLevel(logLevel => log(logService, logLevel, `Log level changed to ${LogLevelToString(logService.getLevel())}`)));
 
 	logService.trace(`Remote configuration data at ${REMOTE_DATA_FOLDER}`);
 	logService.trace('process arguments:', environmentService.args);

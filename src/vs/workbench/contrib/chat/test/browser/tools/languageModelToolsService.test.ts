@@ -4047,7 +4047,7 @@ suite('LanguageModelToolsService', () => {
 			let receivedParameters: Record<string, any> | undefined;
 			mockHooksService.preToolUseHookResult = {
 				output: undefined,
-				success: true,
+				resultKind: 'success',
 				permissionDecision: 'allow',
 				updatedInput: { safeCommand: 'echo hello' },
 			};
@@ -4096,7 +4096,7 @@ suite('LanguageModelToolsService', () => {
 			let receivedParameters: Record<string, any> | undefined;
 			mockHooks.preToolUseHookResult = {
 				output: undefined,
-				success: true,
+				resultKind: 'success',
 				permissionDecision: 'allow',
 				updatedInput: { invalidField: 'wrong' },
 			};
@@ -4152,7 +4152,7 @@ suite('LanguageModelToolsService', () => {
 			let receivedParameters: Record<string, any> | undefined;
 			mockHooks.preToolUseHookResult = {
 				output: undefined,
-				success: true,
+				resultKind: 'success',
 				permissionDecision: 'allow',
 				updatedInput: { command: 'safe-command' },
 			};

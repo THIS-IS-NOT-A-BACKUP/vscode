@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-// version: 1
+// version: 3
 
 declare module 'vscode' {
 
@@ -302,6 +302,30 @@ declare module 'vscode' {
 		values: Array<Uri | Location>;
 	}
 
+	export class ChatSubagentToolInvocationData {
+		/**
+		 * A description of the subagent's purpose or task.
+		 */
+		description?: string;
+
+		/**
+		 * The name of the subagent being invoked.
+		 */
+		agentName?: string;
+
+		/**
+		 * The prompt given to the subagent.
+		 */
+		prompt?: string;
+
+		/**
+		 * The result text from the subagent after completion.
+		 */
+		result?: string;
+
+		constructor(description?: string, agentName?: string, prompt?: string, result?: string);
+	}
+
 	export class ChatToolInvocationPart {
 		toolName: string;
 		toolCallId: string;
@@ -311,11 +335,16 @@ declare module 'vscode' {
 		pastTenseMessage?: string | MarkdownString;
 		isConfirmed?: boolean;
 		isComplete?: boolean;
-		toolSpecificData?: ChatTerminalToolInvocationData | ChatMcpToolInvocationData | ChatTodoToolInvocationData | ChatSimpleToolResultData | ChatToolResourcesInvocationData;
+		toolSpecificData?: ChatTerminalToolInvocationData | ChatMcpToolInvocationData | ChatTodoToolInvocationData | ChatSimpleToolResultData | ChatToolResourcesInvocationData | ChatSubagentToolInvocationData;
 		subAgentInvocationId?: string;
 		presentation?: 'hidden' | 'hiddenAfterComplete' | undefined;
 
-		constructor(toolName: string, toolCallId: string, isError?: boolean);
+		/**
+		 * If this flag is set, this will be treated as an update to any previous tool call with the same id.
+		 */
+		enablePartialUpdate?: boolean;
+
+		constructor(toolName: string, toolCallId: string, errorMessage?: string);
 	}
 
 	/**

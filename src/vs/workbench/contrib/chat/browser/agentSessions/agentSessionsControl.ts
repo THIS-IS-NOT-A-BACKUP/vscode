@@ -8,7 +8,7 @@ import { ChatContextKeys } from '../../common/actions/chatContextKeys.js';
 import { IContextMenuService } from '../../../../../platform/contextview/browser/contextView.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { IOpenEvent, WorkbenchCompressibleAsyncDataTree } from '../../../../../platform/list/browser/listService.js';
-import { $, addDisposableListener, append, EventHelper } from '../../../../../base/browser/dom.js';
+import { $, append, EventHelper } from '../../../../../base/browser/dom.js';
 import { AgentSessionSection, IAgentSession, IAgentSessionSection, IAgentSessionsModel, IMarshalledAgentSessionContext, isAgentSession, isAgentSessionSection } from './agentSessionsModel.js';
 import { AgentSessionListItem, AgentSessionRenderer, AgentSessionsAccessibilityProvider, AgentSessionsCompressionDelegate, AgentSessionsDataSource, AgentSessionsDragAndDrop, AgentSessionsIdentityProvider, AgentSessionsKeyboardNavigationLabelProvider, AgentSessionsListDelegate, AgentSessionSectionRenderer, AgentSessionsSorter, IAgentSessionsFilter, IAgentSessionsSorterOptions } from './agentSessionsViewer.js';
 import { FuzzyScore } from '../../../../../base/common/filters.js';
@@ -175,14 +175,6 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 		)) as WorkbenchCompressibleAsyncDataTree<IAgentSessionsModel, AgentSessionListItem, FuzzyScore>;
 
 		ChatContextKeys.agentSessionsViewerFocused.bindTo(list.contextKeyService);
-
-		// Track mouse vs keyboard focus to suppress focus outlines on mouse clicks
-		this._register(addDisposableListener(this.sessionsContainer!, 'mousedown', () => {
-			this.sessionsContainer!.classList.add('mouse-focused');
-		}));
-		this._register(addDisposableListener(this.sessionsContainer!, 'keydown', () => {
-			this.sessionsContainer!.classList.remove('mouse-focused');
-		}));
 
 		const model = this.agentSessionsService.model;
 
