@@ -13,17 +13,13 @@ import { Schemas } from '../../../../../base/common/network.js';
 import { IWorkbenchContribution } from '../../../../common/contributions.js';
 import { IChatModel } from '../../common/model/chatModel.js';
 import { convertLegacyChatSessionTiming, IChatDetail, IChatService, ResponseModelState } from '../../common/chatService/chatService.js';
-import { ChatSessionStatus, IChatSessionItem, IChatSessionItemProvider, IChatSessionsService, localChatSessionType } from '../../common/chatSessionsService.js';
+import { ChatSessionStatus, IChatSessionItem, IChatSessionItemController, IChatSessionsService, localChatSessionType } from '../../common/chatSessionsService.js';
 import { getChatSessionType } from '../../common/model/chatUri.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
 
-interface IChatSessionItemWithProvider extends IChatSessionItem {
-	readonly provider: IChatSessionItemProvider;
-}
+export class LocalAgentsSessionsController extends Disposable implements IChatSessionItemController, IWorkbenchContribution {
 
-export class LocalAgentsSessionsProvider extends Disposable implements IChatSessionItemProvider, IWorkbenchContribution {
-
-	static readonly ID = 'workbench.contrib.localAgentsSessionsProvider';
+	static readonly ID = 'workbench.contrib.localAgentsSessionsController';
 
 	readonly chatSessionType = localChatSessionType;
 
@@ -40,34 +36,39 @@ export class LocalAgentsSessionsProvider extends Disposable implements IChatSess
 	) {
 		super();
 
-		this._register(this.chatSessionsService.registerChatSessionItemProvider(this));
+		this._register(this.chatSessionsService.registerChatSessionItemController(this.chatSessionType, this));
 
 		this.registerListeners();
 	}
 
-	private registerListeners(): void {
-		this._register(this.chatSessionsService.registerChatModelChangeListeners(
-			this.chatService,
-			Schemas.vscodeLocalChatSession,
-			() => this._onDidChangeChatSessionItems.fire()
-		));
+	private _items: IChatSessionItem[] = [];
+	get items(): readonly IChatSessionItem[] {
+		return this._items;
+	}
 
-		this._register(this.chatSessionsService.onDidChangeSessionItems(({ chatSessionType }) => {
-			if (chatSessionType === this.chatSessionType) {
-				this._onDidChange.fire();
-			}
-		}));
+	async refresh(token: CancellationToken): Promise<void> {
+		this._items = await this.provideChatSessionItems(token);
+	}
+
+	private registerListeners(): void {
+		const refreshItems = async () => {
+			this._onDidChangeChatSessionItems.fire();
+			await this.refresh(CancellationToken.None);
+			this._onDidChangeChatSessionItems.fire();
+		};
+
+		this._register(this.chatSessionsService.registerChatModelChangeListeners(this.chatService, Schemas.vscodeLocalChatSession, refreshItems));
 
 		this._register(this.chatService.onDidDisposeSession(e => {
 			const session = e.sessionResource.filter(resource => getChatSessionType(resource) === this.chatSessionType);
 			if (session.length > 0) {
-				this._onDidChangeChatSessionItems.fire();
+				refreshItems();
 			}
 		}));
 	}
 
-	async provideChatSessionItems(token: CancellationToken): Promise<IChatSessionItem[]> {
-		const sessions: IChatSessionItemWithProvider[] = [];
+	private async provideChatSessionItems(token: CancellationToken): Promise<IChatSessionItem[]> {
+		const sessions: IChatSessionItem[] = [];
 		const sessionsByResource = new ResourceSet();
 
 		for (const sessionDetail of await this.chatService.getLiveSessionItems()) {
@@ -88,7 +89,7 @@ export class LocalAgentsSessionsProvider extends Disposable implements IChatSess
 		return sessions;
 	}
 
-	private async getHistoryItems(): Promise<IChatSessionItemWithProvider[]> {
+	private async getHistoryItems(): Promise<IChatSessionItem[]> {
 		try {
 			const historyItems = await this.chatService.getHistorySessionItems();
 
@@ -98,7 +99,7 @@ export class LocalAgentsSessionsProvider extends Disposable implements IChatSess
 		}
 	}
 
-	private toChatSessionItem(chat: IChatDetail): IChatSessionItemWithProvider | undefined {
+	private toChatSessionItem(chat: IChatDetail): IChatSessionItem | undefined {
 		const model = this.chatService.getSession(chat.sessionResource);
 
 		let description: string | undefined;
@@ -112,7 +113,6 @@ export class LocalAgentsSessionsProvider extends Disposable implements IChatSess
 
 		return {
 			resource: chat.sessionResource,
-			provider: this,
 			label: chat.title,
 			description,
 			status: model ? this.modelToStatus(model) : this.chatResponseStateToStatus(chat.lastResponseState),

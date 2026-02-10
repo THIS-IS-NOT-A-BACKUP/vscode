@@ -427,8 +427,8 @@ export class PromptsService extends Disposable implements IPromptsService {
 			}
 		}
 
-		if (type !== PromptsType.skill) {
-			// no user source folders for skills
+		if (type !== PromptsType.skill && type !== PromptsType.hook) {
+			// no user source folders for skills and hooks
 			const userHome = this.userDataService.currentProfile.promptsHome;
 			result.push({ uri: userHome, storage: PromptsStorage.user, type });
 		}
@@ -567,7 +567,7 @@ export class PromptsService extends Disposable implements IPromptsService {
 				} satisfies IAgentInstructions;
 
 				const name = ast.header?.name ?? promptPath.name ?? getCleanPromptName(uri);
-				const target = getTarget(PromptsType.agent, ast.header);
+				const target = getTarget(PromptsType.agent, ast.header ?? uri);
 
 				const source: IAgentSource = IAgentSource.fromPromptPath(promptPath);
 				if (!ast.header) {

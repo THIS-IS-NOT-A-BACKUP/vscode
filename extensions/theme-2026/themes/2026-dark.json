@@ -102,6 +102,7 @@
 		"commandCenter.border": "#2E3031",
 		"editor.background": "#121314",
 		"editor.foreground": "#BBBEBF",
+		"editorStickyScroll.background": "#121314",
 		"editorLineNumber.foreground": "#858889",
 		"editorLineNumber.activeForeground": "#BBBEBF",
 		"editorCursor.foreground": "#BBBEBF",

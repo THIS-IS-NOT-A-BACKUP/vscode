@@ -55,7 +55,7 @@ import { ILanguageModelToolsService } from '../common/tools/languageModelToolsSe
 import { HooksExecutionService, IHooksExecutionService } from '../common/hooks/hooksExecutionService.js';
 import { ChatPromptFilesExtensionPointHandler } from '../common/promptSyntax/chatPromptFilesContribution.js';
 import { PromptsConfig } from '../common/promptSyntax/config/config.js';
-import { INSTRUCTIONS_DEFAULT_SOURCE_FOLDER, INSTRUCTION_FILE_EXTENSION, LEGACY_MODE_DEFAULT_SOURCE_FOLDER, LEGACY_MODE_FILE_EXTENSION, PROMPT_DEFAULT_SOURCE_FOLDER, PROMPT_FILE_EXTENSION, DEFAULT_SKILL_SOURCE_FOLDERS, AGENTS_SOURCE_FOLDER, AGENT_FILE_EXTENSION, SKILL_FILENAME, CLAUDE_AGENTS_SOURCE_FOLDER, DEFAULT_HOOK_FILE_PATHS } from '../common/promptSyntax/config/promptFileLocations.js';
+import { INSTRUCTIONS_DEFAULT_SOURCE_FOLDER, INSTRUCTION_FILE_EXTENSION, LEGACY_MODE_DEFAULT_SOURCE_FOLDER, LEGACY_MODE_FILE_EXTENSION, PROMPT_DEFAULT_SOURCE_FOLDER, PROMPT_FILE_EXTENSION, DEFAULT_SKILL_SOURCE_FOLDERS, AGENTS_SOURCE_FOLDER, AGENT_FILE_EXTENSION, SKILL_FILENAME, CLAUDE_AGENTS_SOURCE_FOLDER, CLAUDE_RULES_SOURCE_FOLDER, DEFAULT_HOOK_FILE_PATHS } from '../common/promptSyntax/config/promptFileLocations.js';
 import { PromptLanguageFeaturesProvider } from '../common/promptSyntax/promptFileContributions.js';
 import { AGENT_DOCUMENTATION_URL, INSTRUCTIONS_DOCUMENTATION_URL, PROMPT_DOCUMENTATION_URL, SKILL_DOCUMENTATION_URL, HOOK_DOCUMENTATION_URL } from '../common/promptSyntax/promptTypes.js';
 import { hookFileSchema, HOOK_SCHEMA_URI, HOOK_FILE_GLOB } from '../common/promptSyntax/hookSchema.js';
@@ -143,6 +143,7 @@ import { ChatRepoInfoContribution } from './chatRepoInfo.js';
 import { VALID_PROMPT_FOLDER_PATTERN } from '../common/promptSyntax/utils/promptFilesLocator.js';
 import { ChatTipService, IChatTipService } from './chatTipService.js';
 import { ChatQueuePickerRendering } from './widget/input/chatQueuePickerActionItem.js';
+import { PlanAgentDefaultModel } from './planAgentDefaultModel.js';
 
 const toolReferenceNameEnumValues: string[] = [];
 const toolReferenceNameEnumDescriptions: string[] = [];
@@ -614,6 +615,14 @@ configurationRegistry.registerConfiguration({
 				}
 			}
 		},
+		[ChatConfiguration.PlanAgentDefaultModel]: {
+			type: 'string',
+			description: nls.localize('chat.planAgent.defaultModel.description', "Select the default language model to use for the Plan agent from the available providers."),
+			default: '',
+			enum: PlanAgentDefaultModel.modelIds,
+			enumItemLabels: PlanAgentDefaultModel.modelLabels,
+			markdownEnumDescriptions: PlanAgentDefaultModel.modelDescriptions
+		},
 		[ChatConfiguration.RequestQueueingEnabled]: {
 			type: 'boolean',
 			description: nls.localize('chat.requestQueuing.enabled.description', "When enabled, allows queuing additional messages while a request is in progress and steering the current request with a new message."),
@@ -721,6 +730,7 @@ configurationRegistry.registerConfiguration({
 			),
 			default: {
 				[INSTRUCTIONS_DEFAULT_SOURCE_FOLDER]: true,
+				[CLAUDE_RULES_SOURCE_FOLDER]: true,
 			},
 			additionalProperties: { type: 'boolean' },
 			propertyNames: {
@@ -732,6 +742,7 @@ configurationRegistry.registerConfiguration({
 			examples: [
 				{
 					[INSTRUCTIONS_DEFAULT_SOURCE_FOLDER]: true,
+					[CLAUDE_RULES_SOURCE_FOLDER]: true,
 				},
 				{
 					[INSTRUCTIONS_DEFAULT_SOURCE_FOLDER]: true,
@@ -1180,6 +1191,37 @@ class ChatResolverContribution extends Disposable {
 	}
 }
 
+class ChatHooksProgressContribution extends Disposable implements IWorkbenchContribution {
+
+	static readonly ID = 'workbench.contrib.chatHooksProgress';
+
+	constructor(
+		@IChatService private readonly chatService: IChatService,
+		@IHooksExecutionService hooksExecutionService: IHooksExecutionService,
+	) {
+		super();
+
+		this._register(hooksExecutionService.onDidHookProgress(event => {
+			const model = this.chatService.getSession(event.sessionResource);
+			if (!model) {
+				return;
+			}
+
+			const request = model.getRequests().at(-1);
+			if (!request) {
+				return;
+			}
+
+			this.chatService.appendProgress(request, {
+				kind: 'hook',
+				hookType: event.hookType,
+				stopReason: event.stopReason,
+				systemMessage: event.systemMessage,
+			});
+		}));
+	}
+}
+
 class ChatAgentSettingContribution extends Disposable implements IWorkbenchContribution {
 
 	static readonly ID = 'workbench.contrib.chatAgentSetting';
@@ -1446,6 +1488,7 @@ class ChatSlashStaticSlashCommandsContribution extends Disposable {
 Registry.as<IEditorFactoryRegistry>(EditorExtensions.EditorFactory).registerEditorSerializer(ChatEditorInput.TypeID, ChatEditorInputSerializer);
 
 registerWorkbenchContribution2(ChatResolverContribution.ID, ChatResolverContribution, WorkbenchPhase.BlockStartup);
+registerWorkbenchContribution2(ChatHooksProgressContribution.ID, ChatHooksProgressContribution, WorkbenchPhase.AfterRestored);
 registerWorkbenchContribution2(ChatLanguageModelsDataContribution.ID, ChatLanguageModelsDataContribution, WorkbenchPhase.BlockRestore);
 registerWorkbenchContribution2(ChatSlashStaticSlashCommandsContribution.ID, ChatSlashStaticSlashCommandsContribution, WorkbenchPhase.Eventually);
 

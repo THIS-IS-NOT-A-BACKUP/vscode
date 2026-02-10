@@ -14,7 +14,7 @@ import { runWithFakedTimers } from '../../../../../../base/test/common/timeTrave
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
 import { TestInstantiationService } from '../../../../../../platform/instantiation/test/common/instantiationServiceMock.js';
 import { workbenchInstantiationService } from '../../../../../test/browser/workbenchTestServices.js';
-import { LocalAgentsSessionsProvider } from '../../../browser/agentSessions/localAgentSessionsProvider.js';
+import { LocalAgentsSessionsController } from '../../../browser/agentSessions/localAgentSessionsController.js';
 import { ModifiedFileEntryState } from '../../../common/editing/chatEditingService.js';
 import { IChatModel, IChatRequestModel, IChatResponseModel } from '../../../common/model/chatModel.js';
 import { ChatRequestQueueKind, IChatDetail, IChatService, IChatSessionStartOptions, ResponseModelState } from '../../../common/chatService/chatService.js';
@@ -280,7 +280,7 @@ function createMockChatModel(options: {
 	} as unknown as IChatModel;
 }
 
-suite('LocalAgentsSessionsProvider', () => {
+suite('LocalAgentsSessionsController', () => {
 	const disposables = new DisposableStore();
 	let mockChatService: MockChatService;
 	let mockChatSessionsService: MockChatSessionsService;
@@ -300,38 +300,39 @@ suite('LocalAgentsSessionsProvider', () => {
 
 	ensureNoDisposablesAreLeakedInTestSuite();
 
-	function createProvider(): LocalAgentsSessionsProvider {
-		return disposables.add(instantiationService.createInstance(LocalAgentsSessionsProvider));
+	function createController(): LocalAgentsSessionsController {
+		return disposables.add(instantiationService.createInstance(LocalAgentsSessionsController));
 	}
 
 	test('should have correct session type', () => {
-		const provider = createProvider();
-		assert.strictEqual(provider.chatSessionType, localChatSessionType);
+		const controller = createController();
+		assert.strictEqual(controller.chatSessionType, localChatSessionType);
 	});
 
 	test('should register itself with chat sessions service', async () => {
-		const provider = createProvider();
+		const controller = createController();
 
-		const providerResults = await mockChatSessionsService.getChatSessionItems(undefined, CancellationToken.None);
-		assert.strictEqual(providerResults.length, 1);
-		assert.strictEqual(providerResults[0].chatSessionType, provider.chatSessionType);
+		const controllerResults = await mockChatSessionsService.getChatSessionItems(undefined, CancellationToken.None);
+		assert.strictEqual(controllerResults.length, 1);
+		assert.strictEqual(controllerResults[0].chatSessionType, controller.chatSessionType);
 	});
 
 	test('should provide empty sessions when no live or history sessions', async () => {
 		return runWithFakedTimers({}, async () => {
-			const provider = createProvider();
+			const controller = createController();
 
 			mockChatService.setLiveSessionItems([]);
 			mockChatService.setHistorySessionItems([]);
 
-			const sessions = await provider.provideChatSessionItems(CancellationToken.None);
+			await controller.refresh(CancellationToken.None);
+			const sessions = controller.items;
 			assert.strictEqual(sessions.length, 0);
 		});
 	});
 
 	test('should provide live session items', async () => {
 		return runWithFakedTimers({}, async () => {
-			const provider = createProvider();
+			const controller = createController();
 
 			const sessionResource = LocalChatSessionUri.forSession('test-session');
 			const mockModel = createMockChatModel({
@@ -350,7 +351,8 @@ suite('LocalAgentsSessionsProvider', () => {
 				lastResponseState: ResponseModelState.Complete
 			}]);
 
-			const sessions = await provider.provideChatSessionItems(CancellationToken.None);
+			await controller.refresh(CancellationToken.None);
+			const sessions = controller.items;
 			assert.strictEqual(sessions.length, 1);
 			assert.strictEqual(sessions[0].label, 'Test Session');
 			assert.strictEqual(sessions[0].resource.toString(), sessionResource.toString());
@@ -359,7 +361,7 @@ suite('LocalAgentsSessionsProvider', () => {
 
 	test('should provide history session items', async () => {
 		return runWithFakedTimers({}, async () => {
-			const provider = createProvider();
+			const controller = createController();
 
 			const sessionResource = LocalChatSessionUri.forSession('history-session');
 
@@ -373,7 +375,8 @@ suite('LocalAgentsSessionsProvider', () => {
 				timing: createTestTiming()
 			}]);
 
-			const sessions = await provider.provideChatSessionItems(CancellationToken.None);
+			await controller.refresh(CancellationToken.None);
+			const sessions = controller.items;
 			assert.strictEqual(sessions.length, 1);
 			assert.strictEqual(sessions[0].label, 'History Session');
 		});
@@ -381,7 +384,7 @@ suite('LocalAgentsSessionsProvider', () => {
 
 	test('should not duplicate sessions in history and live', async () => {
 		return runWithFakedTimers({}, async () => {
-			const provider = createProvider();
+			const controller = createController();
 
 			const sessionResource = LocalChatSessionUri.forSession('duplicate-session');
 			const mockModel = createMockChatModel({
@@ -407,7 +410,8 @@ suite('LocalAgentsSessionsProvider', () => {
 				timing: createTestTiming()
 			}]);
 
-			const sessions = await provider.provideChatSessionItems(CancellationToken.None);
+			await controller.refresh(CancellationToken.None);
+			const sessions = controller.items;
 			assert.strictEqual(sessions.length, 1);
 			assert.strictEqual(sessions[0].label, 'Live Session');
 		});
@@ -416,7 +420,7 @@ suite('LocalAgentsSessionsProvider', () => {
 	suite('Session Status', () => {
 		test('should return InProgress status when request in progress', async () => {
 			return runWithFakedTimers({}, async () => {
-				const provider = createProvider();
+				const controller = createController();
 
 				const sessionResource = LocalChatSessionUri.forSession('in-progress-session');
 				const mockModel = createMockChatModel({
@@ -435,7 +439,8 @@ suite('LocalAgentsSessionsProvider', () => {
 					timing: createTestTiming()
 				}]);
 
-				const sessions = await provider.provideChatSessionItems(CancellationToken.None);
+				await controller.refresh(CancellationToken.None);
+				const sessions = controller.items;
 				assert.strictEqual(sessions.length, 1);
 				assert.strictEqual(sessions[0].status, ChatSessionStatus.InProgress);
 			});
@@ -443,7 +448,7 @@ suite('LocalAgentsSessionsProvider', () => {
 
 		test('should return Completed status when last response is complete', async () => {
 			return runWithFakedTimers({}, async () => {
-				const provider = createProvider();
+				const controller = createController();
 
 				const sessionResource = LocalChatSessionUri.forSession('completed-session');
 				const mockModel = createMockChatModel({
@@ -465,7 +470,8 @@ suite('LocalAgentsSessionsProvider', () => {
 					timing: createTestTiming(),
 				}]);
 
-				const sessions = await provider.provideChatSessionItems(CancellationToken.None);
+				await controller.refresh(CancellationToken.None);
+				const sessions = controller.items;
 				assert.strictEqual(sessions.length, 1);
 				assert.strictEqual(sessions[0].status, ChatSessionStatus.Completed);
 			});
@@ -473,7 +479,7 @@ suite('LocalAgentsSessionsProvider', () => {
 
 		test('should return Success status when last response was canceled', async () => {
 			return runWithFakedTimers({}, async () => {
-				const provider = createProvider();
+				const controller = createController();
 
 				const sessionResource = LocalChatSessionUri.forSession('canceled-session');
 				const mockModel = createMockChatModel({
@@ -494,7 +500,8 @@ suite('LocalAgentsSessionsProvider', () => {
 					timing: createTestTiming(),
 				}]);
 
-				const sessions = await provider.provideChatSessionItems(CancellationToken.None);
+				await controller.refresh(CancellationToken.None);
+				const sessions = controller.items;
 				assert.strictEqual(sessions.length, 1);
 				assert.strictEqual(sessions[0].status, ChatSessionStatus.Completed);
 			});
@@ -502,7 +509,7 @@ suite('LocalAgentsSessionsProvider', () => {
 
 		test('should return Failed status when last response has error', async () => {
 			return runWithFakedTimers({}, async () => {
-				const provider = createProvider();
+				const controller = createController();
 
 				const sessionResource = LocalChatSessionUri.forSession('error-session');
 				const mockModel = createMockChatModel({
@@ -523,7 +530,8 @@ suite('LocalAgentsSessionsProvider', () => {
 					timing: createTestTiming(),
 				}]);
 
-				const sessions = await provider.provideChatSessionItems(CancellationToken.None);
+				await controller.refresh(CancellationToken.None);
+				const sessions = controller.items;
 				assert.strictEqual(sessions.length, 1);
 				assert.strictEqual(sessions[0].status, ChatSessionStatus.Failed);
 			});
@@ -533,7 +541,7 @@ suite('LocalAgentsSessionsProvider', () => {
 	suite('Session Statistics', () => {
 		test('should return statistics for sessions with modified entries', async () => {
 			return runWithFakedTimers({}, async () => {
-				const provider = createProvider();
+				const controller = createController();
 
 				const sessionResource = LocalChatSessionUri.forSession('stats-session');
 				const mockModel = createMockChatModel({
@@ -572,7 +580,8 @@ suite('LocalAgentsSessionsProvider', () => {
 					}
 				}]);
 
-				const sessions = await provider.provideChatSessionItems(CancellationToken.None);
+				await controller.refresh(CancellationToken.None);
+				const sessions = controller.items;
 				assert.strictEqual(sessions.length, 1);
 				assert.ok(sessions[0].changes);
 				const changes = sessions[0].changes as { files: number; insertions: number; deletions: number };
@@ -584,7 +593,7 @@ suite('LocalAgentsSessionsProvider', () => {
 
 		test('should not return statistics for sessions without modified entries', async () => {
 			return runWithFakedTimers({}, async () => {
-				const provider = createProvider();
+				const controller = createController();
 
 				const sessionResource = LocalChatSessionUri.forSession('no-stats-session');
 				const mockModel = createMockChatModel({
@@ -612,7 +621,8 @@ suite('LocalAgentsSessionsProvider', () => {
 					timing: createTestTiming()
 				}]);
 
-				const sessions = await provider.provideChatSessionItems(CancellationToken.None);
+				await controller.refresh(CancellationToken.None);
+				const sessions = controller.items;
 				assert.strictEqual(sessions.length, 1);
 				assert.strictEqual(sessions[0].changes, undefined);
 			});
@@ -622,7 +632,7 @@ suite('LocalAgentsSessionsProvider', () => {
 	suite('Session Timing', () => {
 		test('should use model timestamp for created when model exists', async () => {
 			return runWithFakedTimers({}, async () => {
-				const provider = createProvider();
+				const controller = createController();
 
 				const sessionResource = LocalChatSessionUri.forSession('timing-session');
 				const modelTimestamp = Date.now() - 5000;
@@ -642,7 +652,8 @@ suite('LocalAgentsSessionsProvider', () => {
 					timing: createTestTiming({ created: modelTimestamp })
 				}]);
 
-				const sessions = await provider.provideChatSessionItems(CancellationToken.None);
+				await controller.refresh(CancellationToken.None);
+				const sessions = controller.items;
 				assert.strictEqual(sessions.length, 1);
 				assert.strictEqual(sessions[0].timing.created, modelTimestamp);
 			});
@@ -650,7 +661,7 @@ suite('LocalAgentsSessionsProvider', () => {
 
 		test('should use lastMessageDate for created when model does not exist', async () => {
 			return runWithFakedTimers({}, async () => {
-				const provider = createProvider();
+				const controller = createController();
 
 				const sessionResource = LocalChatSessionUri.forSession('history-timing');
 				const lastMessageDate = Date.now() - 10000;
@@ -665,7 +676,8 @@ suite('LocalAgentsSessionsProvider', () => {
 					timing: createTestTiming({ created: lastMessageDate })
 				}]);
 
-				const sessions = await provider.provideChatSessionItems(CancellationToken.None);
+				await controller.refresh(CancellationToken.None);
+				const sessions = controller.items;
 				assert.strictEqual(sessions.length, 1);
 				assert.strictEqual(sessions[0].timing.created, lastMessageDate);
 			});
@@ -673,7 +685,7 @@ suite('LocalAgentsSessionsProvider', () => {
 
 		test('should set lastRequestEnded from last response completedAt', async () => {
 			return runWithFakedTimers({}, async () => {
-				const provider = createProvider();
+				const controller = createController();
 
 				const sessionResource = LocalChatSessionUri.forSession('endtime-session');
 				const completedAt = Date.now() - 1000;
@@ -694,7 +706,8 @@ suite('LocalAgentsSessionsProvider', () => {
 					timing: createTestTiming({ lastRequestEnded: completedAt })
 				}]);
 
-				const sessions = await provider.provideChatSessionItems(CancellationToken.None);
+				await controller.refresh(CancellationToken.None);
+				const sessions = controller.items;
 				assert.strictEqual(sessions.length, 1);
 				assert.strictEqual(sessions[0].timing.lastRequestEnded, completedAt);
 			});
@@ -704,7 +717,7 @@ suite('LocalAgentsSessionsProvider', () => {
 	suite('Session Icon', () => {
 		test('should use Codicon.chatSparkle as icon', async () => {
 			return runWithFakedTimers({}, async () => {
-				const provider = createProvider();
+				const controller = createController();
 
 				const sessionResource = LocalChatSessionUri.forSession('icon-session');
 				const mockModel = createMockChatModel({
@@ -722,7 +735,8 @@ suite('LocalAgentsSessionsProvider', () => {
 					timing: createTestTiming()
 				}]);
 
-				const sessions = await provider.provideChatSessionItems(CancellationToken.None);
+				await controller.refresh(CancellationToken.None);
+				const sessions = controller.items;
 				assert.strictEqual(sessions.length, 1);
 				assert.strictEqual(sessions[0].iconPath, Codicon.chatSparkle);
 			});
@@ -732,7 +746,7 @@ suite('LocalAgentsSessionsProvider', () => {
 	suite('Events', () => {
 		test('should fire onDidChangeChatSessionItems when model progress changes', async () => {
 			return runWithFakedTimers({}, async () => {
-				const provider = createProvider();
+				const controller = createController();
 
 				const sessionResource = LocalChatSessionUri.forSession('progress-session');
 				const mockModel = createMockChatModel({
@@ -745,7 +759,7 @@ suite('LocalAgentsSessionsProvider', () => {
 				mockChatService.addSession(sessionResource, mockModel);
 
 				let changeEventCount = 0;
-				disposables.add(provider.onDidChangeChatSessionItems(() => {
+				disposables.add(controller.onDidChangeChatSessionItems(() => {
 					changeEventCount++;
 				}));
 
@@ -758,7 +772,7 @@ suite('LocalAgentsSessionsProvider', () => {
 
 		test('should fire onDidChangeChatSessionItems when model request status changes', async () => {
 			return runWithFakedTimers({}, async () => {
-				const provider = createProvider();
+				const controller = createController();
 
 				const sessionResource = LocalChatSessionUri.forSession('status-change-session');
 				const mockModel = createMockChatModel({
@@ -771,7 +785,7 @@ suite('LocalAgentsSessionsProvider', () => {
 				mockChatService.addSession(sessionResource, mockModel);
 
 				let changeEventCount = 0;
-				disposables.add(provider.onDidChangeChatSessionItems(() => {
+				disposables.add(controller.onDidChangeChatSessionItems(() => {
 					changeEventCount++;
 				}));
 
@@ -784,7 +798,7 @@ suite('LocalAgentsSessionsProvider', () => {
 
 		test('should clean up model listeners when model is removed via chatModels observable', async () => {
 			return runWithFakedTimers({}, async () => {
-				const provider = createProvider();
+				const controller = createController();
 
 				const sessionResource = LocalChatSessionUri.forSession('cleanup-session');
 				const mockModel = createMockChatModel({
@@ -802,7 +816,7 @@ suite('LocalAgentsSessionsProvider', () => {
 				// The onDidChangeChatSessionItems from registerModelListeners cleanup should fire once
 				// but after that, title changes should NOT fire onDidChangeChatSessionItems
 				let changeEventCount = 0;
-				disposables.add(provider.onDidChangeChatSessionItems(() => {
+				disposables.add(controller.onDidChangeChatSessionItems(() => {
 					changeEventCount++;
 				}));
 
