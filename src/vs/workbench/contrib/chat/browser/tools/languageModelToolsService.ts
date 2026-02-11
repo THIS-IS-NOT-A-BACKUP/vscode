@@ -47,7 +47,7 @@ import { ChatToolInvocation } from '../../common/model/chatProgressTypes/chatToo
 import { chatSessionResourceToId } from '../../common/model/chatUri.js';
 import { HookType } from '../../common/promptSyntax/hookSchema.js';
 import { ILanguageModelToolsConfirmationService } from '../../common/tools/languageModelToolsConfirmationService.js';
-import { CountTokensCallback, createToolSchemaUri, IBeginToolCallOptions, IExternalPreToolUseHookResult, ILanguageModelToolsService, IPreparedToolInvocation, isToolSet, IToolAndToolSetEnablementMap, IToolData, IToolImpl, IToolInvocation, IToolInvokedEvent, IToolResult, IToolResultInputOutputDetails, IToolSet, SpecedToolAliases, stringifyPromptTsxPart, ToolDataSource, toolMatchesModel, ToolSet, ToolSetForModel, VSCodeToolReference } from '../../common/tools/languageModelToolsService.js';
+import { CountTokensCallback, createToolSchemaUri, IBeginToolCallOptions, IExternalPreToolUseHookResult, ILanguageModelToolsService, IPreparedToolInvocation, isToolSet, IToolAndToolSetEnablementMap, IToolData, IToolImpl, IToolInvocation, IToolInvokedEvent, IToolResult, IToolResultInputOutputDetails, IToolSet, SpecedToolAliases, stringifyPromptTsxPart, ToolDataSource, ToolInvocationPresentation, toolMatchesModel, ToolSet, ToolSetForModel, VSCodeToolReference } from '../../common/tools/languageModelToolsService.js';
 import { getToolConfirmationAlert } from '../accessibility/chatAccessibilityProvider.js';
 
 const jsonSchemaRegistry = Registry.as<JSONContributionRegistry.IJSONContributionRegistry>(JSONContributionRegistry.Extensions.JSONContribution);
@@ -209,6 +209,13 @@ export class LanguageModelToolsService extends Disposable implements ILanguageMo
 		if (agentModeEnabled !== false) {
 			return true;
 		}
+
+		// Internal tools that explicitly cannot be referenced in prompts are always permitted
+		// since they are infrastructure tools (e.g. inline_chat_exit), not user-facing agent tools
+		if (!isToolSet(toolOrToolSet) && toolOrToolSet.canBeReferencedInPrompt === false && toolOrToolSet.source.type === 'internal') {
+			return true;
+		}
+
 		const permittedInternalToolSetIds = [SpecedToolAliases.read, SpecedToolAliases.search, SpecedToolAliases.web];
 		if (isToolSet(toolOrToolSet)) {
 			const permitted = toolOrToolSet.source.type === 'internal' && permittedInternalToolSetIds.includes(toolOrToolSet.referenceName);
@@ -377,6 +384,7 @@ export class LanguageModelToolsService extends Disposable implements ILanguageMo
 
 		if (toolData) {
 			if (pendingInvocation) {
+				pendingInvocation.presentation = ToolInvocationPresentation.Hidden;
 				pendingInvocation.cancelFromStreaming(ToolConfirmKind.Denied, reason);
 			} else if (request) {
 				const cancelledInvocation = ChatToolInvocation.createCancelled(
@@ -385,6 +393,7 @@ export class LanguageModelToolsService extends Disposable implements ILanguageMo
 					ToolConfirmKind.Denied,
 					reason
 				);
+				cancelledInvocation.presentation = ToolInvocationPresentation.Hidden;
 				this._chatService.appendProgress(request, cancelledInvocation);
 			}
 		}
@@ -726,17 +735,49 @@ export class LanguageModelToolsService extends Disposable implements ILanguageMo
 				}
 				const fullReferenceName = getToolFullReferenceName(tool.data);
 				const hookReason = hookResult.permissionDecisionReason;
-				const baseMessage = localize('hookRequiresConfirmation.message', "{0} hook confirmation required", HookType.PreToolUse);
+				const hookNote = hookReason
+					? localize('hookRequiresConfirmation.messageWithReason', "{0} hook required confirmation: {1}", HookType.PreToolUse, hookReason)
+					: localize('hookRequiresConfirmation.message', "{0} hook required confirmation", HookType.PreToolUse);
 				preparedInvocation.confirmationMessages = {
 					...preparedInvocation.confirmationMessages,
 					title: localize('hookRequiresConfirmation.title', "Use the '{0}' tool?", fullReferenceName),
-					message: new MarkdownString(hookReason ? `${baseMessage}\n\n${hookReason}` : baseMessage),
+					message: new MarkdownString(`_${hookNote}_`),
 					allowAutoConfirm: false,
 				};
 				preparedInvocation.toolSpecificData = {
 					kind: 'input',
 					rawInput: dto.parameters,
 				};
+			} else {
+				// Tool already has its own confirmation - prepend hook note
+				const hookReason = hookResult.permissionDecisionReason;
+				const hookNote = hookReason
+					? localize('hookRequiresConfirmation.note', "{0} hook required confirmation: {1}", HookType.PreToolUse, hookReason)
+					: localize('hookRequiresConfirmation.noteNoReason', "{0} hook required confirmation", HookType.PreToolUse);
+
+				const existing = preparedInvocation.confirmationMessages!;
+				if (preparedInvocation.toolSpecificData?.kind === 'terminal') {
+					// Terminal tools render message as hover only; use disclaimer for visible text
+					const existingDisclaimerText = existing.disclaimer
+						? (typeof existing.disclaimer === 'string' ? existing.disclaimer : existing.disclaimer.value)
+						: undefined;
+					const combinedDisclaimer = existingDisclaimerText
+						? `${hookNote}\n\n${existingDisclaimerText}`
+						: hookNote;
+					preparedInvocation.confirmationMessages = {
+						...existing,
+						disclaimer: combinedDisclaimer,
+						allowAutoConfirm: false,
+					};
+				} else {
+					// Edit/other tools: prepend hook note to the message body
+					const msgText = typeof existing.message === 'string' ? existing.message : existing.message?.value ?? '';
+					preparedInvocation.confirmationMessages = {
+						...existing,
+						message: new MarkdownString(`_${hookNote}_\n\n${msgText}`),
+						allowAutoConfirm: false,
+					};
+				}
 			}
 			return { autoConfirmed: undefined, preparedInvocation };
 		}

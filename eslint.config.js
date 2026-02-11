@@ -2064,7 +2064,9 @@ export default tseslint.config(
 	// Additional extension strictness rules
 	{
 		files: [
-			'extensions/markdown-language-features/**/*.ts',
+			'extensions/markdown-language-features/src/**/*.ts',
+			'extensions/markdown-language-features/notebook/**/*.ts',
+			'extensions/markdown-language-features/preview-src/**/*.ts',
 			'extensions/mermaid-chat-features/**/*.ts',
 			'extensions/media-preview/**/*.ts',
 			'extensions/simple-browser/**/*.ts',
