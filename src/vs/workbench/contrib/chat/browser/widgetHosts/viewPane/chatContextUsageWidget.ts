@@ -248,23 +248,26 @@ export class ChatContextUsageWidget extends Disposable {
 		const usage = response.usage;
 		const modelMetadata = this.languageModelsService.lookupLanguageModel(modelId);
 		const maxInputTokens = modelMetadata?.maxInputTokens;
+		const maxOutputTokens = modelMetadata?.maxOutputTokens;
 
-		if (!usage || !maxInputTokens || maxInputTokens <= 0) {
+		if (!usage || !maxInputTokens || maxInputTokens <= 0 || !maxOutputTokens || maxOutputTokens <= 0) {
 			this.hide();
 			return;
 		}
 
 		const promptTokens = usage.promptTokens;
 		const promptTokenDetails = usage.promptTokenDetails;
-		const percentage = Math.min(100, (promptTokens / maxInputTokens) * 100);
+		const totalContextWindow = maxInputTokens + maxOutputTokens;
+		const usedTokens = promptTokens + maxOutputTokens;
+		const percentage = Math.min(100, (usedTokens / totalContextWindow) * 100);
 
-		this.render(percentage, promptTokens, maxInputTokens, promptTokenDetails);
+		this.render(percentage, usedTokens, totalContextWindow, promptTokenDetails);
 		this.show();
 	}
 
-	private render(percentage: number, promptTokens: number, maxTokens: number, promptTokenDetails?: readonly { category: string; label: string; percentageOfPrompt: number }[]): void {
+	private render(percentage: number, usedTokens: number, totalContextWindow: number, promptTokenDetails?: readonly { category: string; label: string; percentageOfPrompt: number }[]): void {
 		// Store current data for use in details popup
-		this.currentData = { promptTokens, maxInputTokens: maxTokens, percentage, promptTokenDetails };
+		this.currentData = { usedTokens, totalContextWindow, percentage, promptTokenDetails };
 
 		// Update pie chart progress
 		this.progressIndicator.setProgress(percentage);

@@ -21,7 +21,7 @@ import { URI } from '../../../../../base/common/uri.js';
 import { ChatContextKeys } from '../../common/actions/chatContextKeys.js';
 import { ChatModeKind } from '../../common/constants.js';
 import { PromptsType } from '../../common/promptSyntax/promptTypes.js';
-import { ILanguageModelToolsService } from '../../common/tools/languageModelToolsService.js';
+import { ILanguageModelToolsService, IToolData, ToolDataSource } from '../../common/tools/languageModelToolsService.js';
 import { MockLanguageModelToolsService } from '../common/tools/mockLanguageModelToolsService.js';
 
 class MockContextKeyServiceWithRulesMatching extends MockContextKeyService {
@@ -479,6 +479,39 @@ suite('ChatTipService', () => {
 		assert.strictEqual(tracker2.isExcluded(tip), true, 'New tracker should read persisted mode exclusion from workspace storage');
 	});
 
+	test('resetSession allows tips in a new conversation', () => {
+		const service = createService();
+		const now = Date.now();
+
+		// Show a tip in the first conversation
+		const tip1 = service.getNextTip('request-1', now + 1000, contextKeyService);
+		assert.ok(tip1, 'First request should get a tip');
+
+		// Second request — no tip (one per session)
+		const tip2 = service.getNextTip('request-2', now + 2000, contextKeyService);
+		assert.strictEqual(tip2, undefined, 'Second request should not get a tip');
+
+		// Start a new conversation
+		service.resetSession();
+
+		// New request after reset should get a tip
+		const tip3 = service.getNextTip('request-3', Date.now() + 1000, contextKeyService);
+		assert.ok(tip3, 'First request after resetSession should get a tip');
+	});
+
+	test('chatResponse tip shows regardless of welcome tip', () => {
+		const service = createService();
+		const now = Date.now();
+
+		// Show a welcome tip (simulating the getting-started view)
+		const welcomeTip = service.getWelcomeTip(contextKeyService);
+		assert.ok(welcomeTip, 'Welcome tip should be shown');
+
+		// First new request should still get a chatResponse tip
+		const tip = service.getNextTip('request-1', now + 1000, contextKeyService);
+		assert.ok(tip, 'ChatResponse tip should show even when welcome tip was shown');
+	});
+
 	test('excludes tip when tracked tool has been invoked', () => {
 		const mockToolsService = createMockToolsService();
 		const tip: ITipDefinition = {
@@ -578,6 +611,74 @@ suite('ChatTipService', () => {
 		await new Promise(r => setTimeout(r, 0));
 
 		assert.strictEqual(tracker.isExcluded(tip), false, 'Should not be excluded when no skill files exist');
+	});
+
+	test('excludes tip when requiresAnyToolSetRegistered tool sets are not registered', () => {
+		const tip: ITipDefinition = {
+			id: 'tip.githubRepo',
+			message: 'test',
+			requiresAnyToolSetRegistered: ['github', 'github-pull-request'],
+		};
+
+		const tracker = testDisposables.add(new TipEligibilityTracker(
+			[tip],
+			{ onDidExecuteCommand: Event.None, onWillExecuteCommand: Event.None } as Partial<ICommandService> as ICommandService,
+			storageService,
+			createMockPromptsService() as IPromptsService,
+			createMockToolsService(),
+			new NullLogService(),
+		));
+
+		assert.strictEqual(tracker.isExcluded(tip), true, 'Should be excluded when no required tool sets are registered');
+	});
+
+	test('excludes tip when a tool belonging to a monitored tool set has been invoked', () => {
+		const mockToolsService = createMockToolsService();
+		const toolInSet: IToolData = { id: 'mcp_github_get_me', source: ToolDataSource.Internal, displayName: 'Get Me', modelDescription: 'Get Me' };
+		mockToolsService.addRegisteredToolSetName('github', [toolInSet]);
+
+		const tip: ITipDefinition = {
+			id: 'tip.githubRepo',
+			message: 'test',
+			excludeWhenAnyToolSetToolInvoked: ['github'],
+		};
+
+		const tracker = testDisposables.add(new TipEligibilityTracker(
+			[tip],
+			{ onDidExecuteCommand: Event.None, onWillExecuteCommand: Event.None } as Partial<ICommandService> as ICommandService,
+			storageService,
+			createMockPromptsService() as IPromptsService,
+			mockToolsService,
+			new NullLogService(),
+		));
+
+		assert.strictEqual(tracker.isExcluded(tip), false, 'Should not be excluded before any tool set tool is invoked');
+
+		mockToolsService.fireOnDidInvokeTool({ toolId: 'mcp_github_get_me', sessionResource: undefined, requestId: undefined, subagentInvocationId: undefined });
+
+		assert.strictEqual(tracker.isExcluded(tip), true, 'Should be excluded after a tool from the monitored tool set is invoked');
+	});
+
+	test('does not exclude tip when at least one requiresAnyToolSetRegistered tool set is registered', () => {
+		const mockToolsService = createMockToolsService();
+		mockToolsService.addRegisteredToolSetName('github');
+
+		const tip: ITipDefinition = {
+			id: 'tip.githubRepo',
+			message: 'test',
+			requiresAnyToolSetRegistered: ['github', 'github-pull-request'],
+		};
+
+		const tracker = testDisposables.add(new TipEligibilityTracker(
+			[tip],
+			{ onDidExecuteCommand: Event.None, onWillExecuteCommand: Event.None } as Partial<ICommandService> as ICommandService,
+			storageService,
+			createMockPromptsService() as IPromptsService,
+			mockToolsService,
+			new NullLogService(),
+		));
+
+		assert.strictEqual(tracker.isExcluded(tip), false, 'Should not be excluded when at least one required tool set is registered');
 	});
 
 	test('re-checks agent file exclusion when onDidChangeCustomAgents fires', async () => {

@@ -78,6 +78,9 @@ import { IChatListItemTemplate } from './chatListRenderer.js';
 import { ChatListWidget } from './chatListWidget.js';
 import { ChatEditorOptions } from './chatOptions.js';
 import { ChatViewWelcomePart, IChatSuggestedPrompts, IChatViewWelcomeContent } from '../viewsWelcome/chatViewWelcomeController.js';
+import { IChatTipService } from '../chatTipService.js';
+import { ChatTipContentPart } from './chatContentParts/chatTipContentPart.js';
+import { ChatContentMarkdownRenderer } from './chatContentMarkdownRenderer.js';
 import { IAgentSessionsService } from '../agentSessions/agentSessionsService.js';
 
 const $ = dom.$;
@@ -233,6 +236,8 @@ export class ChatWidget extends Disposable implements IChatWidget {
 	private welcomeMessageContainer!: HTMLElement;
 	private readonly welcomePart: MutableDisposable<ChatViewWelcomePart> = this._register(new MutableDisposable());
 
+	private readonly _gettingStartedTipPart = this._register(new MutableDisposable<DisposableStore>());
+
 	private readonly chatSuggestNextWidget: ChatSuggestNextWidget;
 
 	private bodyDimension: dom.Dimension | undefined;
@@ -368,6 +373,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		@IWorkspaceContextService private readonly contextService: IWorkspaceContextService,
 		@ILifecycleService private readonly lifecycleService: ILifecycleService,
 		@IChatAttachmentResolveService private readonly chatAttachmentResolveService: IChatAttachmentResolveService,
+		@IChatTipService private readonly chatTipService: IChatTipService,
 	) {
 		super();
 
@@ -840,9 +846,25 @@ export class ChatWidget extends Disposable implements IChatWidget {
 	 */
 	private updateChatViewVisibility(): void {
 		if (this.viewModel) {
+			const isStandardLayout = this.viewOptions.renderStyle !== 'compact' && this.viewOptions.renderStyle !== 'minimal';
 			const numItems = this.viewModel.getItems().length;
 			dom.setVisibility(numItems === 0, this.welcomeMessageContainer);
 			dom.setVisibility(numItems !== 0, this.listContainer);
+
+			// Show/hide the getting-started tip container based on empty state.
+			// Only use this in the standard chat layout where the welcome view is shown.
+			if (isStandardLayout && this.inputPart) {
+				const tipContainer = this.inputPart.gettingStartedTipContainerElement;
+				if (numItems === 0) {
+					this.renderGettingStartedTipIfNeeded();
+				} else {
+					// Dispose the cached tip part so the next empty state picks a
+					// fresh (rotated) tip instead of re-showing the stale one.
+					this._gettingStartedTipPart.clear();
+					dom.clearNode(tipContainer);
+					dom.setVisibility(false, tipContainer);
+				}
+			}
 		}
 
 		// Only show welcome getting started until extension is installed
@@ -902,6 +924,44 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		} finally {
 			this._isRenderingWelcome = false;
 		}
+	}
+
+	private renderGettingStartedTipIfNeeded(): void {
+		if (!this.inputPart) {
+			return;
+		}
+
+		const tipContainer = this.inputPart.gettingStartedTipContainerElement;
+
+		// Already showing a tip
+		if (this._gettingStartedTipPart.value) {
+			dom.setVisibility(true, tipContainer);
+			return;
+		}
+
+		const tip = this.chatTipService.getWelcomeTip(this.contextKeyService);
+		if (!tip) {
+			dom.setVisibility(false, tipContainer);
+			return;
+		}
+
+		const store = new DisposableStore();
+		const renderer = this.instantiationService.createInstance(ChatContentMarkdownRenderer);
+		const tipPart = store.add(this.instantiationService.createInstance(ChatTipContentPart,
+			tip,
+			renderer,
+			() => this.chatTipService.getWelcomeTip(this.contextKeyService),
+		));
+		tipContainer.appendChild(tipPart.domNode);
+
+		store.add(tipPart.onDidHide(() => {
+			tipPart.domNode.remove();
+			this._gettingStartedTipPart.clear();
+			dom.setVisibility(false, tipContainer);
+		}));
+
+		this._gettingStartedTipPart.value = store;
+		dom.setVisibility(true, tipContainer);
 	}
 
 	private _getGenerateInstructionsMessage(): IMarkdownString {
@@ -990,7 +1050,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			message: new MarkdownString(DISCLAIMER),
 			icon: Codicon.chatSparkle,
 			additionalMessage,
-			suggestedPrompts: this.getPromptFileSuggestions()
+			suggestedPrompts: this.getPromptFileSuggestions(),
 		};
 	}
 
@@ -1866,6 +1926,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		}
 		this.inputPart.clearTodoListWidget(model.sessionResource, false);
 		this.chatSuggestNextWidget.hide();
+		this.chatTipService.resetSession();
 
 		this._codeBlockModelCollection.clear();
 
