@@ -9,7 +9,7 @@ import { ContextKeyExpr, ContextKeyExpression, IContextKeyService } from '../../
 import { createDecorator, IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { IProductService } from '../../../../platform/product/common/productService.js';
 import { ChatContextKeys } from '../common/actions/chatContextKeys.js';
-import { ChatModeKind } from '../common/constants.js';
+import { ChatAgentLocation, ChatModeKind } from '../common/constants.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { Disposable, MutableDisposable } from '../../../../base/common/lifecycle.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
@@ -36,6 +36,16 @@ export interface IChatTipService {
 	 * Fired when the current tip is dismissed.
 	 */
 	readonly onDidDismissTip: Event<void>;
+
+	/**
+	 * Fired when the user navigates to a different tip (previous/next).
+	 */
+	readonly onDidNavigateTip: Event<IChatTip>;
+
+	/**
+	 * Fired when the tip widget is hidden without dismissing the tip.
+	 */
+	readonly onDidHideTip: Event<void>;
 
 	/**
 	 * Fired when tips are disabled.
@@ -73,9 +83,27 @@ export interface IChatTipService {
 	dismissTip(): void;
 
 	/**
+	 * Hides the tip widget without permanently dismissing the tip.
+	 * The tip may be shown again in a future session.
+	 */
+	hideTip(): void;
+
+	/**
 	 * Disables tips permanently by setting the `chat.tips.enabled` configuration to false.
 	 */
 	disableTips(): Promise<void>;
+
+	/**
+	 * Navigates to the next tip in the catalog without permanently dismissing the current one.
+	 * @param contextKeyService The context key service to evaluate tip eligibility.
+	 */
+	navigateToNextTip(contextKeyService: IContextKeyService): IChatTip | undefined;
+
+	/**
+	 * Navigates to the previous tip in the catalog without permanently dismissing the current one.
+	 * @param contextKeyService The context key service to evaluate tip eligibility.
+	 */
+	navigateToPreviousTip(contextKeyService: IContextKeyService): IChatTip | undefined;
 }
 
 export interface ITipDefinition {
@@ -106,18 +134,6 @@ export interface ITipDefinition {
 	 * The tip won't be shown if the tool it describes has already been used.
 	 */
 	readonly excludeWhenToolsInvoked?: string[];
-	/**
-	 * Tool set reference names. If any tool belonging to one of these tool sets
-	 * has ever been invoked in this workspace, the tip becomes ineligible.
-	 * Unlike {@link excludeWhenToolsInvoked}, this does not require listing
-	 * individual tool IDs, it checks all tools that belong to the named sets.
-	 */
-	readonly excludeWhenAnyToolSetToolInvoked?: string[];
-	/**
-	 * Tool set reference names where at least one must be registered for the tip to be eligible.
-	 * If none of the listed tool sets are registered, the tip is not shown.
-	 */
-	readonly requiresAnyToolSetRegistered?: string[];
 	/**
 	 * If set, exclude this tip when prompt files of the specified type exist in the workspace.
 	 */
@@ -211,16 +227,6 @@ const TIP_CATALOG: ITipDefinition[] = [
 		excludeWhenToolsInvoked: ['renderMermaidDiagram'],
 	},
 	{
-		id: 'tip.githubRepo',
-		message: localize('tip.githubRepo', "Tip: Mention a GitHub repository (@owner/repo) in your prompt to let the agent search code, browse issues, and explore pull requests from that repo."),
-		when: ContextKeyExpr.and(
-			ChatContextKeys.chatModeKind.isEqualTo(ChatModeKind.Agent),
-			ContextKeyExpr.notEquals('gitOpenRepositoryCount', '0'),
-		),
-		excludeWhenAnyToolSetToolInvoked: ['github', 'github-pull-request'],
-		requiresAnyToolSetRegistered: ['github', 'github-pull-request'],
-	},
-	{
 		id: 'tip.subagents',
 		message: localize('tip.subagents', "Tip: Ask the agent to work in parallel to complete large tasks faster."),
 		when: ChatContextKeys.chatModeKind.isEqualTo(ChatModeKind.Agent),
@@ -264,9 +270,6 @@ export class TipEligibilityTracker extends Disposable {
 	private readonly _pendingCommands: Set<string>;
 	private readonly _pendingModes: Set<string>;
 	private readonly _pendingTools: Set<string>;
-
-	/** Tool set reference names monitored via {@link ITipDefinition.excludeWhenAnyToolSetToolInvoked}. */
-	private readonly _monitoredToolSets: Set<string>;
 
 	private readonly _commandListener = this._register(new MutableDisposable());
 	private readonly _toolListener = this._register(new MutableDisposable());
@@ -333,13 +336,6 @@ export class TipEligibilityTracker extends Disposable {
 			}
 		}
 
-		this._monitoredToolSets = new Set<string>();
-		for (const tip of tips) {
-			for (const name of tip.excludeWhenAnyToolSetToolInvoked ?? []) {
-				this._monitoredToolSets.add(name);
-			}
-		}
-
 		// --- Set up command listener (auto-disposes when all seen) --------------
 
 		if (this._pendingCommands.size > 0) {
@@ -358,44 +354,17 @@ export class TipEligibilityTracker extends Disposable {
 
 		// --- Set up tool listener (auto-disposes when all seen) -----------------
 
-		if (this._pendingTools.size > 0 || this._monitoredToolSets.size > 0) {
+		if (this._pendingTools.size > 0) {
 			this._toolListener.value = this._languageModelToolsService.onDidInvokeTool(e => {
-				let changed = false;
-
 				// Track explicit tool IDs
 				if (this._pendingTools.has(e.toolId)) {
 					this._invokedTools.add(e.toolId);
 					this._pendingTools.delete(e.toolId);
-					changed = true;
-				}
 
-				// Track tools belonging to monitored tool sets
-				if (this._monitoredToolSets.size > 0 && !this._invokedTools.has(e.toolId)) {
-					for (const setName of this._monitoredToolSets) {
-						const toolSet = this._languageModelToolsService.getToolSetByName(setName);
-						if (toolSet) {
-							for (const tool of toolSet.getTools()) {
-								if (tool.id === e.toolId) {
-									this._invokedTools.add(e.toolId);
-									// Remove set name from monitoring since ANY tool from the set excludes the tip.
-									// The tip remains excluded via _invokedTools even after we stop monitoring.
-									this._monitoredToolSets.delete(setName);
-									changed = true;
-									break;
-								}
-							}
-						}
-						if (changed) {
-							break;
-						}
-					}
-				}
-
-				if (changed) {
 					this._persistSet(TipEligibilityTracker._TOOLS_STORAGE_KEY, this._invokedTools);
 				}
 
-				if (this._pendingTools.size === 0 && this._monitoredToolSets.size === 0) {
+				if (this._pendingTools.size === 0) {
 					this._toolListener.clear();
 				}
 			});
@@ -477,29 +446,9 @@ export class TipEligibilityTracker extends Disposable {
 				}
 			}
 		}
-		if (tip.excludeWhenAnyToolSetToolInvoked) {
-			for (const setName of tip.excludeWhenAnyToolSetToolInvoked) {
-				const toolSet = this._languageModelToolsService.getToolSetByName(setName);
-				if (toolSet) {
-					for (const tool of toolSet.getTools()) {
-						if (this._invokedTools.has(tool.id)) {
-							this._logService.debug('#ChatTips: tip excluded because tool set tool was invoked', tip.id, setName, tool.id);
-							return true;
-						}
-					}
-				}
-			}
-		}
 		if (tip.excludeWhenPromptFilesExist && this._excludedByFiles.has(tip.id)) {
 			this._logService.debug('#ChatTips: tip excluded because prompt files exist', tip.id);
 			return true;
-		}
-		if (tip.requiresAnyToolSetRegistered) {
-			const hasAny = tip.requiresAnyToolSetRegistered.some(name => this._languageModelToolsService.getToolSetByName(name));
-			if (!hasAny) {
-				this._logService.debug('#ChatTips: tip excluded because no required tool sets are registered', tip.id);
-				return true;
-			}
 		}
 		return false;
 	}
@@ -550,6 +499,12 @@ export class ChatTipService extends Disposable implements IChatTipService {
 
 	private readonly _onDidDismissTip = this._register(new Emitter<void>());
 	readonly onDidDismissTip = this._onDidDismissTip.event;
+
+	private readonly _onDidNavigateTip = this._register(new Emitter<IChatTip>());
+	readonly onDidNavigateTip = this._onDidNavigateTip.event;
+
+	private readonly _onDidHideTip = this._register(new Emitter<void>());
+	readonly onDidHideTip = this._onDidHideTip.event;
 
 	private readonly _onDidDisableTips = this._register(new Emitter<void>());
 	readonly onDidDisableTips = this._onDidDisableTips.event;
@@ -636,6 +591,13 @@ export class ChatTipService extends Disposable implements IChatTipService {
 		}
 	}
 
+	hideTip(): void {
+		this._hasShownRequestTip = false;
+		this._shownTip = undefined;
+		this._tipRequestId = undefined;
+		this._onDidHideTip.fire();
+	}
+
 	async disableTips(): Promise<void> {
 		this._hasShownRequestTip = false;
 		this._shownTip = undefined;
@@ -652,6 +614,11 @@ export class ChatTipService extends Disposable implements IChatTipService {
 
 		// Only show tips for Copilot
 		if (!this._isCopilotEnabled()) {
+			return undefined;
+		}
+
+		// Only show tips in the main chat panel, not in terminal/editor inline chat
+		if (!this._isChatLocation(contextKeyService)) {
 			return undefined;
 		}
 
@@ -690,6 +657,11 @@ export class ChatTipService extends Disposable implements IChatTipService {
 
 		// Only show tips for Copilot
 		if (!this._isCopilotEnabled()) {
+			return undefined;
+		}
+
+		// Only show tips in the main chat panel, not in terminal/editor inline chat
+		if (!this._isChatLocation(contextKeyService)) {
 			return undefined;
 		}
 
@@ -757,6 +729,40 @@ export class ChatTipService extends Disposable implements IChatTipService {
 		return this._createTip(selectedTip);
 	}
 
+	navigateToNextTip(contextKeyService: IContextKeyService): IChatTip | undefined {
+		return this._navigateTip(1, contextKeyService);
+	}
+
+	navigateToPreviousTip(contextKeyService: IContextKeyService): IChatTip | undefined {
+		return this._navigateTip(-1, contextKeyService);
+	}
+
+	private _navigateTip(direction: 1 | -1, contextKeyService: IContextKeyService): IChatTip | undefined {
+		if (!this._shownTip) {
+			return undefined;
+		}
+
+		const currentIndex = TIP_CATALOG.findIndex(t => t.id === this._shownTip!.id);
+		if (currentIndex === -1) {
+			return undefined;
+		}
+
+		const dismissedIds = new Set(this._getDismissedTipIds());
+		for (let i = 1; i < TIP_CATALOG.length; i++) {
+			const idx = ((currentIndex + direction * i) % TIP_CATALOG.length + TIP_CATALOG.length) % TIP_CATALOG.length;
+			const candidate = TIP_CATALOG[idx];
+			if (!dismissedIds.has(candidate.id) && this._isEligible(candidate, contextKeyService)) {
+				this._shownTip = candidate;
+				this._storageService.store(ChatTipService._LAST_TIP_ID_KEY, candidate.id, StorageScope.PROFILE, StorageTarget.USER);
+				const tip = this._createTip(candidate);
+				this._onDidNavigateTip.fire(tip);
+				return tip;
+			}
+		}
+
+		return undefined;
+	}
+
 	private _isEligible(tip: ITipDefinition, contextKeyService: IContextKeyService): boolean {
 		if (tip.when && !contextKeyService.contextMatchesRules(tip.when)) {
 			this._logService.debug('#ChatTips: tip is not eligible due to when clause', tip.id, tip.when.serialize());
@@ -767,6 +773,11 @@ export class ChatTipService extends Disposable implements IChatTipService {
 		}
 		this._logService.debug('#ChatTips: tip is eligible', tip.id);
 		return true;
+	}
+
+	private _isChatLocation(contextKeyService: IContextKeyService): boolean {
+		const location = contextKeyService.getContextKeyValue<ChatAgentLocation>(ChatContextKeys.location.key);
+		return !location || location === ChatAgentLocation.Chat;
 	}
 
 	private _isCopilotEnabled(): boolean {

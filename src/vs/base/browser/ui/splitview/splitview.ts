@@ -908,13 +908,18 @@ export class SplitView<TLayoutContext = undefined, TView extends IView<TLayoutCo
 			container.classList.add('visible');
 		}
 
-		// 6. Clip overflow on the target container while it shrinks.
-		//    Only apply for HIDE animations - for SHOW, we leave overflow alone
-		//    so that box-shadow / visual effects on the child Part are not clipped
-		//    by the parent container during the animation.
-		if (!visible) {
-			container.style.overflow = 'hidden';
-		}
+		// 6. Clip overflow on the animating container so that the view
+		//    content (rendered at its full target size) is revealed/hidden
+		//    smoothly as the container width animates.
+		container.style.overflow = 'hidden';
+
+		// The target size is the full (non-zero) panel size. During
+		// animation we re-layout the animating view at this fixed size
+		// after each frame so its content never reflows at intermediate
+		// widths/heights (prevents chat, extension icons, etc. from
+		// jumping around). Sibling views still receive interpolated sizes
+		// so the editor / bottom panel remain responsive.
+		const viewTargetSize = visible ? finalSizes[index] : startSizes[index];
 
 		// 6b. Set initial opacity for fade effect
 		container.style.opacity = visible ? '0' : '1';
@@ -925,6 +930,12 @@ export class SplitView<TLayoutContext = undefined, TView extends IView<TLayoutCo
 
 		// 8. Render the start state
 		this.layoutViews();
+		try {
+			this.viewItems[index].view.layout(viewTargetSize, 0, this.layoutContext);
+		} catch (e) {
+			console.error('Splitview: Failed to layout view during animation');
+			console.error(e);
+		}
 
 		// 9. Easing curve is pre-parsed - ready for JS evaluation
 
@@ -934,9 +945,9 @@ export class SplitView<TLayoutContext = undefined, TView extends IView<TLayoutCo
 				this.viewItems[i].size = finalSizes[i];
 			}
 			container.style.opacity = '';
+			container.style.overflow = '';
 			if (!visible) {
 				container.classList.remove('visible');
-				container.style.overflow = '';
 			}
 			this.layoutViews();
 			this.saveProportions();
@@ -995,6 +1006,16 @@ export class SplitView<TLayoutContext = undefined, TView extends IView<TLayoutCo
 			}
 
 			this.layoutViews();
+
+			// Re-layout the animating view at its full target size so its
+			// content does not reflow at intermediate sizes. The container
+			// is already at the interpolated size with overflow:hidden.
+			try {
+				this.viewItems[index].view.layout(viewTargetSize, 0, this.layoutContext);
+			} catch (e) {
+				console.error('Splitview: Failed to layout view during animation');
+				console.error(e);
+			}
 
 			if (t < 1) {
 				rafId = window.requestAnimationFrame(animate);

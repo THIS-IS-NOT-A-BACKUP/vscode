@@ -19,9 +19,9 @@ import { ChatTipService, ITipDefinition, TipEligibilityTracker } from '../../bro
 import { AgentFileType, IPromptPath, IPromptsService, IResolvedAgentFile, PromptsStorage } from '../../common/promptSyntax/service/promptsService.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { ChatContextKeys } from '../../common/actions/chatContextKeys.js';
-import { ChatModeKind } from '../../common/constants.js';
+import { ChatAgentLocation, ChatModeKind } from '../../common/constants.js';
 import { PromptsType } from '../../common/promptSyntax/promptTypes.js';
-import { ILanguageModelToolsService, IToolData, ToolDataSource } from '../../common/tools/languageModelToolsService.js';
+import { ILanguageModelToolsService } from '../../common/tools/languageModelToolsService.js';
 import { MockLanguageModelToolsService } from '../common/tools/mockLanguageModelToolsService.js';
 
 class MockContextKeyServiceWithRulesMatching extends MockContextKeyService {
@@ -140,6 +140,28 @@ suite('ChatTipService', () => {
 
 		const tip = service.getNextTip('request-1', now + 1000, contextKeyService);
 		assert.strictEqual(tip, undefined, 'Should not return a tip when tips setting is disabled');
+	});
+
+	test('returns undefined when location is terminal', () => {
+		const service = createService();
+		const now = Date.now();
+
+		const terminalContextKeyService = new MockContextKeyServiceWithRulesMatching();
+		terminalContextKeyService.createKey(ChatContextKeys.location.key, ChatAgentLocation.Terminal);
+
+		const tip = service.getNextTip('request-1', now + 1000, terminalContextKeyService);
+		assert.strictEqual(tip, undefined, 'Should not return a tip in terminal inline chat');
+	});
+
+	test('returns undefined when location is editor inline', () => {
+		const service = createService();
+		const now = Date.now();
+
+		const editorContextKeyService = new MockContextKeyServiceWithRulesMatching();
+		editorContextKeyService.createKey(ChatContextKeys.location.key, ChatAgentLocation.EditorInline);
+
+		const tip = service.getNextTip('request-1', now + 1000, editorContextKeyService);
+		assert.strictEqual(tip, undefined, 'Should not return a tip in editor inline chat');
 	});
 
 	test('old requests do not consume the session tip allowance', () => {
@@ -611,74 +633,6 @@ suite('ChatTipService', () => {
 		await new Promise(r => setTimeout(r, 0));
 
 		assert.strictEqual(tracker.isExcluded(tip), false, 'Should not be excluded when no skill files exist');
-	});
-
-	test('excludes tip when requiresAnyToolSetRegistered tool sets are not registered', () => {
-		const tip: ITipDefinition = {
-			id: 'tip.githubRepo',
-			message: 'test',
-			requiresAnyToolSetRegistered: ['github', 'github-pull-request'],
-		};
-
-		const tracker = testDisposables.add(new TipEligibilityTracker(
-			[tip],
-			{ onDidExecuteCommand: Event.None, onWillExecuteCommand: Event.None } as Partial<ICommandService> as ICommandService,
-			storageService,
-			createMockPromptsService() as IPromptsService,
-			createMockToolsService(),
-			new NullLogService(),
-		));
-
-		assert.strictEqual(tracker.isExcluded(tip), true, 'Should be excluded when no required tool sets are registered');
-	});
-
-	test('excludes tip when a tool belonging to a monitored tool set has been invoked', () => {
-		const mockToolsService = createMockToolsService();
-		const toolInSet: IToolData = { id: 'mcp_github_get_me', source: ToolDataSource.Internal, displayName: 'Get Me', modelDescription: 'Get Me' };
-		mockToolsService.addRegisteredToolSetName('github', [toolInSet]);
-
-		const tip: ITipDefinition = {
-			id: 'tip.githubRepo',
-			message: 'test',
-			excludeWhenAnyToolSetToolInvoked: ['github'],
-		};
-
-		const tracker = testDisposables.add(new TipEligibilityTracker(
-			[tip],
-			{ onDidExecuteCommand: Event.None, onWillExecuteCommand: Event.None } as Partial<ICommandService> as ICommandService,
-			storageService,
-			createMockPromptsService() as IPromptsService,
-			mockToolsService,
-			new NullLogService(),
-		));
-
-		assert.strictEqual(tracker.isExcluded(tip), false, 'Should not be excluded before any tool set tool is invoked');
-
-		mockToolsService.fireOnDidInvokeTool({ toolId: 'mcp_github_get_me', sessionResource: undefined, requestId: undefined, subagentInvocationId: undefined });
-
-		assert.strictEqual(tracker.isExcluded(tip), true, 'Should be excluded after a tool from the monitored tool set is invoked');
-	});
-
-	test('does not exclude tip when at least one requiresAnyToolSetRegistered tool set is registered', () => {
-		const mockToolsService = createMockToolsService();
-		mockToolsService.addRegisteredToolSetName('github');
-
-		const tip: ITipDefinition = {
-			id: 'tip.githubRepo',
-			message: 'test',
-			requiresAnyToolSetRegistered: ['github', 'github-pull-request'],
-		};
-
-		const tracker = testDisposables.add(new TipEligibilityTracker(
-			[tip],
-			{ onDidExecuteCommand: Event.None, onWillExecuteCommand: Event.None } as Partial<ICommandService> as ICommandService,
-			storageService,
-			createMockPromptsService() as IPromptsService,
-			mockToolsService,
-			new NullLogService(),
-		));
-
-		assert.strictEqual(tracker.isExcluded(tip), false, 'Should not be excluded when at least one required tool set is registered');
 	});
 
 	test('re-checks agent file exclusion when onDidChangeCustomAgents fires', async () => {
