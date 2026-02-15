@@ -97,7 +97,7 @@ export class ModalEditorPart {
 			ModalEditorPartImpl,
 			mainWindow.vscodeWindowId,
 			this.editorPartsView,
-			localize('modalEditorPart', "Modal Editor Area")
+			modalElement,
 		));
 		disposables.add(this.editorPartsView.registerPart(editorPart));
 		editorPart.create(editorPartContainer);
@@ -240,7 +240,7 @@ class ModalEditorPartImpl extends EditorPart implements IModalEditorPart {
 	constructor(
 		windowId: number,
 		editorPartsView: IEditorPartsView,
-		groupsLabel: string,
+		private readonly modalElement: HTMLElement,
 		@IInstantiationService instantiationService: IInstantiationService,
 		@IThemeService themeService: IThemeService,
 		@IConfigurationService configurationService: IConfigurationService,
@@ -250,9 +250,13 @@ class ModalEditorPartImpl extends EditorPart implements IModalEditorPart {
 		@IContextKeyService contextKeyService: IContextKeyService,
 	) {
 		const id = ModalEditorPartImpl.COUNTER++;
-		super(editorPartsView, `workbench.parts.modalEditor.${id}`, groupsLabel, windowId, instantiationService, themeService, configurationService, storageService, layoutService, hostService, contextKeyService);
+		super(editorPartsView, `workbench.parts.modalEditor.${id}`, localize('modalEditorPart', "Modal Editor Area"), windowId, instantiationService, themeService, configurationService, storageService, layoutService, hostService, contextKeyService);
 
 		this.enforceModalPartOptions();
+	}
+
+	getModalElement() {
+		return this.modalElement;
 	}
 
 	override create(parent: HTMLElement, options?: object): void {
