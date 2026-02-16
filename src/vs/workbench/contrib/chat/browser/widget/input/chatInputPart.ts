@@ -1069,10 +1069,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		if (sessionType) {
 			// Session has a specific chat session type - show only models that target
 			// this session type, if any such models exist.
-			const targeted = models.filter(entry => entry.metadata?.targetChatSessionType === sessionType);
-			if (targeted.length > 0) {
-				return targeted;
-			}
+			return models.filter(entry => entry.metadata?.targetChatSessionType === sessionType && entry.metadata?.isUserSelectable);
 		}
 
 		// No session type or no targeted models - show general models (those without
