@@ -10,7 +10,7 @@ import { coalesce } from '../../../../../../base/common/arrays.js';
 import { Codicon } from '../../../../../../base/common/codicons.js';
 import { groupBy } from '../../../../../../base/common/collections.js';
 import { IDisposable } from '../../../../../../base/common/lifecycle.js';
-import { autorun, IObservable } from '../../../../../../base/common/observable.js';
+import { autorun, IObservable, observableValue } from '../../../../../../base/common/observable.js';
 import { ThemeIcon } from '../../../../../../base/common/themables.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { localize } from '../../../../../../nls.js';
@@ -33,6 +33,7 @@ import { getOpenChatActionIdForMode } from '../../actions/chatActions.js';
 import { IToggleChatModeArgs, ToggleAgentModeActionId } from '../../actions/chatExecuteActions.js';
 import { ChatInputPickerActionViewItem, IChatInputPickerOptions } from './chatInputPickerActionItem.js';
 import { IOpenerService } from '../../../../../../platform/opener/common/opener.js';
+import { IWorkbenchAssignmentService } from '../../../../../services/assignment/common/assignmentService.js';
 
 export interface IModePickerDelegate {
 	readonly currentMode: IObservable<IChatMode>;
@@ -69,8 +70,11 @@ export class ModePickerActionItem extends ChatInputPickerActionViewItem {
 		@ICommandService commandService: ICommandService,
 		@IProductService private readonly _productService: IProductService,
 		@ITelemetryService telemetryService: ITelemetryService,
-		@IOpenerService openerService: IOpenerService
+		@IOpenerService openerService: IOpenerService,
+		@IWorkbenchAssignmentService assignmentService: IWorkbenchAssignmentService,
 	) {
+		const assignments = observableValue<{ showOldAskMode: boolean }>('modePickerAssignments', { showOldAskMode: false });
+
 		// Get custom agent target (if filtering is enabled)
 		const customAgentTarget = delegate.customAgentTarget?.() ?? Target.Undefined;
 
@@ -210,20 +214,17 @@ export class ModePickerActionItem extends ChatInputPickerActionViewItem {
 				const agentMode = modes.builtin.find(mode => mode.id === ChatMode.Agent.id);
 
 				const otherBuiltinModes = modes.builtin.filter(mode => {
-					if (mode.id === ChatMode.Agent.id) {
-						return false;
-					}
-					if (mode.id === ChatMode.Edit.id) {
-						return false;
-					}
-					if (mode.id === ChatMode.Ask.id) {
-						return false;
+					return mode.id !== ChatMode.Agent.id && shouldShowBuiltInMode(mode, assignments.get());
+				});
+				const filteredCustomModes = modes.custom.filter(mode => {
+					if (isModeConsideredBuiltIn(mode, this._productService)) {
+						return shouldShowBuiltInMode(mode, assignments.get());
 					}
 					return true;
 				});
 				// Filter out 'implement' mode from the dropdown - it's available for handoffs but not user-selectable
 				const customModes = groupBy(
-					modes.custom,
+					filteredCustomModes,
 					mode => isModeConsideredBuiltIn(mode, this._productService) ? 'builtin' : 'custom');
 
 				const modeSupportsVSCode = (mode: IChatMode) => {
@@ -268,6 +269,13 @@ export class ModePickerActionItem extends ChatInputPickerActionViewItem {
 			if (this.element) {
 				this.renderLabel(this.element);
 			}
+		}));
+
+		assignmentService.getTreatment('chat.showOldAskMode').then(showOldAskMode => {
+			assignments.set({ showOldAskMode: showOldAskMode === 'enabled' }, undefined);
+		});
+		this._register(assignmentService.onDidRefetchAssignments(async () => {
+			assignments.set({ showOldAskMode: await assignmentService.getTreatment('chat.showOldAskMode') === 'enabled' }, undefined);
 		}));
 	}
 
@@ -325,4 +333,22 @@ function isModeConsideredBuiltIn(mode: IChatMode, productService: IProductServic
 		return true;
 	}
 	return !isOrganizationPromptFile(modeUri, mode.source.extensionId, productService);
+}
+
+function shouldShowBuiltInMode(mode: IChatMode, assignments: { showOldAskMode: boolean }): boolean {
+	// The built-in "Edit" mode is deprecated, but still supported for older conversations.
+	if (mode.id === ChatMode.Edit.id) {
+		return false;
+	}
+
+	// The "Ask" mode is a special case - we want to show either the old or new version based on the assignment, but not both
+	// We still support the old "Ask" mode for conversations that already use it.
+	if (mode.id === ChatMode.Ask.id) {
+		return assignments.showOldAskMode;
+	}
+	if (mode.name.get().toLowerCase() === 'ask') {
+		return !assignments.showOldAskMode;
+	}
+
+	return true;
 }

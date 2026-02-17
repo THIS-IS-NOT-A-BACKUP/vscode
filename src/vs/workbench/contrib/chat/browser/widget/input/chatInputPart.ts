@@ -209,6 +209,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	private readonly _chatQuestionCarouselWidget = this._register(new MutableDisposable<ChatQuestionCarouselPart>());
 	private readonly _chatQuestionCarouselDisposables = this._register(new DisposableStore());
 	private _currentQuestionCarouselResponseId: string | undefined;
+	private _hasQuestionCarouselContextKey: IContextKey<boolean> | undefined;
 	private readonly _chatEditingTodosDisposables = this._register(new DisposableStore());
 	private _lastEditingSessionResource: URI | undefined;
 
@@ -562,6 +563,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		this.inputEditorHasText = ChatContextKeys.inputHasText.bindTo(contextKeyService);
 		this.chatCursorAtTop = ChatContextKeys.inputCursorAtTop.bindTo(contextKeyService);
 		this.inputEditorHasFocus = ChatContextKeys.inputHasFocus.bindTo(contextKeyService);
+		this._hasQuestionCarouselContextKey = ChatContextKeys.Editing.hasQuestionCarousel.bindTo(contextKeyService);
 		this.chatModeKindKey = ChatContextKeys.chatModeKind.bindTo(contextKeyService);
 		this.chatModeNameKey = ChatContextKeys.chatModeName.bindTo(contextKeyService);
 		this.withinEditSessionKey = ChatContextKeys.withinEditSessionDiff.bindTo(contextKeyService);
@@ -2172,7 +2174,8 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 							this.setCurrentLanguageModel(model);
 							this.renderAttachedContext();
 						},
-						getModels: () => this.getModels()
+						getModels: () => this.getModels(),
+						canManageModels: () => !this.getCurrentSessionType()
 					};
 					return this.modelWidget = this.instantiationService.createInstance(ModelPickerActionItem, action, undefined, itemDelegate, pickerOptions);
 				} else if (action.id === OpenModePickerAction.ID && action instanceof MenuItemAction) {
@@ -2613,6 +2616,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			this.instantiationService.createInstance(ChatQuestionCarouselPart, carousel, context, options)
 		);
 		this._chatQuestionCarouselWidget.value = part;
+		this._hasQuestionCarouselContextKey?.set(true);
 
 		dom.clearNode(this.chatQuestionCarouselContainer);
 		dom.append(this.chatQuestionCarouselContainer, part.domNode);
@@ -2627,6 +2631,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		this._chatQuestionCarouselDisposables.clear();
 		this._chatQuestionCarouselWidget.clear();
 		this._currentQuestionCarouselResponseId = undefined;
+		this._hasQuestionCarouselContextKey?.set(false);
 		dom.clearNode(this.chatQuestionCarouselContainer);
 	}
 	get questionCarouselResponseId(): string | undefined {
