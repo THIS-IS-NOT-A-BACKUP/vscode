@@ -464,8 +464,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		this.hoverHidden(requestHover);
 
 		const checkpointContainer = dom.append(rowContainer, $('.checkpoint-container'));
-		const codiconContainer = dom.append(checkpointContainer, $('.codicon-container'));
-		dom.append(codiconContainer, $('span.codicon.codicon-bookmark'));
+		dom.append(checkpointContainer, $('.checkpoint-line-left'));
 
 		const checkpointToolbar = templateDisposables.add(scopedInstantiationService.createInstance(MenuWorkbenchToolBar, checkpointContainer, MenuId.ChatMessageCheckpoint, {
 			actionViewItemProvider: (action, options) => {
@@ -483,7 +482,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			},
 		}));
 
-		dom.append(checkpointContainer, $('.checkpoint-divider'));
+		dom.append(checkpointContainer, $('.checkpoint-line-right'));
 
 		const user = dom.append(header, $('.user'));
 		const avatarContainer = dom.append(user, $('.avatar-container'));
@@ -517,10 +516,12 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		footerDetailsContainer.tabIndex = 0;
 
 		const checkpointRestoreContainer = dom.append(rowContainer, $('.checkpoint-restore-container'));
-		const codiconRestoreContainer = dom.append(checkpointRestoreContainer, $('.codicon-container'));
-		dom.append(codiconRestoreContainer, $('span.codicon.codicon-bookmark'));
+		dom.append(checkpointRestoreContainer, $('.checkpoint-line-left'));
 		const label = dom.append(checkpointRestoreContainer, $('span.checkpoint-label-text'));
 		label.textContent = localize('checkpointRestore', 'Checkpoint Restored');
+		const dot = dom.append(checkpointRestoreContainer, $('span.checkpoint-dot-separator'));
+		dot.textContent = '\u00B7';
+		dot.setAttribute('aria-hidden', 'true');
 		const checkpointRestoreToolbar = templateDisposables.add(scopedInstantiationService.createInstance(MenuWorkbenchToolBar, checkpointRestoreContainer, MenuId.ChatMessageRestoreCheckpoint, {
 			actionViewItemProvider: (action, options) => {
 				if (action instanceof MenuItemAction) {
@@ -537,7 +538,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			},
 		}));
 
-		dom.append(checkpointRestoreContainer, $('.checkpoint-divider'));
+		dom.append(checkpointRestoreContainer, $('.checkpoint-line-right'));
 
 
 		const agentHover = templateDisposables.add(this.instantiationService.createInstance(ChatAgentHover));
@@ -2103,6 +2104,13 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		const inputPartHasCarousel = widget?.input.questionCarousel !== undefined;
 
 		if (carousel.isUsed || responseIsComplete) {
+			if (responseIsComplete && !carousel.isUsed && isResponseVM(context.element) && carousel.resolveId && carousel.data === undefined) {
+				carousel.data = {};
+				carousel.isUsed = true;
+				this.chatService.notifyQuestionCarouselAnswer(context.element.requestId, carousel.resolveId, undefined);
+				this.pendingQuestionCarousels.get(context.element.sessionResource)?.clear();
+			}
+
 			// Clear the carousel from input part when response completes (stopped/canceled)
 			// Only clear if this response's carousel is currently displayed (pass responseId)
 			if (responseIsComplete && inputPartHasCarousel && responseId) {

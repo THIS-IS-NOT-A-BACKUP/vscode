@@ -36,7 +36,7 @@
 
 /* Editor */
 .sessions-chat-editor {
-	padding: 0 10px;
+	padding: 0 6px 6px 6px;
 	height: 72px;
 	min-height: 72px;
 	max-height: 200px;

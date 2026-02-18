@@ -441,7 +441,7 @@ interface IExtensionManifest {
 /**
  * Loosely based on `getExtensionKind` from `src/vs/workbench/services/extensions/common/extensionManifestPropertiesService.ts`
  */
-function isWebExtension(manifest: IExtensionManifest): boolean {
+export function isWebExtension(manifest: IExtensionManifest): boolean {
 	if (Boolean(manifest.browser)) {
 		return true;
 	}
@@ -578,11 +578,11 @@ export function packageMarketplaceExtensionsStream(forWeb: boolean): Stream {
 }
 
 export interface IScannedBuiltinExtension {
-	extensionPath: string;
-	packageJSON: any;
-	packageNLS?: any;
-	readmePath?: string;
-	changelogPath?: string;
+	readonly extensionPath: string;
+	readonly packageJSON: unknown;
+	readonly packageNLS: unknown | undefined;
+	readonly readmePath: string | undefined;
+	readonly changelogPath: string | undefined;
 }
 
 export function scanBuiltinExtensions(extensionsRoot: string, exclude: string[] = []): IScannedBuiltinExtension[] {

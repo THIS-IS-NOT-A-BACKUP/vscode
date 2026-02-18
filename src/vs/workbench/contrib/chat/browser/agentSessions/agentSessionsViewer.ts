@@ -503,7 +503,7 @@ export class AgentSessionSectionRenderer implements ICompressibleTreeRenderer<IA
 
 export class AgentSessionsListDelegate implements IListVirtualDelegate<AgentSessionListItem> {
 
-	static readonly ITEM_HEIGHT = 44;
+	static readonly ITEM_HEIGHT = 48;
 	static readonly SECTION_HEIGHT = 26;
 
 	getHeight(element: AgentSessionListItem): number {
@@ -758,13 +758,19 @@ export function groupAgentSessionsByDate(sessions: IAgentSession[]): Map<AgentSe
 		}
 	}
 
+	const sectionWithCount = (section: AgentSessionSection, sessions: IAgentSession[]) => ({
+		section,
+		label: localize('agentSessions.sectionWithCount', "{0} ({1})", AgentSessionSectionLabels[section], sessions.length),
+		sessions
+	});
+
 	return new Map<AgentSessionSection, IAgentSessionSection>([
-		[AgentSessionSection.InProgress, { section: AgentSessionSection.InProgress, label: AgentSessionSectionLabels[AgentSessionSection.InProgress], sessions: inProgressSessions }],
-		[AgentSessionSection.Today, { section: AgentSessionSection.Today, label: AgentSessionSectionLabels[AgentSessionSection.Today], sessions: todaySessions }],
-		[AgentSessionSection.Yesterday, { section: AgentSessionSection.Yesterday, label: AgentSessionSectionLabels[AgentSessionSection.Yesterday], sessions: yesterdaySessions }],
-		[AgentSessionSection.Week, { section: AgentSessionSection.Week, label: AgentSessionSectionLabels[AgentSessionSection.Week], sessions: weekSessions }],
-		[AgentSessionSection.Older, { section: AgentSessionSection.Older, label: AgentSessionSectionLabels[AgentSessionSection.Older], sessions: olderSessions }],
-		[AgentSessionSection.Archived, { section: AgentSessionSection.Archived, label: localize('agentSessions.archivedSectionWithCount', "Archived ({0})", archivedSessions.length), sessions: archivedSessions }],
+		[AgentSessionSection.InProgress, sectionWithCount(AgentSessionSection.InProgress, inProgressSessions)],
+		[AgentSessionSection.Today, sectionWithCount(AgentSessionSection.Today, todaySessions)],
+		[AgentSessionSection.Yesterday, sectionWithCount(AgentSessionSection.Yesterday, yesterdaySessions)],
+		[AgentSessionSection.Week, sectionWithCount(AgentSessionSection.Week, weekSessions)],
+		[AgentSessionSection.Older, sectionWithCount(AgentSessionSection.Older, olderSessions)],
+		[AgentSessionSection.Archived, sectionWithCount(AgentSessionSection.Archived, archivedSessions)],
 	]);
 }
 

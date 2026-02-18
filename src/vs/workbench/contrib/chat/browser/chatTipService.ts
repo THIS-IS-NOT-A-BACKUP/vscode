@@ -113,6 +113,11 @@ export interface ITipDefinition {
 	 */
 	readonly enabledCommands?: string[];
 	/**
+	 * Chat model IDs for which this tip is eligible.
+	 * Compared against the lowercased `chatModelId` context key.
+	 */
+	readonly onlyWhenModelIds?: readonly string[];
+	/**
 	 * Command IDs that, if ever executed in this workspace, make this tip ineligible.
 	 * The tip won't be shown if the user has already performed the action it suggests.
 	 */
@@ -144,6 +149,12 @@ export interface ITipDefinition {
  * Static catalog of tips. Each tip has an optional when clause for eligibility.
  */
 const TIP_CATALOG: ITipDefinition[] = [
+	{
+		id: 'tip.switchToAuto',
+		message: localize('tip.switchToAuto', "Tip: Using gpt-4.1? Try switching to [Auto](command:workbench.action.chat.openModelPicker) in the model picker for better coding performance."),
+		enabledCommands: ['workbench.action.chat.openModelPicker'],
+		onlyWhenModelIds: ['gpt-4.1'],
+	},
 	{
 		id: 'tip.agentMode',
 		message: localize('tip.agentMode', "Tip: Try [Agents](command:workbench.action.chat.openEditSession) to make edits across your project and run commands."),
@@ -615,12 +626,40 @@ export class ChatTipService extends Disposable implements IChatTipService {
 
 		// Return the already-shown tip for stable rerenders
 		if (this._tipRequestId === 'welcome' && this._shownTip) {
+			if (!this._isEligible(this._shownTip, contextKeyService)) {
+				const nextTip = this._findNextEligibleTip(this._shownTip.id, contextKeyService);
+				if (nextTip) {
+					this._shownTip = nextTip;
+					this._storageService.store(ChatTipService._LAST_TIP_ID_KEY, nextTip.id, StorageScope.PROFILE, StorageTarget.USER);
+					const tip = this._createTip(nextTip);
+					this._onDidNavigateTip.fire(tip);
+					return tip;
+				}
+			}
 			return this._createTip(this._shownTip);
 		}
 
 		const tip = this._pickTip('welcome', contextKeyService);
 
 		return tip;
+	}
+
+	private _findNextEligibleTip(currentTipId: string, contextKeyService: IContextKeyService): ITipDefinition | undefined {
+		const currentIndex = TIP_CATALOG.findIndex(tip => tip.id === currentTipId);
+		if (currentIndex === -1) {
+			return undefined;
+		}
+
+		const dismissedIds = new Set(this._getDismissedTipIds());
+		for (let i = 1; i < TIP_CATALOG.length; i++) {
+			const idx = (currentIndex + i) % TIP_CATALOG.length;
+			const candidate = TIP_CATALOG[idx];
+			if (!dismissedIds.has(candidate.id) && this._isEligible(candidate, contextKeyService)) {
+				return candidate;
+			}
+		}
+
+		return undefined;
 	}
 
 	private _pickTip(sourceId: string, contextKeyService: IContextKeyService): IChatTip | undefined {
@@ -711,6 +750,13 @@ export class ChatTipService extends Disposable implements IChatTipService {
 	}
 
 	private _isEligible(tip: ITipDefinition, contextKeyService: IContextKeyService): boolean {
+		if (tip.onlyWhenModelIds?.length) {
+			const currentModelId = this._getCurrentChatModelId(contextKeyService);
+			const isModelMatch = tip.onlyWhenModelIds.some(modelId => currentModelId === modelId || currentModelId.startsWith(`${modelId}-`));
+			if (!isModelMatch) {
+				return false;
+			}
+		}
 		if (tip.when && !contextKeyService.contextMatchesRules(tip.when)) {
 			this._logService.debug('#ChatTips: tip is not eligible due to when clause', tip.id, tip.when.serialize());
 			return false;
@@ -720,6 +766,42 @@ export class ChatTipService extends Disposable implements IChatTipService {
 		}
 		this._logService.debug('#ChatTips: tip is eligible', tip.id);
 		return true;
+	}
+
+	private _getCurrentChatModelId(contextKeyService: IContextKeyService): string {
+		const normalize = (modelId: string | undefined): string => {
+			const normalizedModelId = modelId?.toLowerCase() ?? '';
+			if (!normalizedModelId) {
+				return '';
+			}
+
+			if (normalizedModelId.includes('/')) {
+				return normalizedModelId.split('/').at(-1) ?? '';
+			}
+
+			return normalizedModelId;
+		};
+
+		const contextKeyModelId = normalize(contextKeyService.getContextKeyValue<string>(ChatContextKeys.chatModelId.key));
+		if (contextKeyModelId) {
+			return contextKeyModelId;
+		}
+
+		const location = contextKeyService.getContextKeyValue<ChatAgentLocation>(ChatContextKeys.location.key) ?? ChatAgentLocation.Chat;
+		const sessionType = contextKeyService.getContextKeyValue<string>(ChatContextKeys.chatSessionType.key) ?? '';
+		const candidateStorageKeys = sessionType
+			? [`chat.currentLanguageModel.${location}.${sessionType}`, `chat.currentLanguageModel.${location}`]
+			: [`chat.currentLanguageModel.${location}`];
+
+		for (const storageKey of candidateStorageKeys) {
+			const persistedModelIdentifier = this._storageService.get(storageKey, StorageScope.APPLICATION);
+			const persistedModelId = normalize(persistedModelIdentifier);
+			if (persistedModelId) {
+				return persistedModelId;
+			}
+		}
+
+		return '';
 	}
 
 	private _isChatLocation(contextKeyService: IContextKeyService): boolean {
