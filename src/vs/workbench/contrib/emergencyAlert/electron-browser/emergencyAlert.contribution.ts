@@ -12,6 +12,7 @@ import { ILogService } from '../../../../platform/log/common/log.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { arch, platform } from '../../../../base/common/process.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
+import { equals } from '../../../../base/common/arrays.js';
 import { IntervalTimer } from '../../../../base/common/async.js';
 import { mainWindow } from '../../../../base/browser/window.js';
 
@@ -20,10 +21,10 @@ interface IEmergencyAlert {
 	readonly platform?: string;
 	readonly arch?: string;
 	readonly message: string;
-	readonly actions?: [{
+	readonly actions?: ReadonlyArray<{
 		readonly label: string;
 		readonly href: string;
-	}];
+	}>;
 }
 
 interface IEmergencyAlerts {
@@ -37,7 +38,8 @@ export class EmergencyAlert extends Disposable implements IWorkbenchContribution
 
 	static readonly ID = 'workbench.contrib.emergencyAlert';
 
-	private readonly pollingTimer = this._register(new IntervalTimer());
+	private currentAlertMessage: string | undefined;
+	private currentAlertActions: IEmergencyAlert['actions'] | undefined;
 
 	constructor(
 		@IBannerService private readonly bannerService: IBannerService,
@@ -53,7 +55,9 @@ export class EmergencyAlert extends Disposable implements IWorkbenchContribution
 		}
 
 		this.fetchAlerts(emergencyAlertUrl);
-		this.pollingTimer.cancelAndSet(() => this.fetchAlerts(emergencyAlertUrl), POLLING_INTERVAL, mainWindow);
+
+		const pollingTimer = this._register(new IntervalTimer());
+		pollingTimer.cancelAndSet(() => this.fetchAlerts(emergencyAlertUrl), POLLING_INTERVAL, mainWindow);
 	}
 
 	private async fetchAlerts(url: string): Promise<void> {
@@ -72,30 +76,49 @@ export class EmergencyAlert extends Disposable implements IWorkbenchContribution
 		}
 
 		const emergencyAlerts = await asJson<IEmergencyAlerts>(requestResult);
-		if (!emergencyAlerts) {
+		if (!emergencyAlerts || !Array.isArray(emergencyAlerts.alerts)) {
+			this.dismissAlert();
 			return;
 		}
 
-		for (const emergencyAlert of emergencyAlerts.alerts) {
-			if (
-				(emergencyAlert.commit !== this.productService.commit) ||				// version mismatch
-				(emergencyAlert.platform && emergencyAlert.platform !== platform) ||	// platform mismatch
-				(emergencyAlert.arch && emergencyAlert.arch !== arch)					// arch mismatch
-			) {
-				return;
-			}
+		// Find the first matching alert
+		const matchingAlert = emergencyAlerts.alerts.find(alert =>
+			alert.commit === this.productService.commit &&
+			(!alert.platform || alert.platform === platform) &&
+			(!alert.arch || alert.arch === arch)
+		);
 
+		if (!matchingAlert) {
+			// No matching alert, dismiss the banner if it was shown
+			this.dismissAlert();
+			return;
+		}
+
+		// Don't update the banner if message and actions didn't change
+		if (
+			this.currentAlertMessage === matchingAlert.message &&
+			equals(this.currentAlertActions ?? [], matchingAlert.actions ?? [], (a, b) => a.label === b.label && a.href === b.href)
+		) {
+			return;
+		}
+
+		this.currentAlertMessage = matchingAlert.message;
+		this.currentAlertActions = matchingAlert.actions;
+		this.bannerService.show({
+			id: BANNER_ID,
+			icon: Codicon.warning,
+			message: matchingAlert.message,
+			actions: matchingAlert.actions
+		});
+	}
+
+	private dismissAlert(): void {
+		if (this.currentAlertMessage !== undefined) {
+			this.currentAlertMessage = undefined;
+			this.currentAlertActions = undefined;
 			this.bannerService.hide(BANNER_ID);
-			this.bannerService.show({
-				id: BANNER_ID,
-				icon: Codicon.warning,
-				message: emergencyAlert.message,
-				actions: emergencyAlert.actions
-			});
-
-			break;
 		}
 	}
 }
 
-registerWorkbenchContribution2('workbench.emergencyAlert', EmergencyAlert, WorkbenchPhase.Eventually);
+registerWorkbenchContribution2(EmergencyAlert.ID, EmergencyAlert, WorkbenchPhase.Eventually);

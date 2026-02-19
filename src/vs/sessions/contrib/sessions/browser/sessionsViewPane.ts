@@ -118,6 +118,7 @@ export class AgenticSessionsViewPane extends ViewPane {
 			source: 'agentSessionsViewPane',
 			filter: sessionsFilter,
 			overrideStyles: this.getLocationBasedColors().listOverrideStyles,
+			disableHover: true,
 			getHoverPosition: () => this.getSessionHoverPosition(),
 			trackActiveEditorSession: () => true,
 			collapseOlderSections: () => true,
@@ -301,12 +302,8 @@ registerAction2(class RefreshAgentSessionsViewerAction extends Action2 {
 			id: 'sessionsView.refresh',
 			title: localize2('refresh', "Refresh Agent Sessions"),
 			icon: Codicon.refresh,
-			menu: [{
-				id: MenuId.ViewTitle,
-				group: 'navigation',
-				order: 1,
-				when: ContextKeyExpr.equals('view', SessionsViewId),
-			}],
+			f1: true,
+			category: localize2('sessionsViewCategory', "Agent Sessions"),
 		});
 	}
 	override run(accessor: ServicesAccessor) {

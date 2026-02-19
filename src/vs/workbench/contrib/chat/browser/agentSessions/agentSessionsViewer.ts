@@ -76,6 +76,7 @@ interface IAgentSessionItemTemplate {
 }
 
 export interface IAgentSessionRendererOptions {
+	readonly disableHover?: boolean;
 	getHoverPosition(): HoverPosition;
 }
 
@@ -364,6 +365,10 @@ export class AgentSessionRenderer extends Disposable implements ICompressibleTre
 	}
 
 	private renderHover(session: ITreeNode<IAgentSession, FuzzyScore>, template: IAgentSessionItemTemplate): void {
+		if (this.options.disableHover) {
+			return;
+		}
+
 		if (!isSessionInProgressStatus(session.element.status) && session.element.isRead()) {
 			return; // the hover is complex and large, for now limit it to in-progress sessions only
 		}
@@ -689,7 +694,7 @@ export class AgentSessionsDataSource implements IAsyncDataSource<IAgentSessionsM
 		if (othersSessions.length > 0) {
 			result.push({
 				section: AgentSessionSection.More,
-				label: localize('agentSessions.moreSectionWithCount', "More ({0})", othersSessions.length),
+				label: AgentSessionSectionLabels[AgentSessionSection.More],
 				sessions: othersSessions
 			});
 		}
@@ -714,7 +719,6 @@ export class AgentSessionsDataSource implements IAsyncDataSource<IAgentSessionsM
 }
 
 export const AgentSessionSectionLabels = {
-	[AgentSessionSection.InProgress]: localize('agentSessions.inProgressSection', "In progress"),
 	[AgentSessionSection.Today]: localize('agentSessions.todaySection', "Today"),
 	[AgentSessionSection.Yesterday]: localize('agentSessions.yesterdaySection', "Yesterday"),
 	[AgentSessionSection.Week]: localize('agentSessions.weekSection', "Last 7 days"),
@@ -732,7 +736,6 @@ export function groupAgentSessionsByDate(sessions: IAgentSession[]): Map<AgentSe
 	const startOfYesterday = startOfToday - DAY_THRESHOLD;
 	const weekThreshold = now - WEEK_THRESHOLD;
 
-	const inProgressSessions: IAgentSession[] = [];
 	const todaySessions: IAgentSession[] = [];
 	const yesterdaySessions: IAgentSession[] = [];
 	const weekSessions: IAgentSession[] = [];
@@ -742,8 +745,6 @@ export function groupAgentSessionsByDate(sessions: IAgentSession[]): Map<AgentSe
 	for (const session of sessions) {
 		if (session.isArchived()) {
 			archivedSessions.push(session);
-		} else if (isSessionInProgressStatus(session.status)) {
-			inProgressSessions.push(session);
 		} else {
 			const sessionTime = getAgentSessionTime(session.timing);
 			if (sessionTime >= startOfToday) {
@@ -758,19 +759,12 @@ export function groupAgentSessionsByDate(sessions: IAgentSession[]): Map<AgentSe
 		}
 	}
 
-	const sectionWithCount = (section: AgentSessionSection, sessions: IAgentSession[]) => ({
-		section,
-		label: localize('agentSessions.sectionWithCount', "{0} ({1})", AgentSessionSectionLabels[section], sessions.length),
-		sessions
-	});
-
 	return new Map<AgentSessionSection, IAgentSessionSection>([
-		[AgentSessionSection.InProgress, sectionWithCount(AgentSessionSection.InProgress, inProgressSessions)],
-		[AgentSessionSection.Today, sectionWithCount(AgentSessionSection.Today, todaySessions)],
-		[AgentSessionSection.Yesterday, sectionWithCount(AgentSessionSection.Yesterday, yesterdaySessions)],
-		[AgentSessionSection.Week, sectionWithCount(AgentSessionSection.Week, weekSessions)],
-		[AgentSessionSection.Older, sectionWithCount(AgentSessionSection.Older, olderSessions)],
-		[AgentSessionSection.Archived, sectionWithCount(AgentSessionSection.Archived, archivedSessions)],
+		[AgentSessionSection.Today, { section: AgentSessionSection.Today, label: AgentSessionSectionLabels[AgentSessionSection.Today], sessions: todaySessions }],
+		[AgentSessionSection.Yesterday, { section: AgentSessionSection.Yesterday, label: AgentSessionSectionLabels[AgentSessionSection.Yesterday], sessions: yesterdaySessions }],
+		[AgentSessionSection.Week, { section: AgentSessionSection.Week, label: AgentSessionSectionLabels[AgentSessionSection.Week], sessions: weekSessions }],
+		[AgentSessionSection.Older, { section: AgentSessionSection.Older, label: AgentSessionSectionLabels[AgentSessionSection.Older], sessions: olderSessions }],
+		[AgentSessionSection.Archived, { section: AgentSessionSection.Archived, label: AgentSessionSectionLabels[AgentSessionSection.Archived], sessions: archivedSessions }],
 	]);
 }
 

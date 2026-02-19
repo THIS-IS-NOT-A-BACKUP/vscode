@@ -12,7 +12,6 @@ import { Separator, toAction } from '../../../../base/common/actions.js';
 import { Radio } from '../../../../base/browser/ui/radio/radio.js';
 import { DropdownMenuActionViewItem } from '../../../../base/browser/ui/dropdown/dropdownActionViewItem.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
-import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { KeyCode } from '../../../../base/common/keyCodes.js';
 import { Disposable, DisposableStore, MutableDisposable } from '../../../../base/common/lifecycle.js';
 import { IObservable, observableValue } from '../../../../base/common/observable.js';
@@ -56,7 +55,9 @@ import { IStorageService, StorageScope, StorageTarget } from '../../../../platfo
 import { IViewPaneOptions, ViewPane } from '../../../../workbench/browser/parts/views/viewPane.js';
 import { ContextMenuController } from '../../../../editor/contrib/contextmenu/browser/contextmenu.js';
 import { getSimpleEditorOptions } from '../../../../workbench/contrib/codeEditor/browser/simpleEditorOptions.js';
+import { IChatRequestVariableEntry } from '../../../../workbench/contrib/chat/common/attachments/chatVariableEntries.js';
 import { isString } from '../../../../base/common/types.js';
+import { NewChatContextAttachments } from './newChatContextAttachments.js';
 
 // #region --- Target Config ---
 
@@ -166,6 +167,7 @@ export interface INewChatSendRequestData {
 	readonly sendOptions: IChatSendRequestOptions;
 	readonly selectedOptions: ReadonlyMap<string, IChatSessionProviderOptionItem>;
 	readonly folderUri?: URI;
+	readonly attachedContext?: IChatRequestVariableEntry[];
 }
 
 /**
@@ -216,6 +218,9 @@ class NewChatWidget extends Disposable {
 	private readonly _optionContextKeys = new Map<string, IContextKey<string>>();
 	private readonly _whenClauseKeys = new Set<string>();
 
+	// Attached context
+	private readonly _contextAttachments: NewChatContextAttachments;
+
 	constructor(
 		options: INewChatWidgetOptions,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
@@ -231,8 +236,10 @@ class NewChatWidget extends Disposable {
 		@IFileDialogService private readonly fileDialogService: IFileDialogService,
 		@IWorkspacesService private readonly workspacesService: IWorkspacesService,
 		@IStorageService private readonly storageService: IStorageService,
+		@ISessionsManagementService private readonly sessionsManagementService: ISessionsManagementService,
 	) {
 		super();
+		this._contextAttachments = this._register(this.instantiationService.createInstance(NewChatContextAttachments));
 		this._targetConfig = this._register(new TargetConfig(options.targetConfig));
 		this._options = options;
 
@@ -311,8 +318,16 @@ class NewChatWidget extends Disposable {
 
 		// Input area inside the input slot
 		const inputArea = dom.$('.sessions-chat-input-area');
+		this._contextAttachments.registerDropTarget(inputArea);
+
+		// Attachments row (plus button + pills) inside input area, above editor
+		const attachRow = dom.append(inputArea, dom.$('.sessions-chat-attach-row'));
+		this._createAttachButton(attachRow);
+		const attachedContextContainer = dom.append(attachRow, dom.$('.sessions-chat-attached-context'));
+		this._contextAttachments.renderAttachedContext(attachedContextContainer);
+
 		this._createEditor(inputArea);
-		this._createToolbar(inputArea);
+		this._createBottomToolbar(inputArea);
 		this._inputSlot.appendChild(inputArea);
 
 		// Local mode picker (below the input, shown when Local is selected)
@@ -368,8 +383,7 @@ class NewChatWidget extends Disposable {
 		});
 		this._pendingSessionResources.set(target, this._pendingSessionResource);
 
-		// Create the session in the extension so that session options can be stored
-		this.chatSessionsService.getOrCreateChatSession(this._pendingSessionResource, CancellationToken.None)
+		this.sessionsManagementService.createNewPendingSession(this._pendingSessionResource,)
 			.catch((err) => this.logService.trace('Failed to create pending session:', err));
 	}
 
@@ -416,14 +430,21 @@ class NewChatWidget extends Disposable {
 		}));
 
 		this._register(this._editor.onDidContentSizeChange(() => {
-			const contentHeight = this._editor.getContentHeight();
-			const clampedHeight = Math.min(Math.max(contentHeight, 36), 200);
-			editorContainer.style.height = `${clampedHeight}px`;
 			this._editor.layout();
 		}));
 	}
 
-	private _createToolbar(container: HTMLElement): void {
+	private _createAttachButton(container: HTMLElement): void {
+		const attachButton = dom.append(container, dom.$('.sessions-chat-attach-button'));
+		attachButton.tabIndex = 0;
+		attachButton.role = 'button';
+		attachButton.title = localize('addContext', "Add Context...");
+		attachButton.ariaLabel = localize('addContext', "Add Context...");
+		dom.append(attachButton, renderIcon(Codicon.add));
+		this._register(dom.addDisposableListener(attachButton, dom.EventType.CLICK, () => this._contextAttachments.showPicker()));
+	}
+
+	private _createBottomToolbar(container: HTMLElement): void {
 		const toolbar = dom.append(container, dom.$('.sessions-chat-toolbar'));
 
 		const modelPickerContainer = dom.append(toolbar, dom.$('.sessions-chat-model-picker'));
@@ -446,6 +467,7 @@ class NewChatWidget extends Disposable {
 			currentModel: this._currentLanguageModel,
 			setModel: (model: ILanguageModelChatMetadataAndIdentifier) => {
 				this._currentLanguageModel.set(model, undefined);
+				this.languageModelsService.addToRecentlyUsedList(model);
 			},
 			getModels: () => this._getAvailableModels(),
 			canManageModels: () => true,
@@ -487,7 +509,17 @@ class NewChatWidget extends Disposable {
 				const metadata = this.languageModelsService.lookupLanguageModel(id);
 				return metadata ? { metadata, identifier: id } : undefined;
 			})
-			.filter((m): m is ILanguageModelChatMetadataAndIdentifier => !!m && !!m.metadata.isUserSelectable);
+			.filter((m): m is ILanguageModelChatMetadataAndIdentifier => !!m && this.shouldShowModel(m));
+	}
+
+	private shouldShowModel(model: ILanguageModelChatMetadataAndIdentifier): boolean {
+		if (!model.metadata.isUserSelectable) {
+			return false;
+		}
+		if (model.metadata.targetChatSessionType === AgentSessionProviders.Background) {
+			return false;
+		}
+		return true;
 	}
 
 	// --- Welcome: Target & option pickers (dropdown row below input) ---
@@ -1044,6 +1076,7 @@ class NewChatWidget extends Disposable {
 				applyCodeBlockSuggestionId: undefined,
 			},
 			agentIdSilent: contribution?.type,
+			attachedContext: this._contextAttachments.attachments.length > 0 ? [...this._contextAttachments.attachments] : undefined,
 		};
 
 		const folderUri = this._selectedFolderUri ?? this.workspaceContextService.getWorkspace().folders[0]?.uri;
@@ -1055,7 +1088,10 @@ class NewChatWidget extends Disposable {
 			sendOptions,
 			selectedOptions: new Map(this._selectedOptions),
 			folderUri,
+			attachedContext: this._contextAttachments.attachments.length > 0 ? [...this._contextAttachments.attachments] : undefined,
 		});
+
+		this._contextAttachments.clear();
 	}
 
 	// --- Layout ---
@@ -1152,6 +1188,9 @@ export class NewChatViewPane extends ViewPane {
 	override setVisible(visible: boolean): void {
 		super.setVisible(visible);
 		this._widget?.setVisible(visible);
+		if (visible) {
+			this._widget?.focusInput();
+		}
 	}
 }
 
