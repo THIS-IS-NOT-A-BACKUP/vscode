@@ -75,15 +75,16 @@ export class RunScriptContribution extends Disposable implements IWorkbenchContr
 
 			const { scripts, cwd, session } = activeSession;
 			const configureScriptPrecondition = session.worktree ? ContextKeyExpr.true() : ContextKeyExpr.false();
+			const addRunActionDisabledTooltip = session.worktree ? undefined : localize('configureScriptTooltipDisabled', "Actions can not be added in empty sessions");
 
 			if (scripts.length === 0) {
-				// No scripts configured - show a "Run Script" button that opens the configure quick pick
+				// No scripts configured - show a "Run Action" button that opens the configure quick pick
 				reader.store.add(registerAction2(class extends Action2 {
 					constructor() {
 						super({
 							id: RUN_SCRIPT_ACTION_ID,
-							title: localize('runScriptNoAction', "Run Script"),
-							tooltip: localize('runScriptTooltipNoAction', "Configure run action"),
+							title: localize('runScriptNoAction', "Run Action..."),
+							tooltip: localize('runScriptTooltipNoAction', "Configure action"),
 							icon: Codicon.play,
 							category: localize2('agentSessions', 'Agent Sessions'),
 							precondition: configureScriptPrecondition,
@@ -111,7 +112,7 @@ export class RunScriptContribution extends Disposable implements IWorkbenchContr
 							super({
 								id: actionId,
 								title: script.name,
-								tooltip: localize('runScriptTooltip', "Run '{0}' in terminal", script.name),
+								tooltip: localize('runActionTooltip', "Run '{0}' in terminal", script.name),
 								icon: Codicon.play,
 								category: localize2('agentSessions', 'Agent Sessions'),
 								menu: [{
@@ -134,9 +135,10 @@ export class RunScriptContribution extends Disposable implements IWorkbenchContr
 				constructor() {
 					super({
 						id: CONFIGURE_DEFAULT_RUN_ACTION_ID,
-						title: localize2('configureDefaultRunAction', "Add Run Script..."),
+						title: localize2('configureDefaultRunAction', "Add Action..."),
+						tooltip: addRunActionDisabledTooltip,
 						category: localize2('agentSessions', 'Agent Sessions'),
-						icon: Codicon.add,
+						icon: Codicon.play,
 						precondition: configureScriptPrecondition,
 						menu: [{
 							id: RunScriptDropdownMenuId,

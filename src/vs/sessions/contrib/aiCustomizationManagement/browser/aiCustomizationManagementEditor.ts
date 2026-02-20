@@ -247,7 +247,7 @@ export class AICustomizationManagementEditor extends EditorPane {
 			layout: (width, _, height) => {
 				this.sidebarContainer.style.width = `${width}px`;
 				if (height !== undefined) {
-					const listHeight = height - 24;
+					const listHeight = height - 8;
 					this.sectionsList.layout(listHeight, width);
 				}
 			},

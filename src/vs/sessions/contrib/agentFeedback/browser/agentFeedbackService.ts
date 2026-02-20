@@ -13,7 +13,6 @@ import { isEqual } from '../../../../base/common/resources.js';
 import { IChatEditingService } from '../../../../workbench/contrib/chat/common/editing/chatEditingService.js';
 import { IAgentSessionsService } from '../../../../workbench/contrib/chat/browser/agentSessions/agentSessionsService.js';
 import { agentSessionContainsResource, editingEntriesContainResource } from '../../../../workbench/contrib/chat/browser/sessionResourceMatching.js';
-import { IChatWidget, IChatWidgetService } from '../../../../workbench/contrib/chat/browser/chat.js';
 
 // --- Types --------------------------------------------------------------------
 
@@ -83,8 +82,6 @@ export interface IAgentFeedbackService {
 
 // --- Implementation -----------------------------------------------------------
 
-const AGENT_FEEDBACK_ATTACHMENT_ID_PREFIX = 'agentFeedback:';
-
 export class AgentFeedbackService extends Disposable implements IAgentFeedbackService {
 
 	declare readonly _serviceBrand: undefined;
@@ -103,41 +100,8 @@ export class AgentFeedbackService extends Disposable implements IAgentFeedbackSe
 	constructor(
 		@IChatEditingService private readonly _chatEditingService: IChatEditingService,
 		@IAgentSessionsService private readonly _agentSessionsService: IAgentSessionsService,
-		@IChatWidgetService private readonly _chatWidgetService: IChatWidgetService,
 	) {
 		super();
-
-		this._registerChatWidgetListeners();
-	}
-
-	private _registerChatWidgetListeners(): void {
-		for (const widget of this._chatWidgetService.getAllWidgets()) {
-			this._registerWidgetListeners(widget);
-		}
-
-		this._store.add(this._chatWidgetService.onDidAddWidget(widget => {
-			this._registerWidgetListeners(widget);
-		}));
-	}
-
-	private _registerWidgetListeners(widget: IChatWidget): void {
-		this._store.add(widget.attachmentModel.onDidChange(e => {
-			for (const deletedId of e.deleted) {
-				if (!deletedId.startsWith(AGENT_FEEDBACK_ATTACHMENT_ID_PREFIX)) {
-					continue;
-				}
-
-				const sessionResourceString = deletedId.slice(AGENT_FEEDBACK_ATTACHMENT_ID_PREFIX.length);
-				if (!sessionResourceString) {
-					continue;
-				}
-
-				const sessionResource = URI.parse(sessionResourceString);
-				if (this.getFeedback(sessionResource).length > 0) {
-					this.clearFeedback(sessionResource);
-				}
-			}
-		}));
 	}
 
 	addFeedback(sessionResource: URI, resourceUri: URI, range: IRange, text: string): IAgentFeedback {

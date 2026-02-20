@@ -8,7 +8,7 @@ import { Disposable } from '../../../../base/common/lifecycle.js';
 import { ICodeEditor, IEditorMouseEvent, MouseTargetType } from '../../../../editor/browser/editorBrowser.js';
 import { IEditorContribution } from '../../../../editor/common/editorCommon.js';
 import { EditorContributionInstantiation, registerEditorContribution } from '../../../../editor/browser/editorExtensions.js';
-import { GlyphMarginLane, IModelDeltaDecoration, TrackedRangeStickiness } from '../../../../editor/common/model.js';
+import { IModelDeltaDecoration, TrackedRangeStickiness } from '../../../../editor/common/model.js';
 import { ModelDecorationOptions } from '../../../../editor/common/model/textModel.js';
 import { Range } from '../../../../editor/common/core/range.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
@@ -20,19 +20,15 @@ import { IAgentSessionsService } from '../../../../workbench/contrib/chat/browse
 import { getSessionForResource } from './agentFeedbackEditorUtils.js';
 import { Selection } from '../../../../editor/common/core/selection.js';
 
-const GLYPH_MARGIN_LANE = GlyphMarginLane.Left;
-
 const feedbackGlyphDecoration = ModelDecorationOptions.register({
 	description: 'agent-feedback-glyph',
-	glyphMarginClassName: `${ThemeIcon.asClassName(Codicon.comment)} agent-feedback-glyph`,
-	glyphMargin: { position: GLYPH_MARGIN_LANE },
+	linesDecorationsClassName: `${ThemeIcon.asClassName(Codicon.comment)} agent-feedback-glyph`,
 	stickiness: TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
 });
 
 const addFeedbackHintDecoration = ModelDecorationOptions.register({
 	description: 'agent-feedback-add-hint',
-	glyphMarginClassName: `${ThemeIcon.asClassName(Codicon.add)} agent-feedback-add-hint`,
-	glyphMargin: { position: GLYPH_MARGIN_LANE },
+	linesDecorationsClassName: `${ThemeIcon.asClassName(Codicon.add)} agent-feedback-add-hint`,
 	stickiness: TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
 });
 
@@ -117,9 +113,10 @@ export class AgentFeedbackGlyphMarginContribution extends Disposable implements 
 			return;
 		}
 
+		const isLineDecoration = e.target.type === MouseTargetType.GUTTER_LINE_DECORATIONS && !e.target.detail.isAfterLines;
+		const isContentArea = e.target.type === MouseTargetType.CONTENT_TEXT || e.target.type === MouseTargetType.CONTENT_EMPTY;
 		if (e.target.position
-			&& e.target.type === MouseTargetType.GUTTER_GLYPH_MARGIN
-			&& !e.target.detail.isAfterLines
+			&& (isLineDecoration || isContentArea)
 			&& !this._feedbackLines.has(e.target.position.lineNumber)
 		) {
 			this._updateHintDecoration(e.target.position.lineNumber);
@@ -150,7 +147,7 @@ export class AgentFeedbackGlyphMarginContribution extends Disposable implements 
 
 	private _onMouseDown(e: IEditorMouseEvent): void {
 		if (!e.target.position
-			|| e.target.type !== MouseTargetType.GUTTER_GLYPH_MARGIN
+			|| e.target.type !== MouseTargetType.GUTTER_LINE_DECORATIONS
 			|| e.target.detail.isAfterLines
 			|| !this._sessionResource
 		) {
@@ -174,9 +171,9 @@ export class AgentFeedbackGlyphMarginContribution extends Disposable implements 
 		const endColumn = model.getLineLastNonWhitespaceColumn(lineNumber);
 		if (startColumn === 0 || endColumn === 0) {
 			// Empty line - select the whole line range
-			this._editor.setSelection(new Selection(lineNumber, 1, lineNumber, model.getLineMaxColumn(lineNumber)));
+			this._editor.setSelection(new Selection(lineNumber, model.getLineMaxColumn(lineNumber), lineNumber, 1));
 		} else {
-			this._editor.setSelection(new Selection(lineNumber, startColumn, lineNumber, endColumn));
+			this._editor.setSelection(new Selection(lineNumber, endColumn, lineNumber, startColumn));
 		}
 		this._editor.focus();
 	}

@@ -25,7 +25,6 @@ import { IWorkspaceContextService } from '../../../../platform/workspace/common/
 import { IWorkspaceEditingService } from '../../../../workbench/services/workspaces/common/workspaceEditing.js';
 import { IViewsService } from '../../../../workbench/services/views/common/viewsService.js';
 import { AgentSessionProviders } from '../../../../workbench/contrib/chat/browser/agentSessions/agentSessions.js';
-import { localize } from '../../../../nls.js';
 
 export const IsNewChatSessionContext = new RawContextKey<boolean>('isNewChatSession', true);
 
@@ -243,7 +242,7 @@ export class SessionsManagementService extends Disposable implements ISessionsMa
 		const chatsSession = await this.chatSessionsService.getOrCreateChatSession(pendingSessionResource, CancellationToken.None);
 		const chatSessionItem: IChatSessionItem = {
 			resource: chatsSession.sessionResource,
-			label: localize('sessionsManagement.newPendingAgentSessionLabel', 'Pending Session'),
+			label: '',
 			timing: {
 				created: Date.now(),
 				lastRequestStarted: undefined,
