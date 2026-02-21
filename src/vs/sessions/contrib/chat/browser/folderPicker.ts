@@ -17,6 +17,7 @@ import { IStorageService, StorageScope, StorageTarget } from '../../../../platfo
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { IWorkspacesService, isRecentFolder } from '../../../../platform/workspaces/common/workspaces.js';
 import { renderIcon } from '../../../../base/browser/ui/iconLabel/iconLabels.js';
+import { INewSession } from './newSession.js';
 
 const STORAGE_KEY_LAST_FOLDER = 'agentSessions.lastPickedFolder';
 const STORAGE_KEY_RECENT_FOLDERS = 'agentSessions.recentlyPickedFolders';
@@ -42,12 +43,21 @@ export class FolderPicker extends Disposable {
 	private _selectedFolderUri: URI | undefined;
 	private _recentlyPickedFolders: URI[] = [];
 	private _cachedRecentFolders: { uri: URI; label?: string }[] = [];
+	private _newSession: INewSession | undefined;
 
 	private _triggerElement: HTMLElement | undefined;
 	private readonly _renderDisposables = this._register(new DisposableStore());
 
 	get selectedFolderUri(): URI | undefined {
 		return this._selectedFolderUri;
+	}
+
+	/**
+	 * Sets the pending session that this picker writes to.
+	 * When the user selects a folder, it calls `setRepoUri` on the session.
+	 */
+	setNewSession(session: INewSession | undefined): void {
+		this._newSession = session;
 	}
 
 	constructor(
@@ -175,6 +185,7 @@ export class FolderPicker extends Disposable {
 		this._addToRecentlyPickedFolders(folderUri);
 		this.storageService.store(STORAGE_KEY_LAST_FOLDER, folderUri.toString(), StorageScope.PROFILE, StorageTarget.MACHINE);
 		this._updateTriggerLabel(this._triggerElement);
+		this._newSession?.setRepoUri(folderUri);
 		this._onDidSelectFolder.fire(folderUri);
 	}
 
