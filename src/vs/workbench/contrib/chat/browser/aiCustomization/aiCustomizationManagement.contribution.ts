@@ -27,7 +27,7 @@ import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase 
 import { Codicon } from '../../../../../base/common/codicons.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
-import { PromptsType } from '../../common/promptSyntax/promptTypes.js';
+import { PROMPT_LANGUAGE_ID, INSTRUCTIONS_LANGUAGE_ID, AGENT_LANGUAGE_ID, SKILL_LANGUAGE_ID, PromptsType } from '../../common/promptSyntax/promptTypes.js';
 import { PromptsStorage } from '../../common/promptSyntax/service/promptsService.js';
 import { ContextKeyExpr } from '../../../../../platform/contextkey/common/contextkey.js';
 import { ChatConfiguration } from '../../common/constants.js';
@@ -36,6 +36,7 @@ import { IDialogService } from '../../../../../platform/dialogs/common/dialogs.j
 import { basename } from '../../../../../base/common/resources.js';
 import { Schemas } from '../../../../../base/common/network.js';
 import { isWindows, isMacintosh } from '../../../../../base/common/platform.js';
+import { ResourceContextKey } from '../../../../common/contextkeys.js';
 
 //#region Editor Registration
 
@@ -43,7 +44,7 @@ Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane).registerEditorPane
 	EditorPaneDescriptor.create(
 		AICustomizationManagementEditor,
 		AI_CUSTOMIZATION_MANAGEMENT_EDITOR_ID,
-		localize('aiCustomizationManagementEditor', "AI Customizations Editor")
+		localize('aiCustomizationManagementEditor', "Chat Customizations Editor")
 	),
 	[
 		// Note: Using the class directly since we use a singleton pattern
@@ -269,17 +270,30 @@ class AICustomizationManagementActionsContribution extends Disposable implements
 			constructor() {
 				super({
 					id: AICustomizationManagementCommands.OpenEditor,
-					title: localize2('openAICustomizations', "Open AI Customizations"),
-					shortTitle: localize2('aiCustomizations', "AI Customizations"),
+					title: localize2('openAICustomizations', "Open Chat Customizations"),
+					shortTitle: localize2('aiCustomizations', "Chat Customizations"),
 					category: CHAT_CATEGORY,
-					precondition: ContextKeyExpr.and(ChatContextKeys.enabled, ContextKeyExpr.has(`config.${ChatConfiguration.AICustomizationMenuEnabled}`)),
+					precondition: ContextKeyExpr.and(ChatContextKeys.enabled, ContextKeyExpr.has(`config.${ChatConfiguration.ChatCustomizationMenuEnabled}`)),
 					f1: true,
-					menu: [{
-						id: MenuId.GlobalActivity,
-						when: ContextKeyExpr.and(ChatContextKeys.enabled, ContextKeyExpr.has(`config.${ChatConfiguration.AICustomizationMenuEnabled}`)),
-						group: '2_configuration',
-						order: 4,
-					}],
+					menu: [
+						{
+							id: MenuId.GlobalActivity,
+							when: ContextKeyExpr.and(ChatContextKeys.enabled, ContextKeyExpr.has(`config.${ChatConfiguration.ChatCustomizationMenuEnabled}`)),
+							group: '2_configuration',
+							order: 4,
+						},
+						{
+							id: MenuId.EditorContent,
+							when: ContextKeyExpr.and(
+								ChatContextKeys.enabled,
+								ContextKeyExpr.or(
+									ContextKeyExpr.equals(ResourceContextKey.LangId.key, PROMPT_LANGUAGE_ID),
+									ContextKeyExpr.equals(ResourceContextKey.LangId.key, INSTRUCTIONS_LANGUAGE_ID),
+									ContextKeyExpr.equals(ResourceContextKey.LangId.key, AGENT_LANGUAGE_ID),
+									ContextKeyExpr.equals(ResourceContextKey.LangId.key, SKILL_LANGUAGE_ID),
+								),
+							),
+						}],
 				});
 			}
 

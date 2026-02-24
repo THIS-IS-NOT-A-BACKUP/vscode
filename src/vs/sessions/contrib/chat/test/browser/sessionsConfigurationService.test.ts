@@ -151,6 +151,22 @@ suite('SessionsConfigurationService', () => {
 		assert.deepStrictEqual(obs.get(), []);
 	});
 
+	test('getSessionTasks reads from repository when no worktree', async () => {
+		const repoTasksUri = URI.parse('file:///repo/.vscode/tasks.json');
+		fileContents.set(repoTasksUri.toString(), tasksJsonContent([
+			makeTask('serve', 'npm run serve', true),
+			makeTask('lint', 'npm run lint', false),
+		]));
+		const userTasksUri = URI.from({ scheme: userSettingsUri.scheme, path: '/user/tasks.json' });
+		fileContents.set(userTasksUri.toString(), tasksJsonContent([]));
+
+		const session = makeSession({ repository: repoUri });
+		const obs = service.getSessionTasks(session);
+
+		await new Promise(r => setTimeout(r, 10));
+		assert.deepStrictEqual(obs.get().map(t => t.label), ['serve']);
+	});
+
 	// --- getNonSessionTasks ---
 
 	test('getNonSessionTasks returns only tasks without inSessions', async () => {
@@ -167,6 +183,21 @@ suite('SessionsConfigurationService', () => {
 		const nonSessionTasks = await service.getNonSessionTasks(session);
 
 		assert.deepStrictEqual(nonSessionTasks.map(t => t.label), ['lint', 'test']);
+	});
+
+	test('getNonSessionTasks reads from repository when no worktree', async () => {
+		const repoTasksUri = URI.parse('file:///repo/.vscode/tasks.json');
+		fileContents.set(repoTasksUri.toString(), tasksJsonContent([
+			makeTask('build', 'npm run build', true),
+			makeTask('lint', 'npm run lint', false),
+		]));
+		const userTasksUri = URI.from({ scheme: userSettingsUri.scheme, path: '/user/tasks.json' });
+		fileContents.set(userTasksUri.toString(), tasksJsonContent([]));
+
+		const session = makeSession({ repository: repoUri });
+		const nonSessionTasks = await service.getNonSessionTasks(session);
+
+		assert.deepStrictEqual(nonSessionTasks.map(t => t.label), ['lint']);
 	});
 
 	// --- addTaskToSessions ---
@@ -200,6 +231,22 @@ suite('SessionsConfigurationService', () => {
 		assert.strictEqual(jsonEdits.length, 0);
 	});
 
+	test('addTaskToSessions writes to repository and does not commit when no worktree', async () => {
+		const repoTasksUri = URI.parse('file:///repo/.vscode/tasks.json');
+		fileContents.set(repoTasksUri.toString(), tasksJsonContent([
+			makeTask('build', 'npm run build'),
+			makeTask('test', 'npm test'),
+		]));
+
+		const session = makeSession({ repository: repoUri });
+		await service.addTaskToSessions(makeTask('test', 'npm test'), session, 'workspace');
+
+		assert.strictEqual(jsonEdits.length, 1);
+		assert.strictEqual(jsonEdits[0].uri.toString(), repoTasksUri.toString());
+		assert.deepStrictEqual(jsonEdits[0].values, [{ path: ['tasks', 1, 'inSessions'], value: true }]);
+		assert.strictEqual(committedFiles.length, 0, 'should not commit when there is no worktree');
+	});
+
 	// --- createAndAddTask ---
 
 	test('createAndAddTask writes new task with inSessions: true', async () => {
@@ -222,6 +269,26 @@ suite('SessionsConfigurationService', () => {
 		assert.strictEqual(tasks[1].inSessions, true);
 		assert.strictEqual(committedFiles.length, 1);
 		assert.strictEqual(committedFiles[0].fileUris[0].path, '/worktree/.vscode/tasks.json');
+	});
+
+	test('createAndAddTask writes to repository and does not commit when no worktree', async () => {
+		const repoTasksUri = URI.parse('file:///repo/.vscode/tasks.json');
+		fileContents.set(repoTasksUri.toString(), tasksJsonContent([
+			makeTask('existing', 'echo hi'),
+		]));
+
+		const session = makeSession({ repository: repoUri });
+		await service.createAndAddTask('npm run dev', session, 'workspace');
+
+		assert.strictEqual(jsonEdits.length, 1);
+		assert.strictEqual(jsonEdits[0].uri.toString(), repoTasksUri.toString());
+		const tasksValue = jsonEdits[0].values.find(v => v.path[0] === 'tasks');
+		assert.ok(tasksValue);
+		const tasks = tasksValue!.value as ITaskEntry[];
+		assert.strictEqual(tasks.length, 2);
+		assert.strictEqual(tasks[1].label, 'npm run dev');
+		assert.strictEqual(tasks[1].inSessions, true);
+		assert.strictEqual(committedFiles.length, 0, 'should not commit when there is no worktree');
 	});
 
 	// --- runTask ---
