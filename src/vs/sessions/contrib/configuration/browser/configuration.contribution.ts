@@ -19,7 +19,6 @@ Registry.as<IConfigurationRegistry>(Extensions.Configuration).registerDefaultCon
 
 		'breadcrumbs.enabled': false,
 
-		'diffEditor.renderSideBySide': false,
 		'diffEditor.hideUnchangedRegions.enabled': true,
 
 		'extensions.ignoreRecommendations': true,
@@ -41,6 +40,7 @@ Registry.as<IConfigurationRegistry>(Extensions.Configuration).registerDefaultCon
 
 		'terminal.integrated.initialHint': false,
 
+		'workbench.editor.doubleClickTabToToggleEditorGroupSizes': 'maximize',
 		'workbench.editor.restoreEditors': false,
 		'workbench.startupEditor': 'none',
 		'workbench.tips.enabled': false,
