@@ -25,9 +25,19 @@ import {
 	createActiveTurn,
 	SessionLifecycle,
 	SessionStatus,
-	ToolCallStatus,
 	TurnState,
 } from './sessionState.js';
+
+// ---- Helper: extract common base fields from a tool call state --------------
+
+function tcBase(tc: IToolCallState) {
+	return {
+		toolCallId: tc.toolCallId,
+		toolName: tc.toolName,
+		displayName: tc.displayName,
+		_meta: tc._meta,
+	};
+}
 
 // ---- Root reducer -----------------------------------------------------------
 
@@ -38,7 +48,10 @@ import {
 export function rootReducer(state: IRootState, action: IRootAction): IRootState {
 	switch (action.type) {
 		case 'root/agentsChanged': {
-			return { ...state, agents: action.agents };
+			return { ...state, agents: [...action.agents] };
+		}
+		case 'root/activeSessionsChanged': {
+			return { ...state, activeSessions: action.activeSessions };
 		}
 	}
 }
@@ -93,54 +106,204 @@ export function sessionReducer(state: ISessionState, action: ISessionAction): IS
 				},
 			};
 		}
-		case 'session/toolStart': {
+		case 'session/toolCallStart': {
 			if (!state.activeTurn || state.activeTurn.id !== action.turnId) {
 				return state;
 			}
-			const toolCalls = new Map(state.activeTurn.toolCalls);
-			toolCalls.set(action.toolCall.toolCallId, action.toolCall);
 			return {
 				...state,
-				activeTurn: { ...state.activeTurn, toolCalls },
+				activeTurn: {
+					...state.activeTurn,
+					toolCalls: {
+						...state.activeTurn.toolCalls,
+						[action.toolCallId]: {
+							status: 'streaming',
+							toolCallId: action.toolCallId,
+							toolName: action.toolName,
+							displayName: action.displayName,
+							_meta: action._meta,
+						},
+					},
+				},
 			};
 		}
-		case 'session/toolComplete': {
+		case 'session/toolCallDelta': {
 			if (!state.activeTurn || state.activeTurn.id !== action.turnId) {
 				return state;
 			}
-			const toolCall = state.activeTurn.toolCalls.get(action.toolCallId);
-			if (!toolCall) {
+			const tc = state.activeTurn.toolCalls[action.toolCallId];
+			if (!tc || tc.status !== 'streaming') {
 				return state;
 			}
-			const toolCalls = new Map(state.activeTurn.toolCalls);
-			toolCalls.set(action.toolCallId, {
-				...toolCall,
-				status: action.result.success ? ToolCallStatus.Completed : ToolCallStatus.Failed,
-				pastTenseMessage: action.result.pastTenseMessage,
-				toolOutput: action.result.toolOutput,
-				error: action.result.error,
-			});
 			return {
 				...state,
-				activeTurn: { ...state.activeTurn, toolCalls },
+				activeTurn: {
+					...state.activeTurn,
+					toolCalls: {
+						...state.activeTurn.toolCalls,
+						[action.toolCallId]: {
+							...tc,
+							partialInput: (tc.partialInput ?? '') + action.content,
+							invocationMessage: action.invocationMessage ?? tc.invocationMessage,
+						},
+					},
+				},
+			};
+		}
+		case 'session/toolCallReady': {
+			if (!state.activeTurn || state.activeTurn.id !== action.turnId) {
+				return state;
+			}
+			const tc = state.activeTurn.toolCalls[action.toolCallId];
+			if (!tc) {
+				return state;
+			}
+			const base = tcBase(tc);
+			const updated: IToolCallState = action.confirmed
+				? {
+					status: 'running',
+					...base,
+					invocationMessage: action.invocationMessage,
+					toolInput: action.toolInput,
+					confirmed: action.confirmed,
+				}
+				: {
+					status: 'pending-confirmation',
+					...base,
+					invocationMessage: action.invocationMessage,
+					toolInput: action.toolInput,
+				};
+			return {
+				...state,
+				activeTurn: {
+					...state.activeTurn,
+					toolCalls: { ...state.activeTurn.toolCalls, [action.toolCallId]: updated },
+				},
+			};
+		}
+		case 'session/toolCallConfirmed': {
+			if (!state.activeTurn || state.activeTurn.id !== action.turnId) {
+				return state;
+			}
+			const tc = state.activeTurn.toolCalls[action.toolCallId];
+			if (!tc || tc.status !== 'pending-confirmation') {
+				return state;
+			}
+			const base = tcBase(tc);
+			const updated: IToolCallState = action.approved
+				? {
+					status: 'running',
+					...base,
+					invocationMessage: tc.invocationMessage,
+					toolInput: tc.toolInput,
+					confirmed: action.confirmed,
+				}
+				: {
+					status: 'cancelled',
+					...base,
+					invocationMessage: tc.invocationMessage,
+					toolInput: tc.toolInput,
+					reason: action.reason,
+					reasonMessage: action.reasonMessage,
+					userSuggestion: action.userSuggestion,
+				};
+			return {
+				...state,
+				activeTurn: {
+					...state.activeTurn,
+					toolCalls: { ...state.activeTurn.toolCalls, [action.toolCallId]: updated },
+				},
+			};
+		}
+		case 'session/toolCallComplete': {
+			if (!state.activeTurn || state.activeTurn.id !== action.turnId) {
+				return state;
+			}
+			const tc = state.activeTurn.toolCalls[action.toolCallId];
+			if (!tc || (tc.status !== 'running' && tc.status !== 'pending-confirmation')) {
+				return state;
+			}
+			const base = tcBase(tc);
+			const confirmed = tc.status === 'running' ? tc.confirmed : 'not-needed';
+			const updated: IToolCallState = action.requiresResultConfirmation
+				? {
+					status: 'pending-result-confirmation',
+					...base,
+					invocationMessage: tc.invocationMessage,
+					toolInput: tc.toolInput,
+					confirmed,
+					...action.result,
+				}
+				: {
+					status: 'completed',
+					...base,
+					invocationMessage: tc.invocationMessage,
+					toolInput: tc.toolInput,
+					confirmed,
+					...action.result,
+				};
+			return {
+				...state,
+				activeTurn: {
+					...state.activeTurn,
+					toolCalls: { ...state.activeTurn.toolCalls, [action.toolCallId]: updated },
+				},
+			};
+		}
+		case 'session/toolCallResultConfirmed': {
+			if (!state.activeTurn || state.activeTurn.id !== action.turnId) {
+				return state;
+			}
+			const tc = state.activeTurn.toolCalls[action.toolCallId];
+			if (!tc || tc.status !== 'pending-result-confirmation') {
+				return state;
+			}
+			const base = tcBase(tc);
+			const updated: IToolCallState = action.approved
+				? {
+					status: 'completed',
+					...base,
+					invocationMessage: tc.invocationMessage,
+					toolInput: tc.toolInput,
+					confirmed: tc.confirmed,
+					success: tc.success,
+					pastTenseMessage: tc.pastTenseMessage,
+					content: tc.content,
+					structuredContent: tc.structuredContent,
+					error: tc.error,
+				}
+				: {
+					status: 'cancelled',
+					...base,
+					invocationMessage: tc.invocationMessage,
+					toolInput: tc.toolInput,
+					reason: 'result-denied',
+				};
+			return {
+				...state,
+				activeTurn: {
+					...state.activeTurn,
+					toolCalls: { ...state.activeTurn.toolCalls, [action.toolCallId]: updated },
+				},
 			};
 		}
 		case 'session/permissionRequest': {
 			if (!state.activeTurn || state.activeTurn.id !== action.turnId) {
 				return state;
 			}
-			const pendingPermissions = new Map(state.activeTurn.pendingPermissions);
-			pendingPermissions.set(action.request.requestId, action.request);
-			let toolCalls: ReadonlyMap<string, IToolCallState> = state.activeTurn.toolCalls;
+			const pendingPermissions = { ...state.activeTurn.pendingPermissions, [action.request.requestId]: action.request };
+			let toolCalls = state.activeTurn.toolCalls;
 			if (action.request.toolCallId) {
-				const toolCall = toolCalls.get(action.request.toolCallId);
-				if (toolCall) {
-					const mutable = new Map(toolCalls);
-					mutable.set(action.request.toolCallId, {
-						...toolCall,
-						status: ToolCallStatus.PendingPermission,
-					});
-					toolCalls = mutable;
+				const toolCall = toolCalls[action.request.toolCallId];
+				if (toolCall && (toolCall.status === 'running' || toolCall.status === 'streaming')) {
+					toolCalls = {
+						...toolCalls,
+						[action.request.toolCallId]: {
+							...toolCall,
+							status: 'pending-confirmation',
+							invocationMessage: toolCall.invocationMessage ?? '',
+						},
+					};
 				}
 			}
 			return {
@@ -152,21 +315,29 @@ export function sessionReducer(state: ISessionState, action: ISessionAction): IS
 			if (!state.activeTurn || state.activeTurn.id !== action.turnId) {
 				return state;
 			}
-			const pendingPermissions = new Map(state.activeTurn.pendingPermissions);
-			const resolved = pendingPermissions.get(action.requestId);
-			pendingPermissions.delete(action.requestId);
-			let toolCalls: ReadonlyMap<string, IToolCallState> = state.activeTurn.toolCalls;
+			const resolved = state.activeTurn.pendingPermissions[action.requestId];
+			const { [action.requestId]: _, ...pendingPermissions } = state.activeTurn.pendingPermissions;
+			let toolCalls = state.activeTurn.toolCalls;
 			if (resolved?.toolCallId) {
-				const toolCall = toolCalls.get(resolved.toolCallId);
-				if (toolCall && toolCall.status === ToolCallStatus.PendingPermission) {
-					const mutable = new Map(toolCalls);
-					mutable.set(resolved.toolCallId, {
-						...toolCall,
-						status: action.approved ? ToolCallStatus.Running : ToolCallStatus.Cancelled,
-						confirmed: action.approved ? 'user-action' : 'denied',
-						cancellationReason: action.approved ? undefined : 'denied',
-					});
-					toolCalls = mutable;
+				const toolCall = toolCalls[resolved.toolCallId];
+				if (toolCall && toolCall.status === 'pending-confirmation') {
+					const base = tcBase(toolCall);
+					const updated: IToolCallState = action.approved
+						? {
+							status: 'running',
+							...base,
+							invocationMessage: toolCall.invocationMessage,
+							toolInput: toolCall.toolInput,
+							confirmed: 'user-action',
+						}
+						: {
+							status: 'cancelled',
+							...base,
+							invocationMessage: toolCall.invocationMessage,
+							toolInput: toolCall.toolInput,
+							reason: 'denied',
+						};
+					toolCalls = { ...toolCalls, [resolved.toolCallId]: updated };
 				}
 			}
 			return {
@@ -219,6 +390,18 @@ export function sessionReducer(state: ISessionState, action: ISessionAction): IS
 				},
 			};
 		}
+		case 'session/serverToolsChanged': {
+			return { ...state, serverTools: action.tools };
+		}
+		case 'session/activeClientChanged': {
+			return { ...state, activeClient: action.activeClient ?? undefined };
+		}
+		case 'session/activeClientToolsChanged': {
+			if (!state.activeClient) {
+				return state;
+			}
+			return { ...state, activeClient: { ...state.activeClient, tools: action.tools } };
+		}
 	}
 }
 
@@ -234,20 +417,23 @@ function finalizeTurn(state: ISessionState, turnId: string, turnState: TurnState
 	const active = state.activeTurn;
 
 	const completedToolCalls: ICompletedToolCall[] = [];
-	for (const tc of active.toolCalls.values()) {
-		completedToolCalls.push({
-			toolCallId: tc.toolCallId,
-			toolName: tc.toolName,
-			displayName: tc.displayName,
-			invocationMessage: tc.invocationMessage,
-			success: tc.status === ToolCallStatus.Completed,
-			pastTenseMessage: tc.pastTenseMessage ?? tc.invocationMessage,
-			toolInput: tc.toolInput,
-			toolKind: tc.toolKind,
-			language: tc.language,
-			toolOutput: tc.toolOutput,
-			error: tc.error,
-		});
+	for (const tc of Object.values(active.toolCalls)) {
+		if (tc.status === 'completed') {
+			completedToolCalls.push(tc);
+		} else if (tc.status === 'cancelled') {
+			completedToolCalls.push(tc);
+		} else {
+			// For tool calls that are not in a terminal state when the turn
+			// finishes (e.g. still streaming or running), force them into
+			// a cancelled state so they are persisted properly.
+			completedToolCalls.push({
+				status: 'cancelled',
+				...tcBase(tc),
+				invocationMessage: tc.status === 'streaming' ? (tc.invocationMessage ?? '') : tc.invocationMessage,
+				toolInput: tc.status === 'streaming' ? undefined : tc.toolInput,
+				reason: 'skipped',
+			});
+		}
 	}
 
 	const finalizedTurn: ITurn = {
@@ -267,4 +453,20 @@ function finalizeTurn(state: ISessionState, turnId: string, turnState: TurnState
 		activeTurn: undefined,
 		summary: { ...state.summary, status: SessionStatus.Idle, modifiedAt: Date.now() },
 	};
+}
+
+// ---- Tool call metadata helpers (VS Code extensions via _meta) --------------
+
+/**
+ * Extracts the VS Code-specific `toolKind` rendering hint from a tool call's `_meta`.
+ */
+export function getToolKind(tc: IToolCallState | ICompletedToolCall): 'terminal' | undefined {
+	return tc._meta?.toolKind as 'terminal' | undefined;
+}
+
+/**
+ * Extracts the VS Code-specific `language` hint from a tool call's `_meta`.
+ */
+export function getToolLanguage(tc: IToolCallState | ICompletedToolCall): string | undefined {
+	return tc._meta?.language as string | undefined;
 }
