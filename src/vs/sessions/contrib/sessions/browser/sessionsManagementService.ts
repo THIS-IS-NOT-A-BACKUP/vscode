@@ -84,6 +84,11 @@ export interface ISessionsManagementService {
 	openNewSessionView(): void;
 
 	/**
+	 * Returns the repository URI for the given session, if available.
+	 */
+	getSessionRepositoryUri(session: IAgentSession): URI | undefined;
+
+	/**
 	 * Create a pending session object for the given target type.
 	 * Local sessions collect options locally; remote sessions notify the extension.
 	 */
@@ -396,12 +401,9 @@ export class SessionsManagementService extends Disposable implements ISessionsMa
 			if (selectedOptions && selectedOptions.size > 0) {
 				const contributedSession = model.contributedChatSession;
 				if (contributedSession) {
-					const initialSessionOptions = [...selectedOptions.entries()].map(
-						([optionId, value]) => ({ optionId, value })
-					);
 					model.setContributedChatSession({
 						...contributedSession,
-						initialSessionOptions,
+						initialSessionOptions: selectedOptions,
 					});
 				}
 			}
@@ -458,6 +460,11 @@ export class SessionsManagementService extends Disposable implements ISessionsMa
 		}
 		this.setActiveSession(undefined);
 		this.isNewChatSessionContext.set(true);
+	}
+
+	getSessionRepositoryUri(session: IAgentSession): URI | undefined {
+		const [repositoryUri] = this.getRepositoryFromMetadata(session);
+		return repositoryUri;
 	}
 
 	private setActiveSession(session: IAgentSession | INewSession | undefined): void {
