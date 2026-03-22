@@ -40,6 +40,7 @@ suite('TerminalSandboxService - allowTrustedDomains', () => {
 	let createdFiles: Map<string, string>;
 	let createdFolders: string[];
 	let deletedFolders: string[];
+	const windowId = 7;
 
 	class MockTrustedDomainService implements ITrustedDomainService {
 		_serviceBrand: undefined;
@@ -76,6 +77,7 @@ suite('TerminalSandboxService - allowTrustedDomains', () => {
 				os: OperatingSystem.Linux,
 				tmpDir: URI.file('/tmp'),
 				appRoot: URI.file('/app'),
+				execPath: '/app/node',
 				pid: 1234,
 				connectionToken: 'test-token',
 				settingsPath: URI.file('/settings'),
@@ -173,10 +175,11 @@ suite('TerminalSandboxService - allowTrustedDomains', () => {
 
 		instantiationService.stub(IConfigurationService, configurationService);
 		instantiationService.stub(IFileService, fileService);
-		instantiationService.stub(IEnvironmentService, <IEnvironmentService & { tmpDir?: URI; execPath?: string }>{
+		instantiationService.stub(IEnvironmentService, <IEnvironmentService & { tmpDir?: URI; execPath?: string; window?: { id: number } }>{
 			_serviceBrand: undefined,
 			tmpDir: URI.file('/tmp'),
-			execPath: '/usr/bin/node'
+			execPath: '/usr/bin/node',
+			window: { id: windowId }
 		});
 		instantiationService.stub(ILogService, new NullLogService());
 		instantiationService.stub(IProductService, productService);
@@ -370,7 +373,7 @@ suite('TerminalSandboxService - allowTrustedDomains', () => {
 	test('should create sandbox temp dir under the server data folder', async () => {
 		const sandboxService = store.add(instantiationService.createInstance(TerminalSandboxService));
 		const configPath = await sandboxService.getSandboxConfigPath();
-		const expectedTempDir = URI.joinPath(URI.file('/home/user'), productService.serverDataFolderName ?? productService.dataFolderName, 'tmp');
+		const expectedTempDir = URI.joinPath(URI.file('/home/user'), productService.serverDataFolderName ?? productService.dataFolderName, 'tmp', `tmp_vscode_${windowId}`);
 
 		strictEqual(sandboxService.getTempDir()?.path, expectedTempDir.path, 'Sandbox temp dir should live under the server data folder');
 		strictEqual(createdFolders[0], expectedTempDir.path, 'Sandbox temp dir should be created before writing the config');
@@ -380,7 +383,7 @@ suite('TerminalSandboxService - allowTrustedDomains', () => {
 	test('should delete sandbox temp dir on shutdown', async () => {
 		const sandboxService = store.add(instantiationService.createInstance(TerminalSandboxService));
 		await sandboxService.getSandboxConfigPath();
-		const expectedTempDir = URI.joinPath(URI.file('/home/user'), productService.serverDataFolderName ?? productService.dataFolderName, 'tmp');
+		const expectedTempDir = URI.joinPath(URI.file('/home/user'), productService.serverDataFolderName ?? productService.dataFolderName, 'tmp', `tmp_vscode_${windowId}`);
 
 		lifecycleService.fireShutdown();
 		await Promise.all(lifecycleService.shutdownJoiners);

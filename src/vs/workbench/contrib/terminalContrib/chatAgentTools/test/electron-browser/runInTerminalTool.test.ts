@@ -289,7 +289,7 @@ suite('RunInTerminalTool', () => {
 			const preparedInvocation = await executeToolTest({ command: 'echo hello' });
 
 			ok(preparedInvocation, 'Expected prepared invocation to be defined');
-			strictEqual((preparedInvocation.invocationMessage as IMarkdownString).value, '$(lock) Running `echo hello` in sandbox');
+			strictEqual((preparedInvocation.invocationMessage as IMarkdownString).value, 'Running `echo hello` in sandbox');
 
 			const terminalData = preparedInvocation.toolSpecificData as IChatTerminalToolInvocationData;
 			strictEqual(terminalData.commandLine.isSandboxWrapped, true);
@@ -1754,6 +1754,47 @@ suite('RunInTerminalTool', () => {
 			if (disclaimerValue) {
 				ok(!disclaimerValue.includes('denied'), 'Should not mention denial for non-denied commands');
 			}
+		});
+	});
+
+	suite('ConfirmTerminalCommandTool', () => {
+		test('should require confirmation when sandbox is enabled but sandbox rewriting is disabled', async () => {
+			sandboxEnabled = true;
+
+			const { ConfirmTerminalCommandTool } = await import('../../browser/tools/runInTerminalConfirmationTool.js');
+			const confirmTool = store.add(instantiationService.createInstance(ConfirmTerminalCommandTool));
+
+			const context: IToolInvocationPreparationContext = {
+				parameters: {
+					command: 'ping google.com',
+					explanation: 'Ping google.com',
+					goal: 'Ping google.com',
+					isBackground: false,
+				} as IRunInTerminalInputParams
+			} as IToolInvocationPreparationContext;
+
+			const result = await confirmTool.prepareToolInvocation(context, CancellationToken.None);
+			assertConfirmationRequired(result);
+		});
+
+		test('should require confirmation when sandbox is disabled', async () => {
+			sandboxEnabled = false;
+			setAutoApprove({});
+
+			const { ConfirmTerminalCommandTool } = await import('../../browser/tools/runInTerminalConfirmationTool.js');
+			const confirmTool = store.add(instantiationService.createInstance(ConfirmTerminalCommandTool));
+
+			const context: IToolInvocationPreparationContext = {
+				parameters: {
+					command: 'echo hello',
+					explanation: 'Print hello',
+					goal: 'Print hello',
+					isBackground: false,
+				} as IRunInTerminalInputParams
+			} as IToolInvocationPreparationContext;
+
+			const result = await confirmTool.prepareToolInvocation(context, CancellationToken.None);
+			assertConfirmationRequired(result);
 		});
 	});
 });
