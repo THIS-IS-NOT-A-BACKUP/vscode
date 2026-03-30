@@ -295,7 +295,7 @@ class ChangesViewModel extends Disposable {
 
 		// Active session changes
 		this.sessionsChangedSignal = observableSignalFromEvent(this,
-			this.agentSessionsService.model.onDidChangeSessions);
+			this.sessionManagementService.onDidChangeSessions);
 
 		// Active session resource
 		this.activeSessionResourceObs = derivedOpts({ equalsFn: isEqual }, reader => {
@@ -841,17 +841,17 @@ export class ChangesViewPane extends ViewPane {
 
 			this.renderDisposables.add(bindContextKey(hasPullRequestContextKey, this.scopedContextKeyService, reader => {
 				const activeSession = this.sessionManagementService.activeSession.read(reader);
-				const activeSessionPullRequest = activeSession?.pullRequest.read(reader);
-				return activeSessionPullRequest?.uri !== undefined;
+				const gitHubInfo = activeSession?.gitHubInfo.read(reader);
+				return gitHubInfo?.pullRequest?.uri !== undefined;
 			}));
 
 			this.renderDisposables.add(bindContextKey(hasOpenPullRequestContextKey, this.scopedContextKeyService, reader => {
 				const activeSession = this.sessionManagementService.activeSession.read(reader);
-				const activeSessionPullRequest = activeSession?.pullRequest.read(reader);
-				if (activeSessionPullRequest?.uri === undefined) {
+				const gitHubInfo = activeSession?.gitHubInfo.read(reader);
+				if (gitHubInfo?.pullRequest?.uri === undefined) {
 					return false;
 				}
-				const iconId = activeSessionPullRequest.icon?.id;
+				const iconId = gitHubInfo.pullRequest.icon?.id;
 				return iconId !== undefined &&
 					(iconId === Codicon.gitPullRequestDraft.id ||
 						iconId === Codicon.gitPullRequest.id);
@@ -1001,58 +1001,7 @@ export class ChangesViewPane extends ViewPane {
 
 		// Create the tree
 		if (!this.tree && this.listContainer) {
-			const resourceLabels = this._register(this.instantiationService.createInstance(ResourceLabels, { onDidChangeVisibility: this.onDidChangeBodyVisibility }));
-			const actionRunner = this.renderDisposables.add(new ChangesViewActionRunner(
-				() => this.viewModel.activeSessionResourceObs.get(),
-				() => this.getSessionDiscardRef(),
-				() => this.getTreeSelection(),
-			));
-			this.tree = this.instantiationService.createInstance(
-				WorkbenchCompressibleObjectTree<ChangesTreeElement>,
-				'ChangesViewTree',
-				this.listContainer,
-				new ChangesTreeDelegate(),
-				[this.instantiationService.createInstance(ChangesTreeRenderer, resourceLabels, MenuId.ChatEditingSessionChangeToolbar, actionRunner)],
-				{
-					alwaysConsumeMouseWheel: false,
-					accessibilityProvider: {
-						getAriaLabel: (element: ChangesTreeElement) => isChangesFileItem(element) ? basename(element.uri.path) : element.name,
-						getWidgetAriaLabel: () => localize('changesViewTree', "Changes Tree")
-					},
-					dnd: {
-						getDragURI: (element: ChangesTreeElement) => element.uri.toString(),
-						getDragLabel: (elements) => {
-							const uris = elements.map(e => e.uri);
-							if (uris.length === 1) {
-								return this.labelService.getUriLabel(uris[0], { relative: true });
-							}
-							return `${uris.length}`;
-						},
-						dispose: () => { },
-						onDragOver: () => false,
-						drop: () => { },
-						onDragStart: (data, originalEvent) => {
-							try {
-								const elements = data.getData() as ChangesTreeElement[];
-								const uris = elements.filter(isChangesFileItem).map(e => e.uri);
-								this.instantiationService.invokeFunction(accessor => fillEditorsDragData(accessor, uris, originalEvent));
-							} catch {
-								// noop
-							}
-						},
-					},
-					identityProvider: {
-						getId: (element: ChangesTreeElement) => element.uri.toString()
-					},
-					indent: this.viewModel.viewModeObs.get() === ChangesViewMode.List ? 0 : 8,
-					compressionEnabled: true,
-					twistieAdditionalCssClass: (e: unknown) => {
-						return this.viewModel.viewModeObs.get() === ChangesViewMode.List
-							? 'force-no-twistie'
-							: undefined;
-					},
-				}
-			);
+			this.tree = this.createChangesTree(this.listContainer, this.onDidChangeBodyVisibility, this._store);
 		}
 
 		// Register tree event handlers
@@ -1062,9 +1011,8 @@ export class ChangesViewPane extends ViewPane {
 			// Re-layout when collapse state changes so the card height adjusts
 			this.renderDisposables.add(tree.onDidChangeContentHeight(() => this.layoutSplitView()));
 
-			const openFileItem = (item: IChangesFileItem, items: IChangesFileItem[], sideBySide: boolean, preserveFocus?: boolean, pinned?: boolean, includeSidebar = true) => {
+			const openFileItem = (item: IChangesFileItem, items: IChangesFileItem[], sideBySide: boolean, preserveFocus: boolean, pinned: boolean, includeSidebar: boolean) => {
 				const { uri: modifiedFileUri, originalUri, isDeletion } = item;
-
 				const currentIndex = items.indexOf(item);
 
 				const sidebar = includeSidebar ? {
@@ -1073,15 +1021,16 @@ export class ChangesViewPane extends ViewPane {
 					}
 				} : undefined;
 
-				const navigation = items.length > 1 ? {
+				const navigation = {
 					total: items.length,
 					current: currentIndex,
 					navigate: (index: number) => {
-						if (index >= 0 && index < items.length) {
-							openFileItem(items[index], items, false, undefined, undefined, includeSidebar);
+						const target = items[index];
+						if (target) {
+							openFileItem(target, items, false, false, false, includeSidebar);
 						}
 					}
-				} : undefined;
+				};
 
 				const group = sideBySide ? SIDE_GROUP : ACTIVE_GROUP;
 
@@ -1114,7 +1063,7 @@ export class ChangesViewPane extends ViewPane {
 				}
 
 				const items = combinedEntriesObs.get();
-				openFileItem(e.element, items, e.sideBySide);
+				openFileItem(e.element, items, e.sideBySide, !!e.editorOptions?.preserveFocus, !!e.editorOptions?.pinned, items.length > 1);
 			}));
 		}
 
@@ -1127,11 +1076,11 @@ export class ChangesViewPane extends ViewPane {
 				if (!session) {
 					return undefined;
 				}
-				const context = this.sessionManagementService.getGitHubContextForSession(session.resource);
-				if (!context || context.prNumber === undefined) {
+				const gitHubInfo = session.gitHubInfo.read(reader);
+				if (!gitHubInfo?.pullRequest) {
 					return undefined;
 				}
-				const prModel = this.gitHubService.getPullRequest(context.owner, context.repo, context.prNumber);
+				const prModel = this.gitHubService.getPullRequest(gitHubInfo.owner, gitHubInfo.repo, gitHubInfo.pullRequest.number);
 				const pr = prModel.pullRequest.read(reader);
 				if (!pr) {
 					return undefined;
@@ -1139,7 +1088,7 @@ export class ChangesViewPane extends ViewPane {
 				// Use the PR's headSha (commit SHA) rather than the branch
 				// name so CI checks can still be fetched after branch deletion
 				// (e.g. after the PR is merged).
-				const ciModel = this.gitHubService.getPullRequestCI(context.owner, context.repo, pr.headSha);
+				const ciModel = this.gitHubService.getPullRequestCI(gitHubInfo.owner, gitHubInfo.repo, pr.headSha);
 				ciModel.refresh();
 				ciModel.startPolling();
 				reader.store.add({ dispose: () => ciModel.stopPolling() });
@@ -1241,39 +1190,13 @@ export class ChangesViewPane extends ViewPane {
 		container: HTMLElement,
 		onDidLayout: Event<{ readonly height: number; readonly width: number }>,
 		items: IChangesFileItem[],
-		openFileItem: (item: IChangesFileItem, items: IChangesFileItem[], sideBySide: boolean, preserveFocus?: boolean, pinned?: boolean, includeSidebar?: boolean) => void,
+		openFileItem: (item: IChangesFileItem, items: IChangesFileItem[], sideBySide: boolean, preserveFocus: boolean, pinned: boolean, includeSidebar: boolean) => void,
 	): IDisposable {
 		const disposables = new DisposableStore();
 
-		const labels = disposables.add(this.instantiationService.createInstance(ResourceLabels, { onDidChangeVisibility: Event.None }));
+		container.classList.add('chat-editing-session-list');
 
-		const tree = disposables.add(this.instantiationService.createInstance(
-			WorkbenchCompressibleObjectTree<ChangesTreeElement>,
-			'ModalEditorSidebar',
-			container,
-			new ChangesTreeDelegate(),
-			[this.instantiationService.createInstance(ChangesTreeRenderer, labels, undefined /* no menu */, undefined /* no action runner */)],
-			{
-				alwaysConsumeMouseWheel: false,
-				multipleSelectionSupport: false,
-				accessibilityProvider: {
-					getAriaLabel: (element: ChangesTreeElement) => isChangesFileItem(element) ? basename(element.uri.path) : element.name,
-					getWidgetAriaLabel: () => localize('modalEditorSidebar', "Files"),
-				},
-				keyboardNavigationLabelProvider: {
-					getKeyboardNavigationLabel: (element: ChangesTreeElement) => isChangesFileItem(element) ? basename(element.uri.path) : element.name,
-					getCompressedNodeKeyboardNavigationLabel: (elements: ChangesTreeElement[]) => elements.map(e => isChangesFileItem(e) ? basename(e.uri.path) : e.name).join('/'),
-				},
-				identityProvider: {
-					getId: (element: ChangesTreeElement) => element.uri.toString()
-				},
-				indent: 0,
-				compressionEnabled: false,
-				setRowLineHeight: false,
-				supportDynamicHeights: false,
-				twistieAdditionalCssClass: () => 'force-no-twistie',
-			}
-		));
+		const tree = this.createChangesTree(container, Event.None, disposables, () => tree.getSelection().filter(item => !!item && isChangesFileItem(item)));
 
 		tree.setChildren(null, items.map(item => ({ element: item as ChangesTreeElement, collapsible: false })));
 
@@ -1282,7 +1205,7 @@ export class ChangesViewPane extends ViewPane {
 		let updatingSelection = false;
 		disposables.add(tree.onDidOpen(e => {
 			if (e.element && isChangesFileItem(e.element) && !updatingSelection) {
-				openFileItem(e.element, items, e.sideBySide, e.editorOptions.preserveFocus, e.editorOptions.pinned, false /* sidebar already rendered */);
+				openFileItem(e.element, items, e.sideBySide, !!e.editorOptions.preserveFocus, !!e.editorOptions.pinned, false /* preserve existing sidebar */);
 			}
 		}));
 
@@ -1318,8 +1241,67 @@ export class ChangesViewPane extends ViewPane {
 		return disposables;
 	}
 
+	private createChangesTree(
+		container: HTMLElement,
+		onDidChangeVisibility: Event<boolean>,
+		disposables: DisposableStore,
+		getSelection?: () => IChangesFileItem[],
+	): WorkbenchCompressibleObjectTree<ChangesTreeElement> {
+		const resourceLabels = disposables.add(this.instantiationService.createInstance(ResourceLabels, { onDidChangeVisibility }));
+		const actionRunner = disposables.add(new ChangesViewActionRunner(
+			() => this.viewModel.activeSessionResourceObs.get(),
+			() => this.getSessionDiscardRef(),
+			getSelection ?? (() => this.getTreeSelection()),
+		));
+		return disposables.add(this.instantiationService.createInstance(
+			WorkbenchCompressibleObjectTree<ChangesTreeElement>,
+			'ChangesViewTree',
+			container,
+			new ChangesTreeDelegate(),
+			[this.instantiationService.createInstance(ChangesTreeRenderer, this.viewModel, resourceLabels, MenuId.ChatEditingSessionChangeToolbar, actionRunner)],
+			{
+				alwaysConsumeMouseWheel: false,
+				accessibilityProvider: {
+					getAriaLabel: (element: ChangesTreeElement) => isChangesFileItem(element) ? basename(element.uri.path) : element.name,
+					getWidgetAriaLabel: () => localize('changesViewTree', "Changes Tree")
+				},
+				dnd: {
+					getDragURI: (element: ChangesTreeElement) => element.uri.toString(),
+					getDragLabel: (elements) => {
+						const uris = elements.map(e => e.uri);
+						if (uris.length === 1) {
+							return this.labelService.getUriLabel(uris[0], { relative: true });
+						}
+						return `${uris.length}`;
+					},
+					dispose: () => { },
+					onDragOver: () => false,
+					drop: () => { },
+					onDragStart: (data, originalEvent) => {
+						try {
+							const elements = data.getData() as ChangesTreeElement[];
+							const uris = elements.filter(isChangesFileItem).map(e => e.uri);
+							this.instantiationService.invokeFunction(accessor => fillEditorsDragData(accessor, uris, originalEvent));
+						} catch {
+							// noop
+						}
+					},
+				},
+				identityProvider: {
+					getId: (element: ChangesTreeElement) => element.uri.toString()
+				},
+				indent: this.viewModel.viewModeObs.get() === ChangesViewMode.List ? 0 : 8,
+				compressionEnabled: true,
+				twistieAdditionalCssClass: (e: unknown) => {
+					return this.viewModel.viewModeObs.get() === ChangesViewMode.List
+						? 'force-no-twistie'
+						: undefined;
+				},
+			}
+		));
+	}
+
 	override dispose(): void {
-		this.tree?.dispose();
 		this.tree = undefined;
 		super.dispose();
 	}
@@ -1406,6 +1388,7 @@ class ChangesTreeRenderer implements ICompressibleTreeRenderer<ChangesTreeElemen
 	readonly templateId: string = ChangesTreeRenderer.TEMPLATE_ID;
 
 	constructor(
+		private viewModel: ChangesViewModel,
 		private labels: ResourceLabels,
 		private menuId: MenuId | undefined,
 		private actionRunner: ActionRunner | undefined,
@@ -1444,6 +1427,10 @@ class ChangesTreeRenderer implements ICompressibleTreeRenderer<ChangesTreeElemen
 			templateDisposables.add(bindContextKey(ChatContextKeys.agentSessionType, contextKeyService, reader => {
 				const activeSession = this.sessionManagementService.activeSession.read(reader);
 				return activeSession?.sessionType ?? '';
+			}));
+
+			templateDisposables.add(bindContextKey(changesVersionModeContextKey, contextKeyService, reader => {
+				return this.viewModel.versionModeObs.read(reader);
 			}));
 		}
 
