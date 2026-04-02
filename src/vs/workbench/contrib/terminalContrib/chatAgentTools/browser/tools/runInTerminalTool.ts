@@ -901,20 +901,20 @@ export class RunInTerminalTool extends Disposable implements IToolImpl {
 	private _getBlockedDomainReason(blockedDomains: string[], deniedDomains: string[] = []): string {
 		if (deniedDomains.length === blockedDomains.length && deniedDomains.length > 0) {
 			if (blockedDomains.length === 1) {
-				return localize('runInTerminal.unsandboxed.domain.reason.denied.single', "This command accesses {0}, which is blocked by chat.agent.sandboxNetwork.deniedDomains.", blockedDomains[0]);
+				return localize('runInTerminal.unsandboxed.domain.reason.denied.single', "This command accesses {0}, which is blocked by chat.agent.sandbox.deniedNetworkDomains.", blockedDomains[0]);
 			}
-			return localize('runInTerminal.unsandboxed.domain.reason.denied.multi', "This command accesses {0} and {1} more domains that are blocked by chat.agent.sandboxNetwork.deniedDomains.", blockedDomains[0], blockedDomains.length - 1);
+			return localize('runInTerminal.unsandboxed.domain.reason.denied.multi', "This command accesses {0} and {1} more domains that are blocked by chat.agent.sandbox.deniedNetworkDomains.", blockedDomains[0], blockedDomains.length - 1);
 		}
 		if (deniedDomains.length > 0) {
 			if (blockedDomains.length === 1) {
-				return localize('runInTerminal.unsandboxed.domain.reason.mixed.single', "This command accesses {0}, which is blocked by chat.agent.sandboxNetwork.deniedDomains or not added to chat.agent.sandboxNetwork.allowedDomains.", blockedDomains[0]);
+				return localize('runInTerminal.unsandboxed.domain.reason.mixed.single', "This command accesses {0}, which is blocked by chat.agent.sandbox.deniedNetworkDomains or not added to chat.agent.sandbox.allowedNetworkDomains.", blockedDomains[0]);
 			}
-			return localize('runInTerminal.unsandboxed.domain.reason.mixed.multi', "This command accesses {0} and {1} more domains that are blocked by chat.agent.sandboxNetwork.deniedDomains or not added to chat.agent.sandboxNetwork.allowedDomains.", blockedDomains[0], blockedDomains.length - 1);
+			return localize('runInTerminal.unsandboxed.domain.reason.mixed.multi', "This command accesses {0} and {1} more domains that are blocked by chat.agent.sandbox.deniedNetworkDomains or not added to chat.agent.sandbox.allowedNetworkDomains.", blockedDomains[0], blockedDomains.length - 1);
 		}
 		if (blockedDomains.length === 1) {
-			return localize('runInTerminal.unsandboxed.domain.reason.single', "This command accesses {0}, which is not permitted by the current chat.agent.sandboxNetwork configuration.", blockedDomains[0]);
+			return localize('runInTerminal.unsandboxed.domain.reason.single', "This command accesses {0}, which is not permitted by the current chat.agent.sandbox configuration.", blockedDomains[0]);
 		}
-		return localize('runInTerminal.unsandboxed.domain.reason.multi', "This command accesses {0} and {1} more domains that are not permitted by the current chat.agent.sandboxNetwork configuration.", blockedDomains[0], blockedDomains.length - 1);
+		return localize('runInTerminal.unsandboxed.domain.reason.multi', "This command accesses {0} and {1} more domains that are not permitted by the current chat.agent.sandbox configuration.", blockedDomains[0], blockedDomains.length - 1);
 	}
 
 	async invoke(invocation: IToolInvocation, _countTokens: CountTokensCallback, _progress: ToolProgress, token: CancellationToken): Promise<IToolResult> {
@@ -1452,15 +1452,20 @@ export class RunInTerminalTool extends Disposable implements IToolImpl {
 	 * Returns data content parts for any found images that exist on disk.
 	 */
 	private async _extractImagesFromOutput(output: string, cwd: URI | undefined): Promise<IToolResult['content']> {
-		const normalizedOutput = output.replace(/\r?\n/g, '');
-
-		// Match paths ending with image extensions. A leading / or \ is sufficient
-		// to identify a path segment; the full path up to the extension is captured.
-		const pathPattern = /(?:[^\s]*[\/\\][^\s]*\.(?:png|jpe?g|gif|webp|bmp))/gi;
+		// Match paths containing at least one / or \ and ending with an image
+		// extension. Each atom uses [^\s/\\]* so it cannot consume separators,
+		// which keeps the [/\\] tokens unambiguous and prevents catastrophic
+		// backtracking on long strings.
+		const pathPattern = /[^\s/\\]*(?:[/\\][^\s/\\]*)+\.(?:png|jpe?g|gif|webp|bmp)/gi;
 
 		const matches = new Set<string>();
-		for (const match of normalizedOutput.matchAll(pathPattern)) {
-			matches.add(match[0]);
+		for (const line of output.split(/\r?\n/)) {
+			if (line.length > 10_000) {
+				continue;
+			}
+			for (const match of line.matchAll(pathPattern)) {
+				matches.add(match[0]);
+			}
 		}
 
 		if (matches.size === 0) {
