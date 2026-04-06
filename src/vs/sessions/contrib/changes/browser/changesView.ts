@@ -7,15 +7,14 @@ import './media/changesView.css';
 import * as dom from '../../../../base/browser/dom.js';
 import { renderLabelWithIcons } from '../../../../base/browser/ui/iconLabel/iconLabels.js';
 import { IListVirtualDelegate } from '../../../../base/browser/ui/list/list.js';
-import { IObjectTreeElement } from '../../../../base/browser/ui/tree/tree.js';
+import { IObjectTreeElement, ITreeSorter } from '../../../../base/browser/ui/tree/tree.js';
 import { ActionRunner, IAction } from '../../../../base/common/actions.js';
 import { Codicon } from '../../../../base/common/codicons.js';
-import { DisposableStore, IDisposable } from '../../../../base/common/lifecycle.js';
+import { Disposable, DisposableStore, IDisposable } from '../../../../base/common/lifecycle.js';
 import { Event } from '../../../../base/common/event.js';
-import { autorun, derived, IObservable } from '../../../../base/common/observable.js';
-import { basename } from '../../../../base/common/path.js';
+import { autorun, derived, derivedOpts, IObservable } from '../../../../base/common/observable.js';
 import { ProgressBar } from '../../../../base/browser/ui/progressbar/progressbar.js';
-import { isEqual } from '../../../../base/common/resources.js';
+import { basename, isEqual } from '../../../../base/common/resources.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
 import { URI } from '../../../../base/common/uri.js';
 import { localize, localize2 } from '../../../../nls.js';
@@ -69,6 +68,8 @@ import { ActiveSessionContextKeys, CHANGES_VIEW_CONTAINER_ID, CHANGES_VIEW_ID, C
 import { buildTreeChildren, ChangesTreeElement, ChangesTreeRenderer, IChangesFileItem, IChangesTreeRootInfo, isChangesFileItem, toIChangesFileItem } from './changesViewRenderer.js';
 import { ChangesViewModel } from './changesViewModel.js';
 import { ResourceTree } from '../../../../base/common/resourceTree.js';
+import { structuralEquals } from '../../../../base/common/equals.js';
+import { compareFileNames, comparePaths } from '../../../../base/common/comparers.js';
 
 const $ = dom.$;
 
@@ -78,52 +79,100 @@ const RUN_SESSION_CODE_REVIEW_ACTION_ID = 'sessions.codeReview.run';
 
 // --- ButtonBar widget
 
-class ChangesButtonBarWidget extends MenuWorkbenchButtonBar {
+class ChangesButtonBarWidget extends Disposable {
 	constructor(
 		container: HTMLElement,
-		sessionResource: URI | undefined,
-		private readonly outgoingChanges: number,
-		private readonly codeReviewLoading: boolean,
-		private readonly reviewCommentCount: number | undefined,
+		viewModel: ChangesViewModel,
 		@IAgentSessionsService agentSessionsService: IAgentSessionsService,
 		@IMenuService menuService: IMenuService,
+		@ICodeReviewService codeReviewService: ICodeReviewService,
 		@IContextKeyService contextKeyService: IContextKeyService,
 		@IContextMenuService contextMenuService: IContextMenuService,
 		@IKeybindingService keybindingService: IKeybindingService,
 		@ITelemetryService telemetryService: ITelemetryService,
-		@IHoverService hoverService: IHoverService,
+		@IHoverService hoverService: IHoverService
 	) {
-		super(
-			container,
-			MenuId.ChatEditingSessionChangesToolbar,
-			{
-				telemetrySource: 'changesView',
-				disableWhileRunning: true,
-				menuOptions: sessionResource
-					? { args: [sessionResource, agentSessionsService.getSession(sessionResource)?.metadata] }
-					: { shouldForwardArgs: true },
-				buttonConfigProvider: (action) => this._getButtonConfiguration(action)
-			},
-			menuService, contextKeyService, contextMenuService, keybindingService, telemetryService, hoverService
-		);
+		super();
+
+		const outgoingChangesObs = derived(reader => {
+			const activeSessionState = viewModel.activeSessionStateObs.read(reader);
+			return activeSessionState?.outgoingChanges ?? 0;
+		});
+
+		const reviewStateObs = derivedOpts<{ isLoading: boolean; commentCount: number | undefined }>({ equalsFn: structuralEquals }, reader => {
+			const sessionResource = viewModel.activeSessionResourceObs.read(reader);
+			if (!sessionResource) {
+				return { isLoading: false, commentCount: undefined };
+			}
+
+			const sessionChanges = viewModel.activeSessionChangesObs.read(reader);
+			const prReviewState = codeReviewService.getPRReviewState(sessionResource).read(reader);
+			const prReviewCommentCount = prReviewState.kind === PRReviewStateKind.Loaded
+				? prReviewState.comments.length
+				: 0;
+
+			let isLoading = false;
+			let commentCount: number | undefined;
+			if (sessionChanges && sessionChanges.length > 0) {
+				const reviewFiles = getCodeReviewFilesFromSessionChanges(sessionChanges);
+				const reviewVersion = getCodeReviewVersion(reviewFiles);
+				const reviewState = codeReviewService.getReviewState(sessionResource).read(reader);
+
+				if (reviewState.kind === CodeReviewStateKind.Loading && reviewState.version === reviewVersion) {
+					isLoading = true;
+				} else {
+					const codeReviewCommentCount = reviewState.kind === CodeReviewStateKind.Result && reviewState.version === reviewVersion
+						? reviewState.comments.length
+						: 0;
+					const totalReviewCommentCount = codeReviewCommentCount + prReviewCommentCount;
+					if (totalReviewCommentCount > 0) {
+						commentCount = totalReviewCommentCount;
+					}
+				}
+			} else if (prReviewCommentCount > 0) {
+				commentCount = prReviewCommentCount;
+			}
+
+			return { isLoading, commentCount };
+		});
+
+		this._register(autorun(reader => {
+			const sessionResource = viewModel.activeSessionResourceObs.read(reader);
+			const outgoingChanges = outgoingChangesObs.read(reader);
+			const reviewState = reviewStateObs.read(reader);
+
+			reader.store.add(new MenuWorkbenchButtonBar(
+				container,
+				MenuId.ChatEditingSessionChangesToolbar,
+				{
+					telemetrySource: 'changesView',
+					disableWhileRunning: true,
+					menuOptions: sessionResource
+						? { args: [sessionResource, agentSessionsService.getSession(sessionResource)?.metadata] }
+						: { shouldForwardArgs: true },
+					buttonConfigProvider: (action) => this._getButtonConfiguration(action, outgoingChanges, reviewState)
+				},
+				menuService, contextKeyService, contextMenuService, keybindingService, telemetryService, hoverService
+			));
+		}));
 	}
 
-	private _getButtonConfiguration(action: IAction): { showIcon: boolean; showLabel: boolean; isSecondary?: boolean; customLabel?: string; customClass?: string } | undefined {
+	private _getButtonConfiguration(action: IAction, outgoingChanges: number, reviewState: { isLoading: boolean; commentCount: number | undefined }): { showIcon: boolean; showLabel: boolean; isSecondary?: boolean; customLabel?: string; customClass?: string } | undefined {
 		if (
 			action.id === 'github.copilot.sessions.sync' ||
 			action.id === 'github.copilot.chat.createPullRequestCopilotCLIAgentSession.updatePR'
 		) {
-			const customLabel = this.outgoingChanges > 0
-				? `${action.label} ${this.outgoingChanges}↑`
+			const customLabel = outgoingChanges > 0
+				? `${action.label} ${outgoingChanges}↑`
 				: action.label;
 			return { customLabel, showIcon: true, showLabel: true, isSecondary: false };
 		}
 		if (action.id === RUN_SESSION_CODE_REVIEW_ACTION_ID) {
-			if (this.codeReviewLoading) {
+			if (reviewState.isLoading) {
 				return { showIcon: true, showLabel: true, isSecondary: true, customLabel: '$(loading~spin)', customClass: 'code-review-loading' };
 			}
-			if (this.reviewCommentCount !== undefined) {
-				return { showIcon: true, showLabel: true, isSecondary: true, customLabel: String(this.reviewCommentCount), customClass: 'code-review-comments' };
+			if (reviewState.commentCount !== undefined) {
+				return { showIcon: true, showLabel: true, isSecondary: true, customLabel: String(reviewState.commentCount), customClass: 'code-review-comments' };
 			}
 			return { showIcon: true, showLabel: false, isSecondary: true };
 		}
@@ -214,7 +263,6 @@ export class ChangesViewPane extends ViewPane {
 		@IEditorService private readonly editorService: IEditorService,
 		@ISessionsManagementService private readonly sessionManagementService: ISessionsManagementService,
 		@ILabelService private readonly labelService: ILabelService,
-		@ICodeReviewService private readonly codeReviewService: ICodeReviewService,
 		@ITelemetryService private readonly telemetryService: ITelemetryService,
 	) {
 		super({ ...options, titleMenuId: MenuId.ChatEditingSessionTitleToolbar }, keybindingService, contextMenuService, configurationService, contextKeyService, viewDescriptorService, instantiationService, openerService, themeService, hoverService);
@@ -463,50 +511,8 @@ export class ChangesViewPane extends ViewPane {
 			const scopedInstantiationService = this.instantiationService.createChild(scopedServiceCollection);
 			this.renderDisposables.add(scopedInstantiationService);
 
-			const outgoingChangesObs = derived(reader => {
-				const activeSessionState = this.viewModel.activeSessionStateObs.read(reader);
-				return activeSessionState?.outgoingChanges ?? 0;
-			});
-
-			this.renderDisposables.add(autorun(reader => {
-				const sessionResource = this.viewModel.activeSessionResourceObs.read(reader);
-				const outgoingChanges = outgoingChangesObs.read(reader);
-
-				// Read code review state to update the button label dynamically
-				let reviewCommentCount: number | undefined;
-				let codeReviewLoading = false;
-				if (sessionResource) {
-					const prReviewState = this.codeReviewService.getPRReviewState(sessionResource).read(reader);
-					const prReviewCommentCount = prReviewState.kind === PRReviewStateKind.Loaded ? prReviewState.comments.length : 0;
-					const activeSession = this.sessionManagementService.activeSession.read(reader);
-					const sessionChanges = activeSession?.changes.read(reader);
-					if (sessionChanges && sessionChanges.length > 0) {
-						const reviewFiles = getCodeReviewFilesFromSessionChanges(sessionChanges);
-						const reviewVersion = getCodeReviewVersion(reviewFiles);
-						const reviewState = this.codeReviewService.getReviewState(sessionResource).read(reader);
-						if (reviewState.kind === CodeReviewStateKind.Loading && reviewState.version === reviewVersion) {
-							codeReviewLoading = true;
-						} else {
-							const codeReviewCommentCount = reviewState.kind === CodeReviewStateKind.Result && reviewState.version === reviewVersion ? reviewState.comments.length : 0;
-							const totalReviewCommentCount = codeReviewCommentCount + prReviewCommentCount;
-							if (totalReviewCommentCount > 0) {
-								reviewCommentCount = totalReviewCommentCount;
-							}
-						}
-					} else if (prReviewCommentCount > 0) {
-						reviewCommentCount = prReviewCommentCount;
-					}
-				}
-
-				reader.store.add(scopedInstantiationService.createInstance(
-					ChangesButtonBarWidget,
-					this.actionsContainer!,
-					sessionResource,
-					outgoingChanges,
-					codeReviewLoading,
-					reviewCommentCount
-				));
-			}));
+			this.renderDisposables.add(scopedInstantiationService.createInstance(
+				ChangesButtonBarWidget, this.actionsContainer, this.viewModel));
 		}
 
 		// Update visibility and file count badge based on entries
@@ -763,8 +769,8 @@ export class ChangesViewPane extends ViewPane {
 				type: 'root',
 				uri: workspaceFolderUri,
 				name: repository.workingDirectory
-					? `${basename(repository.uri.fsPath)} (${branchName})`
-					: basename(repository.uri.fsPath),
+					? `${basename(repository.uri)} (${branchName})`
+					: basename(repository.uri),
 			},
 			resourceTreeRootUri,
 		};
@@ -883,7 +889,7 @@ export class ChangesViewPane extends ViewPane {
 			{
 				alwaysConsumeMouseWheel: false,
 				accessibilityProvider: {
-					getAriaLabel: (element: ChangesTreeElement) => isChangesFileItem(element) ? basename(element.uri.path) : element.name,
+					getAriaLabel: (element: ChangesTreeElement) => isChangesFileItem(element) ? basename(element.uri) : element.name,
 					getWidgetAriaLabel: () => localize('changesViewTree', "Changes Tree")
 				},
 				dnd: {
@@ -913,6 +919,7 @@ export class ChangesViewPane extends ViewPane {
 				},
 				indent: this.viewModel.viewModeObs.get() === ChangesViewMode.List ? 0 : 8,
 				compressionEnabled: true,
+				sorter: new ChangesTreeSorter(() => this.viewModel.viewModeObs.get()),
 				twistieAdditionalCssClass: (e: unknown) => {
 					return this.viewModel.viewModeObs.get() === ChangesViewMode.List
 						? 'force-no-twistie'
@@ -985,7 +992,7 @@ class ChangesViewActionRunner extends ActionRunner {
 	}
 }
 
-// --- Tree Delegate
+// --- Tree Delegate and Sorter
 
 class ChangesTreeDelegate implements IListVirtualDelegate<ChangesTreeElement> {
 	static readonly ROW_HEIGHT = 22;
@@ -996,6 +1003,37 @@ class ChangesTreeDelegate implements IListVirtualDelegate<ChangesTreeElement> {
 
 	getTemplateId(_element: ChangesTreeElement): string {
 		return ChangesTreeRenderer.TEMPLATE_ID;
+	}
+}
+
+class ChangesTreeSorter implements ITreeSorter<ChangesTreeElement> {
+	constructor(private readonly viewMode: () => ChangesViewMode) { }
+
+	compare(a: ChangesTreeElement, b: ChangesTreeElement): number {
+		if (this.viewMode() === ChangesViewMode.List) {
+			// List
+			const aPath = (a as IChangesFileItem).uri.fsPath;
+			const bPath = (b as IChangesFileItem).uri.fsPath;
+
+			return comparePaths(aPath, bPath);
+		}
+
+		// Tree
+		const aIsDirectory = ResourceTree.isResourceNode(a);
+		const bIsDirectory = ResourceTree.isResourceNode(b);
+
+		if (aIsDirectory !== bIsDirectory) {
+			return aIsDirectory ? -1 : 1;
+		}
+
+		const aName = ResourceTree.isResourceNode(a)
+			? a.name
+			: basename((a as IChangesFileItem).uri);
+		const bName = ResourceTree.isResourceNode(b)
+			? b.name
+			: basename((b as IChangesFileItem).uri);
+
+		return compareFileNames(aName, bName);
 	}
 }
 
