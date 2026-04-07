@@ -53,10 +53,10 @@ import { createFileIconThemableTreeContainerScope } from '../../../../workbench/
 import { ACTIVE_GROUP, IEditorService, SIDE_GROUP } from '../../../../workbench/services/editor/common/editorService.js';
 import { IExtensionService } from '../../../../workbench/services/extensions/common/extensions.js';
 import { IWorkbenchLayoutService } from '../../../../workbench/services/layout/browser/layoutService.js';
-import { ISessionsManagementService } from '../../sessions/browser/sessionsManagementService.js';
+import { ISessionsManagementService } from '../../../services/sessions/common/sessionsManagement.js';
 import { CodeReviewStateKind, getCodeReviewFilesFromSessionChanges, getCodeReviewVersion, ICodeReviewService, PRReviewStateKind } from '../../codeReview/browser/codeReviewService.js';
 import { CIStatusWidget } from './checksWidget.js';
-import { GITHUB_REMOTE_FILE_SCHEME, SessionStatus } from '../../sessions/common/sessionData.js';
+import { COPILOT_CLOUD_SESSION_TYPE, GITHUB_PR_FILE_SCHEME, GITHUB_REMOTE_FILE_SCHEME, SessionStatus } from '../../../services/sessions/common/session.js';
 import { Orientation } from '../../../../base/browser/ui/sash/sash.js';
 import { IView, Sizing, SplitView } from '../../../../base/browser/ui/splitview/splitview.js';
 import { Color } from '../../../../base/common/color.js';
@@ -294,8 +294,7 @@ export class ChangesViewPane extends ViewPane {
 		// can use it in their `when` clauses. Update reactively when the active session
 		// changes.
 		this._register(bindContextKey(ChatContextKeys.agentSessionType, this.scopedContextKeyService, reader => {
-			const activeSession = this.sessionManagementService.activeSession.read(reader);
-			return activeSession?.sessionType ?? '';
+			return this.viewModel.activeSessionTypeObs.read(reader) ?? '';
 		}));
 
 		// Title actions
@@ -750,29 +749,29 @@ export class ChangesViewPane extends ViewPane {
 			return undefined;
 		}
 
-		const sampleUri = items[0].uri;
+		let name: string = '';
 		let resourceTreeRootUri = workspaceFolderUri;
 
-		if (sampleUri.scheme === GITHUB_REMOTE_FILE_SCHEME) {
-			const parts = sampleUri.path.split('/').filter(Boolean);
-			if (parts.length >= 3) {
-				resourceTreeRootUri = sampleUri.with({ path: '/' + parts.slice(0, 3).join('/'), query: '', fragment: '' });
-			}
-		} else if (sampleUri.scheme !== workspaceFolderUri.scheme || sampleUri.authority !== workspaceFolderUri.authority) {
-			resourceTreeRootUri = sampleUri.with({ path: workspaceFolderUri.path, authority: workspaceFolderUri.authority, query: '', fragment: '' });
+		if (workspaceFolderUri.scheme === GITHUB_REMOTE_FILE_SCHEME) {
+			// Cloud session
+			resourceTreeRootUri = URI.from({ scheme: GITHUB_PR_FILE_SCHEME, path: '/' });
+			const segments = workspaceFolderUri.path.split('/').filter(Boolean);
+			name = `${segments.slice(0, 2).join('/')} (${decodeURIComponent(segments[2])})`;
+		} else {
+			// Local session
+			const branchName = this.viewModel.activeSessionStateObs.get()?.branchName;
+			name = repository.workingDirectory
+				? `${basename(repository.uri)} (${branchName})`
+				: basename(repository.uri);
 		}
-
-		const branchName = this.viewModel.activeSessionStateObs.get()?.branchName;
 
 		return {
 			root: {
 				type: 'root',
 				uri: workspaceFolderUri,
-				name: repository.workingDirectory
-					? `${basename(repository.uri)} (${branchName})`
-					: basename(repository.uri),
+				name
 			},
-			resourceTreeRootUri,
+			resourceTreeRootUri
 		};
 	}
 
@@ -884,7 +883,9 @@ export class ChangesViewPane extends ViewPane {
 					// Pass in the tree root to be used to compute the label description
 					const activeSession = this.sessionManagementService.activeSession.get();
 					const repository = activeSession?.workspace.get()?.repositories[0];
-					return repository?.workingDirectory ?? repository?.uri;
+					return repository?.uri.scheme === GITHUB_REMOTE_FILE_SCHEME
+						? URI.from({ scheme: GITHUB_PR_FILE_SCHEME, path: '/' })
+						: repository?.workingDirectory ?? repository?.uri;
 				})],
 			{
 				alwaysConsumeMouseWheel: false,
@@ -1153,8 +1154,9 @@ class ChangesPickerActionItem extends ActionWidgetDropdownActionViewItem {
 						description: localize('chatEditing.versionsAllChanges.description', 'Show all changes made in this session'),
 						checked: viewModel.versionModeObs.get() === ChangesVersionMode.AllChanges,
 						category: { label: 'checkpoints', order: 2, showHeader: false },
-						enabled: viewModel.activeSessionFirstCheckpointRefObs.get() !== undefined &&
-							viewModel.activeSessionLastCheckpointRefObs.get() !== undefined,
+						enabled: viewModel.activeSessionTypeObs.get() === COPILOT_CLOUD_SESSION_TYPE ||
+							(viewModel.activeSessionFirstCheckpointRefObs.get() !== undefined &&
+								viewModel.activeSessionLastCheckpointRefObs.get() !== undefined),
 						run: async () => {
 							viewModel.setVersionMode(ChangesVersionMode.AllChanges);
 							logChangesViewVersionModeChange(this.telemetryService, ChangesVersionMode.AllChanges);
@@ -1170,8 +1172,9 @@ class ChangesPickerActionItem extends ActionWidgetDropdownActionViewItem {
 						description: localize('chatEditing.versionsLastTurnChanges.description', 'Show only changes from the last turn'),
 						checked: viewModel.versionModeObs.get() === ChangesVersionMode.LastTurn,
 						category: { label: 'checkpoints', order: 3, showHeader: false },
-						enabled: viewModel.activeSessionFirstCheckpointRefObs.get() !== undefined &&
-							viewModel.activeSessionLastCheckpointRefObs.get() !== undefined,
+						enabled: viewModel.activeSessionTypeObs.get() === COPILOT_CLOUD_SESSION_TYPE ||
+							(viewModel.activeSessionFirstCheckpointRefObs.get() !== undefined &&
+								viewModel.activeSessionLastCheckpointRefObs.get() !== undefined),
 						run: async () => {
 							viewModel.setVersionMode(ChangesVersionMode.LastTurn);
 							logChangesViewVersionModeChange(this.telemetryService, ChangesVersionMode.LastTurn);
