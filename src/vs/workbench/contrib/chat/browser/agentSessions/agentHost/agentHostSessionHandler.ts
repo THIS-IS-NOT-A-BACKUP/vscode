@@ -14,7 +14,7 @@ import { autorun, IObservable, observableValue } from '../../../../../../base/co
 import { isEqual } from '../../../../../../base/common/resources.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { localize } from '../../../../../../nls.js';
-import { AgentProvider, AgentSession, IAgentAttachment, type IAgentConnection } from '../../../../../../platform/agentHost/common/agentService.js';
+import { AgentHostSessionConfigBranchNameHintKey, AgentProvider, AgentSession, IAgentAttachment, type IAgentConnection } from '../../../../../../platform/agentHost/common/agentService.js';
 import { IAgentSubscription } from '../../../../../../platform/agentHost/common/state/agentSubscription.js';
 import { ISessionTruncatedAction } from '../../../../../../platform/agentHost/common/state/protocol/actions.js';
 import { ICustomizationRef, TerminalClaimKind, type IProtectedResourceMetadata } from '../../../../../../platform/agentHost/common/state/protocol/state.js';
@@ -259,6 +259,19 @@ export interface IAgentHostSessionHandlerConfig {
 	readonly customizations?: IObservable<ICustomizationRef[]>;
 }
 
+export function getAgentHostBranchNameHint(message: string): string | undefined {
+	const words = message
+		.toLowerCase()
+		.normalize('NFKD')
+		.replace(/[^a-z0-9]+/g, '-')
+		.replace(/^-+|-+$/g, '')
+		.split('-')
+		.filter(word => word.length > 0)
+		.slice(0, 8);
+	const hint = words.join('-').slice(0, 48).replace(/-+$/g, '');
+	return hint.length > 0 ? hint : undefined;
+}
+
 export class AgentHostSessionHandler extends Disposable implements IChatSessionContentProvider {
 
 	private readonly _activeSessions = new ResourceMap<AgentHostChatSession>();
@@ -368,7 +381,8 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 				}
 				const sessionState = this._getSessionState(resolvedSession.toString());
 				if (sessionState) {
-					history.push(...turnsToHistory(sessionState.turns, this._config.agentId));
+					const modelId = this._toLanguageModelId(sessionResource, sessionState.summary.model);
+					history.push(...turnsToHistory(sessionState.turns, this._config.agentId, modelId));
 
 					// Enrich history with inner tool calls from subagent
 					// child sessions. Subscribes to each child session so
@@ -395,6 +409,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 							type: 'request',
 							prompt: sessionState.activeTurn.userMessage.text,
 							participant: this._config.agentId,
+							modelId,
 						});
 						history.push({
 							type: 'response',
@@ -420,7 +435,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 			async (request: IChatAgentRequest, progress: (parts: IChatProgress[]) => void, token: CancellationToken) => {
 				// todo@connor4312, I think IChatSession.requestHandler is actually
 				// dead code and I don't believe this is ever called.
-				const backendSession = resolvedSession ?? await this._createAndSubscribe(sessionResource, request.userSelectedModelId);
+				const backendSession = resolvedSession ?? await this._createAndSubscribe(sessionResource, request.userSelectedModelId, undefined, request.agentHostSessionConfig);
 				if (!resolvedSession) {
 					resolvedSession = backendSession;
 					this._sessionToBackend.set(sessionResource, backendSession);
@@ -519,7 +534,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 		// Resolve or create backend session
 		let resolvedSession = this._sessionToBackend.get(request.sessionResource);
 		if (!resolvedSession) {
-			resolvedSession = await this._createAndSubscribe(request.sessionResource, request.userSelectedModelId);
+			resolvedSession = await this._createAndSubscribe(request.sessionResource, request.userSelectedModelId, undefined, request.agentHostSessionConfig, getAgentHostBranchNameHint(request.message));
 			this._sessionToBackend.set(request.sessionResource, resolvedSession);
 		}
 
@@ -1779,7 +1794,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 
 		const chatModel = this._chatService.getSession(sessionResource);
 
-		const forkedSession = await this._createAndSubscribe(sessionResource, undefined, {
+		const forkedSession = await this._createAndSubscribe(sessionResource, protocolState?.summary.model, {
 			session: backendSession,
 			turnIndex,
 		});
@@ -1799,8 +1814,9 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 	}
 
 	/** Creates a new backend session and subscribes to its state. */
-	private async _createAndSubscribe(sessionResource: URI, modelId?: string, fork?: { session: URI; turnIndex: number }): Promise<URI> {
+	private async _createAndSubscribe(sessionResource: URI, modelId?: string, fork?: { session: URI; turnIndex: number }, sessionConfig?: Record<string, string>, branchNameHint?: string): Promise<URI> {
 		const rawModelId = this._extractRawModelId(modelId);
+		const config = branchNameHint ? { ...sessionConfig, [AgentHostSessionConfigBranchNameHintKey]: branchNameHint } : sessionConfig;
 		const workingDirectory = this._config.resolveWorkingDirectory?.(sessionResource)
 			?? this._workingDirectoryResolver.resolve(sessionResource)
 			?? this._workspaceContextService.getWorkspace().folders[0]?.uri;
@@ -1827,6 +1843,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 				provider: this._config.provider,
 				workingDirectory,
 				fork,
+				config,
 			});
 		} catch (err) {
 			// If authentication is required (e.g. token expired), try interactive auth and retry once
@@ -1839,6 +1856,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 						provider: this._config.provider,
 						workingDirectory,
 						fork,
+						config,
 					});
 				} else {
 					throw new Error(localize('agentHost.authRequired', "Authentication is required to start a session. Please sign in and try again."));
@@ -1917,6 +1935,14 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 			return languageModelIdentifier.substring(prefix.length);
 		}
 		return languageModelIdentifier;
+	}
+
+	private _toLanguageModelId(sessionResource: URI, rawModelId: string | undefined): string | undefined {
+		if (!rawModelId) {
+			return undefined;
+		}
+		const prefix = `${sessionResource.scheme}:`;
+		return rawModelId.startsWith(prefix) ? rawModelId : `${prefix}${rawModelId}`;
 	}
 
 	private _convertVariablesToAttachments(request: IChatAgentRequest): IAgentAttachment[] {
