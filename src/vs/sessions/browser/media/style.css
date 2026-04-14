@@ -188,6 +188,10 @@
 	background-color: var(--vscode-sessionsPanel-background) !important;
 }
 
+.agent-sessions-workbench .quick-input-header {
+	border-radius: var(--vscode-cornerRadius-xLarge);
+}
+
 /* ---- Sessions Context Menus ---- */
 
 .agent-sessions-workbench .context-view.monaco-menu-container,
@@ -267,18 +271,14 @@
 		opacity 250ms ease-out,
 		margin-top 250ms ease-out,
 		margin-right 250ms ease-out,
-		margin-bottom 250ms ease-out,
-		border-color 250ms ease-out,
-		background 250ms ease-out;
+		margin-bottom 250ms ease-out;
 }
 
 /* Auxiliary bar also transitions horizontal margin */
 .agent-sessions-workbench .part.auxiliarybar {
 	transition:
 		opacity 250ms ease-out,
-		margin 250ms ease-out,
-		border-color 250ms ease-out,
-		background 250ms ease-out;
+		margin 250ms ease-out;
 }
 
 .agent-sessions-workbench .part.sidebar > .content {

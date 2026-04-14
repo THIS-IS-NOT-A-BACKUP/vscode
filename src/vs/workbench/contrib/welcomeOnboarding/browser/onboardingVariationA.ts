@@ -30,7 +30,9 @@ import { IQuickInputService } from '../../../../platform/quickinput/common/quick
 import { IFileService } from '../../../../platform/files/common/files.js';
 import { IPathService } from '../../../services/path/common/pathService.js';
 import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
-import { InstallChatEvent, InstallChatClassification } from '../../chat/browser/chatSetup/chatSetup.js';
+import { InstallChatEvent, InstallChatClassification, ChatSetupStrategy } from '../../chat/browser/chatSetup/chatSetup.js';
+import { ICommandService } from '../../../../platform/commands/common/commands.js';
+import { IAccessibilityService } from '../../../../platform/accessibility/common/accessibility.js';
 import {
 	OnboardingStepId,
 	ONBOARDING_STEPS,
@@ -135,6 +137,8 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		@IFileService private readonly fileService: IFileService,
 		@IPathService private readonly pathService: IPathService,
 		@ITelemetryService private readonly telemetryService: ITelemetryService,
+		@ICommandService private readonly commandService: ICommandService,
+		@IAccessibilityService private readonly accessibilityService: IAccessibilityService,
 	) {
 		super();
 
@@ -224,6 +228,9 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			if (this._isLastStep()) {
 				this._logAction('complete');
 				this._dismiss('complete');
+			} else if (this.currentStepIndex === 0) {
+				this._logAction('continueWithoutSignIn');
+				this._nextStep();
 			} else {
 				this._logAction('next');
 				this._nextStep();
@@ -362,6 +369,8 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			this._renderAgentSessionsSubtitle(this.subtitleEl);
 		} else if (stepId === OnboardingStepId.Personalize) {
 			this._renderPersonalizeSubtitle(this.subtitleEl);
+		} else if (stepId === OnboardingStepId.Extensions) {
+			this._renderExtensionsSubtitle(this.subtitleEl);
 		} else {
 			this.subtitleEl.textContent = getOnboardingStepSubtitle(stepId);
 		}
@@ -400,11 +409,25 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			this.backButton.style.display = this.currentStepIndex === 0 ? 'none' : '';
 		}
 		if (this.nextButton) {
-			this.nextButton.textContent = this._isLastStep()
-				? localize('onboarding.getStarted', "Get Started")
-				: localize('onboarding.next', "Continue");
+			if (this.currentStepIndex === 0) {
+				// Sign-in step: secondary "Continue without Signing In"
+				this.nextButton.className = 'onboarding-a-btn onboarding-a-btn-secondary';
+				this.nextButton.textContent = localize('onboarding.continueWithoutSignIn', "Continue without Signing In");
+			} else if (this._isLastStep()) {
+				this.nextButton.className = 'onboarding-a-btn onboarding-a-btn-primary';
+				this.nextButton.textContent = localize('onboarding.getStarted', "Get Started");
+			} else {
+				this.nextButton.className = 'onboarding-a-btn onboarding-a-btn-primary';
+				this.nextButton.textContent = localize('onboarding.next', "Continue");
+			}
 		}
 		if (this.skipButton && this.footerLeft) {
+			if (this.currentStepIndex === 0) {
+				// Sign-in step: ghost Skip button
+				this.skipButton.className = 'onboarding-a-btn onboarding-a-btn-ghost';
+			} else {
+				this.skipButton.className = 'onboarding-a-btn onboarding-a-btn-ghost';
+			}
 			if (this._isLastStep()) {
 				this.skipButton.style.display = 'none';
 				// Show sign-in nudge in footer
@@ -544,6 +567,11 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			if (account) {
 				this._userSignedIn = true;
 				this.telemetryService.publicLog2<InstallChatEvent, InstallChatClassification>('commandCenter.chatInstall', { installResult: 'installed', installDuration: watch.elapsed(), signUpErrorCode: undefined, provider });
+				// Run chat setup in the background (sign-up, extension install, entitlement resolution)
+				this.commandService.executeCommand('workbench.action.chat.triggerSetup', undefined, {
+					disableChatViewReveal: true,
+					setupStrategy: ChatSetupStrategy.DefaultSetup,
+				});
 				this._nextStep();
 			}
 		} catch (error) {
@@ -575,6 +603,10 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			if (account) {
 				this._userSignedIn = true;
 				this.telemetryService.publicLog2<InstallChatEvent, InstallChatClassification>('commandCenter.chatInstall', { installResult: 'installed', installDuration: watch.elapsed(), signUpErrorCode: undefined, provider });
+				this.commandService.executeCommand('workbench.action.chat.triggerSetup', undefined, {
+					disableChatViewReveal: true,
+					setupStrategy: ChatSetupStrategy.DefaultSetup,
+				});
 				this._nextStep();
 			}
 		} catch (error) {
@@ -679,8 +711,10 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		for (const theme of themes) {
 			this._createThemeCard(themeGrid, theme, themeCards);
 		}
-		const selectedThemeIndex = themes.findIndex(t => t.id === this.selectedThemeId);
-		this._setupRadioGroupNavigation(themeCards, Math.max(0, selectedThemeIndex));
+		// Make all theme cards individually tabbable
+		for (const card of themeCards) {
+			card.setAttribute('tabindex', '0');
+		}
 
 		// Keyboard Mapping section — only shown when another editor is detected
 		const keymapOptions = this._detectedEditorIds
@@ -724,6 +758,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 					}
 					pill.classList.add('selected');
 					pill.setAttribute('aria-checked', 'true');
+					this.accessibilityService.alert(localize('onboarding.keymap.selected.alert', "{0} keyboard mapping selected", keymap.label));
 				}));
 			}
 			const selectedKeymapIndex = keymapOptions.findIndex(k => k.id === this.selectedKeymapId);
@@ -743,6 +778,20 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			'+',
 			this._createKbd(localize('onboarding.personalize.tip.p', "P")),
 			localize('onboarding.personalize.tip.suffix', " to access all VS Code commands."),
+		);
+	}
+
+	private _renderExtensionsSubtitle(container: HTMLElement): void {
+		clearNode(container);
+		const modifier = isMacintosh ? 'Cmd' : 'Ctrl';
+		container.append(
+			localize('onboarding.extensions.subtitle.prefix', "Install extensions to enhance your workflow. Press "),
+			this._createKbd(localize({ key: 'onboarding.extensions.subtitle.modifier', comment: ['Keyboard modifier key'] }, "{0}", modifier)),
+			'+',
+			this._createKbd(localize('onboarding.extensions.subtitle.shift', "Shift")),
+			'+',
+			this._createKbd(localize('onboarding.extensions.subtitle.x', "X")),
+			localize('onboarding.extensions.subtitle.suffix', " to browse the Extension Marketplace."),
 		);
 	}
 
@@ -776,6 +825,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			}
 			card.classList.add('selected');
 			card.setAttribute('aria-checked', 'true');
+			this.accessibilityService.alert(localize('onboarding.theme.selected.alert', "{0} theme selected", theme.label));
 		}));
 
 		this.stepDisposables.add(addDisposableListener(card, EventType.KEY_DOWN, (e: KeyboardEvent) => {
@@ -822,6 +872,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			const installBtn = this._registerStepFocusable(append(row, $<HTMLButtonElement>('button.onboarding-a-ext-install')));
 			installBtn.type = 'button';
 			installBtn.textContent = localize('onboarding.ext.install', "Install");
+			installBtn.setAttribute('aria-label', localize('onboarding.ext.install.aria', "Install {0}", ext.name));
 
 			this.stepDisposables.add(addDisposableListener(installBtn, EventType.CLICK, () => {
 				this._logAction('installExtension', undefined, ext.id);
@@ -831,6 +882,8 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 					() => {
 						installBtn.textContent = localize('onboarding.ext.installed', "Installed");
 						installBtn.classList.add('installed');
+						installBtn.setAttribute('aria-label', localize('onboarding.ext.installed.aria', "{0} installed", ext.name));
+						this.accessibilityService.alert(localize('onboarding.ext.installed.alert', "{0} has been installed", ext.name));
 					},
 					() => {
 						installBtn.textContent = localize('onboarding.ext.install', "Install");
@@ -1049,6 +1102,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 					c.setAttribute('aria-checked', c.dataset.id === option.id ? 'true' : 'false');
 				}
 				this._applyAiPreference(option.id);
+				this.accessibilityService.alert(localize('onboarding.aiPref.selected.alert', "{0} selected", option.label));
 			}));
 		}
 		const selectedAiIndex = ONBOARDING_AI_PREFERENCE_OPTIONS.findIndex(o => o.id === this.selectedAiMode);
@@ -1129,7 +1183,10 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 	}
 
 	private _createFeatureCard(parent: HTMLElement, icon: ThemeIcon, title: string, description?: string): HTMLElement {
-		const card = append(parent, $('div.onboarding-a-feature-card'));
+		const card = this._registerStepFocusable(append(parent, $('div.onboarding-a-feature-card')));
+		card.setAttribute('tabindex', '0');
+		card.setAttribute('role', 'group');
+		card.setAttribute('aria-label', title);
 		const iconCol = append(card, $('div.onboarding-a-feature-icon'));
 		iconCol.appendChild(renderIcon(icon));
 		const textCol = append(card, $('div.onboarding-a-feature-text'));
