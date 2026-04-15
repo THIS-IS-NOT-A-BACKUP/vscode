@@ -31,6 +31,7 @@ import { IChatSessionFileChange, IChatSessionsService } from '../../../../workbe
 import { ChatAgentLocation, ChatModeKind } from '../../../../workbench/contrib/chat/common/constants.js';
 import { ILanguageModelsService } from '../../../../workbench/contrib/chat/common/languageModels.js';
 import { agentHostSessionWorkspaceKey, buildAgentHostSessionWorkspace } from '../../../common/agentHostSessionWorkspace.js';
+import { isSessionConfigComplete } from '../../../common/sessionConfig.js';
 import { ISessionChangeEvent, ISendRequestOptions } from '../../../services/sessions/common/sessionsProvider.js';
 import { IAgentHostSessionsProvider } from '../../../common/agentHostSessionsProvider.js';
 import { ISession, IChat, IGitHubInfo, ISessionWorkspace, ISessionWorkspaceBrowseAction, SessionStatus, ISessionType, COPILOT_CLI_SESSION_TYPE } from '../../../services/sessions/common/session.js';
@@ -126,7 +127,7 @@ interface IChatData {
 	/** Currently selected mode identifier and kind. */
 	readonly mode: IObservable<{ readonly id: string; readonly kind: string } | undefined>;
 	/** Whether the session is still initializing (e.g., resolving git repository). */
-	readonly loading: IObservable<boolean>;
+	readonly loading: ISettableObservable<boolean>;
 	/** Whether the session is archived. */
 	readonly isArchived: IObservable<boolean>;
 	/** Whether the session has been read. */
@@ -137,8 +138,6 @@ interface IChatData {
 	readonly lastTurnEnd: IObservable<Date | undefined>;
 	/** GitHub information associated with this session, if any. */
 	readonly gitHubInfo: IObservable<IGitHubInfo | undefined>;
-	/** Whether the session is ready to accept messages. */
-	readonly ready: ISettableObservable<boolean>;
 }
 
 export interface IRemoteAgentHostSessionsProviderConfig {
@@ -172,7 +171,6 @@ class RemoteSessionAdapter implements IChatData {
 	readonly description: ISettableObservable<IMarkdownString | undefined>;
 	readonly lastTurnEnd: ISettableObservable<Date | undefined>;
 	readonly gitHubInfo = observableValue<IGitHubInfo | undefined>('gitHubInfo', undefined);
-	readonly ready = observableValue('ready', true);
 
 	/** The agent provider name (e.g. 'copilot') for constructing backend URIs. */
 	readonly agentProvider: string;
@@ -633,7 +631,7 @@ export class RemoteAgentHostSessionsProvider extends Disposable implements IAgen
 		const resource = URI.from({ scheme: resourceScheme, path: `/untitled-${generateUuid()}` });
 		const status = observableValue<SessionStatus>(this, SessionStatus.Untitled);
 		const modelId = observableValue<string | undefined>(this, undefined);
-		const ready = observableValue(this, false);
+		const loading = observableValue(this, true);
 		const data: IChatData = {
 			id: `${this.id}:${resource.toString()}`,
 			resource,
@@ -648,19 +646,17 @@ export class RemoteAgentHostSessionsProvider extends Disposable implements IAgen
 			changes: observableValue<readonly IChatSessionFileChange[]>(this, []),
 			modelId,
 			mode: observableValue(this, undefined),
-			loading: observableValue(this, false),
+			loading,
 			isArchived: observableValue(this, false),
 			isRead: observableValue(this, true),
 			description: observableValue(this, undefined),
 			lastTurnEnd: observableValue(this, undefined),
 			gitHubInfo: observableValue(this, undefined),
-			ready,
 		};
 		const agentProvider = this._agentProviderFromSessionType(sessionType.id);
 		this._newSessionWorkspaces.set(data.id, workspaceUri);
 		this._newSessionAgentProviders.set(data.id, agentProvider);
-		this._newSessionConfigs.set(data.id, { ready: false, schema: { type: 'object', properties: {} }, values: {} });
-		this._updateSessionReady(data.id);
+		this._newSessionConfigs.set(data.id, { schema: { type: 'object', properties: {} }, values: {} });
 		this._onDidChangeSessionConfig.fire(data.id);
 		this._resolveSessionConfig(data.id, agentProvider, workspaceUri, undefined);
 		return { data, status, modelId };
@@ -675,8 +671,8 @@ export class RemoteAgentHostSessionsProvider extends Disposable implements IAgen
 		const workingDirectory = this._newSessionWorkspaces.get(sessionId);
 		if (workingDirectory) {
 			const current = this._newSessionConfigs.get(sessionId)?.values ?? {};
-			this._newSessionConfigs.set(sessionId, { ready: false, schema: { type: 'object', properties: {} }, values: { ...current, [property]: value } });
-			this._updateSessionReady(sessionId);
+			this._newSessionConfigs.set(sessionId, { schema: { type: 'object', properties: {} }, values: { ...current, [property]: value } });
+			this._setNewSessionLoading(sessionId, true);
 			this._onDidChangeSessionConfig.fire(sessionId);
 			await this._resolveSessionConfig(sessionId, this._getAgentProviderForSession(sessionId), workingDirectory, { ...current, [property]: value });
 			return;
@@ -697,7 +693,6 @@ export class RemoteAgentHostSessionsProvider extends Disposable implements IAgen
 			...runningConfig,
 			values: { ...runningConfig.values, [property]: value },
 		});
-		this._updateSessionReady(sessionId);
 		this._onDidChangeSessionConfig.fire(sessionId);
 
 		// Dispatch to the agent host connection
@@ -905,8 +900,17 @@ export class RemoteAgentHostSessionsProvider extends Disposable implements IAgen
 		return newSession;
 	}
 
+	addChat(_sessionId: string): IChat {
+		throw new Error('Multiple chats per session is not supported for remote agent host sessions');
+	}
+
+	async sendRequest(_sessionId: string, _chatResource: URI, _options: ISendRequestOptions): Promise<ISession> {
+		throw new Error('Multiple chats per session is not supported for remote agent host sessions');
+	}
+
 	private async _resolveSessionConfig(sessionId: string, agentProvider: string, workingDirectory: URI, config: Record<string, string> | undefined): Promise<void> {
 		if (!this._connection) {
+			this._setNewSessionLoading(sessionId, false);
 			return;
 		}
 		const request = (this._newSessionConfigRequests.get(sessionId) ?? 0) + 1;
@@ -921,13 +925,14 @@ export class RemoteAgentHostSessionsProvider extends Disposable implements IAgen
 				return;
 			}
 			this._newSessionConfigs.set(sessionId, result);
+			this._setNewSessionLoading(sessionId, !isSessionConfigComplete(result));
 		} catch {
 			if (this._newSessionConfigRequests.get(sessionId) !== request) {
 				return;
 			}
 			this._newSessionConfigs.delete(sessionId);
+			this._setNewSessionLoading(sessionId, false);
 		}
-		this._updateSessionReady(sessionId);
 		this._onDidChangeSessionConfig.fire(sessionId);
 	}
 
@@ -961,7 +966,6 @@ export class RemoteAgentHostSessionsProvider extends Disposable implements IAgen
 		}
 		if (Object.keys(mutableProperties).length > 0) {
 			this._runningSessionConfigs.set(newSessionId, {
-				ready: true,
 				schema: { type: 'object', properties: mutableProperties },
 				values: mutableValues,
 			});
@@ -1153,12 +1157,10 @@ export class RemoteAgentHostSessionsProvider extends Disposable implements IAgen
 			// Session was restored (e.g. after reconnect) — create a minimal
 			// config entry from the changed values so the picker can render.
 			this._runningSessionConfigs.set(sessionId, {
-				ready: true,
 				schema: { type: 'object', properties: buildMutableConfigSchema(config) },
 				values: config,
 			});
 		}
-		this._updateSessionReady(sessionId);
 		this._onDidChangeSessionConfig.fire(sessionId);
 	}
 
@@ -1172,17 +1174,10 @@ export class RemoteAgentHostSessionsProvider extends Disposable implements IAgen
 		}
 	}
 
-	private _updateSessionReady(sessionId: string): void {
-		const configReady = this.getSessionConfig(sessionId)?.ready ?? true;
-		// New (untitled) session
+	private _setNewSessionLoading(sessionId: string, loading: boolean): void {
 		if (this._currentNewSession?.id === sessionId) {
-			this._currentNewSession.ready.set(configReady, undefined);
-			return;
+			this._currentNewSession.loading.set(loading, undefined);
 		}
-		// Running session
-		const rawId = this._rawIdFromChatId(sessionId);
-		const cached = rawId ? this._sessionCache.get(rawId) : undefined;
-		cached?.ready.set(configReady, undefined);
 	}
 
 	private _agentProviderFromSessionType(sessionType: string): string {
@@ -1260,7 +1255,6 @@ export class RemoteAgentHostSessionsProvider extends Disposable implements IAgen
 			description: chat.description,
 			lastTurnEnd: chat.lastTurnEnd,
 			gitHubInfo: chat.gitHubInfo,
-			ready: chat.ready,
 			chats: constObservable([mainChat]),
 			mainChat,
 		};

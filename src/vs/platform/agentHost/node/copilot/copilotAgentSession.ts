@@ -179,7 +179,7 @@ export class CopilotAgentSession extends Disposable {
 	readonly sessionUri: URI;
 
 	/** Tracks active tool invocations so we can produce past-tense messages on completion. */
-	private readonly _activeToolCalls = new Map<string, { toolName: string; displayName: string; parameters: Record<string, unknown> | undefined }>();
+	private readonly _activeToolCalls = new Map<string, { toolName: string; displayName: string; parameters: Record<string, unknown> | undefined; content: IToolResultContent[] }>();
 	/** Pending permission requests awaiting a renderer-side decision. */
 	private readonly _pendingPermissions = new Map<string, DeferredPromise<boolean>>();
 	/** Pending user input requests awaiting a renderer-side answer. */
@@ -230,12 +230,37 @@ export class CopilotAgentSession extends Disposable {
 		this._register(toDisposable(() => this._denyPendingPermissions()));
 		this._register(toDisposable(() => this._shellManager?.dispose()));
 		this._register(toDisposable(() => this._cancelPendingUserInputs()));
+
+		// When a shell tool associates a terminal with a tool call, fire a
+		// tool_content_changed event so the UI can connect to the terminal
+		// while the command is still running.
+		if (this._shellManager) {
+			this._register(this._shellManager.onDidAssociateTerminal(({ toolCallId, terminalUri, displayName }) => {
+				const tracked = this._activeToolCalls.get(toolCallId);
+				if (!tracked) {
+					return;
+				}
+
+				tracked.content.push({
+					type: ToolResultContentType.Terminal,
+					resource: terminalUri,
+					title: displayName,
+				});
+
+				this._onDidSessionProgress.fire({
+					session: this.sessionUri,
+					type: 'tool_content_changed',
+					toolCallId,
+					content: tracked.content,
+				});
+			}));
+		}
 		this._register(toDisposable(() => this._cancelPendingClientToolCalls()));
 	}
 
 	/**
 	 * The snapshot of client contributions captured when this session was
-	 * created. Used by the agent to detect when the session is stale.
+	 * created. Used by the agent to detect when the session is 1stale.
 	 */
 	get appliedSnapshot(): IActiveClientSnapshot {
 		return this._appliedSnapshot;
@@ -611,7 +636,7 @@ export class CopilotAgentSession extends Disposable {
 				try { parameters = JSON.parse(toolArgs) as Record<string, unknown>; } catch { /* ignore */ }
 			}
 			const displayName = getToolDisplayName(e.data.toolName);
-			this._activeToolCalls.set(e.data.toolCallId, { toolName: e.data.toolName, displayName, parameters });
+			this._activeToolCalls.set(e.data.toolCallId, { toolName: e.data.toolName, displayName, parameters, content: [] });
 			const toolKind = getToolKind(e.data.toolName);
 
 			this._onDidSessionProgress.fire({
@@ -642,7 +667,7 @@ export class CopilotAgentSession extends Disposable {
 			const displayName = tracked.displayName;
 			const toolOutput = e.data.error?.message ?? e.data.result?.content;
 
-			const content: IToolResultContent[] = [];
+			const content: IToolResultContent[] = [...tracked.content];
 			if (toolOutput !== undefined) {
 				content.push({ type: ToolResultContentType.Text, text: toolOutput });
 			}
@@ -659,10 +684,11 @@ export class CopilotAgentSession extends Disposable {
 				}
 			}
 
-			// Add terminal content reference for shell tools
+			// Add terminal content reference for shell tools (skip if already
+			// added during onDidAssociateTerminal while the tool was running)
 			if (isShellTool(tracked.toolName) && this._shellManager) {
 				const terminalUri = this._shellManager.getTerminalUriForToolCall(e.data.toolCallId);
-				if (terminalUri) {
+				if (terminalUri && !content.some(c => c.type === ToolResultContentType.Terminal && c.resource === terminalUri)) {
 					content.push({
 						type: ToolResultContentType.Terminal,
 						resource: terminalUri,

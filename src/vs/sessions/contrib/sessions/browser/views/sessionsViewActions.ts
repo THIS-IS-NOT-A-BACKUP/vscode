@@ -752,20 +752,12 @@ registerAction2(class AddChatAction extends Action2 {
 
 	async run(accessor: ServicesAccessor): Promise<void> {
 		const sessionsManagementService = accessor.get(ISessionsManagementService);
-		const quickInputService = accessor.get(IQuickInputService);
 
 		const activeSession = sessionsManagementService.activeSession.get();
 		if (!activeSession || activeSession.status.get() === SessionStatus.Untitled) {
 			return;
 		}
 
-		const query = await quickInputService.input({
-			placeHolder: localize('addChat.placeholder', "Enter a prompt for the new chat"),
-			prompt: localize('addChat.prompt', "Add a new chat to the active session"),
-		});
-
-		if (query) {
-			await sessionsManagementService.sendAndCreateChat(activeSession, { query });
-		}
+		sessionsManagementService.openNewChatInSession(activeSession);
 	}
 });

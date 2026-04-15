@@ -18,6 +18,7 @@ import { AgentSession, IAgent } from '../../common/agentService.js';
 import { ISessionDataService } from '../../common/sessionDataService.js';
 import { ActionType, IActionEnvelope, ISessionAction } from '../../common/state/sessionActions.js';
 import { PendingMessageKind, ResponsePartKind, SessionStatus, ToolCallStatus, ToolResultContentType } from '../../common/state/sessionState.js';
+import { IProductService } from '../../../product/common/productService.js';
 import { AgentService } from '../../node/agentService.js';
 import { AgentSideEffects } from '../../node/agentSideEffects.js';
 import { SessionDatabase } from '../../node/sessionDatabase.js';
@@ -952,7 +953,7 @@ suite('AgentSideEffects', () => {
 			const sessionDataService = createSessionDataService(sessionDb);
 			const localAgent = new MockAgent();
 			disposables.add(toDisposable(() => localAgent.dispose()));
-			const localService = disposables.add(new AgentService(new NullLogService(), fileService, sessionDataService));
+			const localService = disposables.add(new AgentService(new NullLogService(), fileService, sessionDataService, { _serviceBrand: undefined } as IProductService));
 			localService.registerProvider(localAgent);
 
 			// Create a session on the agent backend
@@ -972,7 +973,7 @@ suite('AgentSideEffects', () => {
 			const sessionDataService = createSessionDataService(sessionDb);
 			const localAgent = new MockAgent();
 			disposables.add(toDisposable(() => localAgent.dispose()));
-			const localService = disposables.add(new AgentService(new NullLogService(), fileService, sessionDataService));
+			const localService = disposables.add(new AgentService(new NullLogService(), fileService, sessionDataService, { _serviceBrand: undefined } as IProductService));
 			localService.registerProvider(localAgent);
 
 			// Create a session on the agent backend

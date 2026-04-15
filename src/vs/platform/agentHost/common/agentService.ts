@@ -14,7 +14,7 @@ import type { IActionEnvelope, INotification, ISessionAction, ITerminalAction } 
 import type { IAgentSubscription } from './state/agentSubscription.js';
 import type { ICreateTerminalParams, IResolveSessionConfigResult, ISessionConfigCompletionsResult } from './state/protocol/commands.js';
 import type { IResourceCopyParams, IResourceCopyResult, IResourceDeleteParams, IResourceDeleteResult, IResourceListResult, IResourceMoveParams, IResourceMoveResult, IResourceReadResult, IResourceWriteParams, IResourceWriteResult, IStateSnapshot } from './state/sessionProtocol.js';
-import { AttachmentType, ComponentToState, SessionStatus, StateComponents, type ICustomizationRef, type IPendingMessage, type IRootState, type ISessionInputAnswer, type ISessionInputRequest, type IToolCallResult, type PolicyState, type StringOrMarkdown, SessionInputResponseKind } from './state/sessionState.js';
+import { AttachmentType, ComponentToState, SessionStatus, StateComponents, type ICustomizationRef, type IPendingMessage, type IRootState, type ISessionInputAnswer, type ISessionInputRequest, type IToolCallResult, type IToolResultContent, type PolicyState, type StringOrMarkdown, SessionInputResponseKind } from './state/sessionState.js';
 
 // IPC contract between the renderer and the agent host utility process.
 // Defines all serializable event types, the IAgent provider interface,
@@ -304,6 +304,13 @@ export interface IAgentSubagentStartedEvent extends IAgentProgressEventBase {
 	readonly agentDescription?: string;
 }
 
+/** Partial content update for a running tool call (e.g. terminal URI available). */
+export interface IAgentToolContentChangedEvent extends IAgentProgressEventBase {
+	readonly type: 'tool_content_changed';
+	readonly toolCallId: string;
+	readonly content: IToolResultContent[];
+}
+
 export type IAgentProgressEvent =
 	| IAgentDeltaEvent
 	| IAgentMessageEvent
@@ -317,7 +324,8 @@ export type IAgentProgressEvent =
 	| IAgentReasoningEvent
 	| IAgentSteeringConsumedEvent
 	| IAgentUserInputRequestEvent
-	| IAgentSubagentStartedEvent;
+	| IAgentSubagentStartedEvent
+	| IAgentToolContentChangedEvent;
 
 // ---- Session URI helpers ----------------------------------------------------
 

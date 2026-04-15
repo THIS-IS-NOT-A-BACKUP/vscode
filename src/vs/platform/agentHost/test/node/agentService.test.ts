@@ -20,6 +20,7 @@ import { ISessionDatabase, ISessionDataService } from '../../common/sessionDataS
 import { SessionDatabase } from '../../node/sessionDatabase.js';
 import { ActionType, IActionEnvelope } from '../../common/state/sessionActions.js';
 import { ResponsePartKind, SessionLifecycle, ToolCallConfirmationReason, ToolCallStatus, ToolResultContentType, TurnState, buildSubagentSessionUri, type IMarkdownResponsePart, type IToolCallCompletedState, type IToolCallResponsePart } from '../../common/state/sessionState.js';
+import { IProductService } from '../../../product/common/productService.js';
 import { AgentService } from '../../node/agentService.js';
 import { MockAgent } from './mockAgent.js';
 import { mapSessionEvents, type ISessionEvent } from '../../node/copilot/mapSessionEvents.js';
@@ -71,7 +72,7 @@ suite('AgentService (node dispatcher)', () => {
 		await fileService.createFolder(URI.from({ scheme: Schemas.inMemory, path: '/testDir' }));
 		await fileService.writeFile(URI.from({ scheme: Schemas.inMemory, path: '/testDir/file.txt' }), VSBuffer.fromString('hello'));
 
-		service = disposables.add(new AgentService(new NullLogService(), fileService, nullSessionDataService));
+		service = disposables.add(new AgentService(new NullLogService(), fileService, nullSessionDataService, { _serviceBrand: undefined } as IProductService));
 		copilotAgent = new MockAgent('copilot');
 		disposables.add(toDisposable(() => copilotAgent.dispose()));
 	});
@@ -202,7 +203,7 @@ suite('AgentService (node dispatcher)', () => {
 			// Manually add the session to the mock
 			(agent as unknown as { _sessions: Map<string, URI> })._sessions.set(sessionId, sessionUri);
 
-			const svc = disposables.add(new AgentService(new NullLogService(), fileService, sessionDataService));
+			const svc = disposables.add(new AgentService(new NullLogService(), fileService, sessionDataService, { _serviceBrand: undefined } as IProductService));
 			svc.registerProvider(agent);
 
 			const sessions = await svc.listSessions();
