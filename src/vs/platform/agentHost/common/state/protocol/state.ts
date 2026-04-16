@@ -282,8 +282,6 @@ export interface ISessionState {
 	serverTools?: IToolDefinition[];
 	/** The client currently providing tools and interactive capabilities to this session */
 	activeClient?: ISessionActiveClient;
-	/** The working directory URI for this session */
-	workingDirectory?: URI;
 	/** Completed turns */
 	turns: ITurn[];
 	/** Currently in-progress turn */
