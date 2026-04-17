@@ -1140,4 +1140,136 @@ describe('AutomodeService', () => {
 			expect(selectionEvent).toBeUndefined();
 		});
 	});
+
+	describe('available_models / knownEndpoints sync', () => {
+		function mockRouterResponse(available_models: string[], routerResult: { chosen_model: string; candidate_models: string[] }, session_token = 'test-token'): void {
+			(mockCAPIClientService.makeRequest as ReturnType<typeof vi.fn>).mockImplementation((_body: any, opts: any) => {
+				if (opts?.type === RequestType.ModelRouter) {
+					return Promise.resolve({
+						ok: true,
+						status: 200,
+						headers: createMockHeaders(),
+						text: vi.fn().mockResolvedValue(JSON.stringify({
+							predicted_label: 'no_reasoning',
+							confidence: 0.96,
+							latency_ms: 23,
+							chosen_model: routerResult.chosen_model,
+							candidate_models: routerResult.candidate_models,
+							scores: { needs_reasoning: 0.04, no_reasoning: 0.96 },
+							sticky_override: false
+						}))
+					});
+				}
+				return Promise.resolve(
+					makeMockTokenResponse({
+						available_models,
+						expires_at: Math.floor(Date.now() / 1000) + 3600,
+						session_token,
+					})
+				);
+			});
+		}
+
+		it('should filter out available_models that have no matching knownEndpoint before sending to router', async () => {
+			enableRouter();
+			const gpt4oEndpoint = createEndpoint('gpt-4o', 'OpenAI');
+			let capturedBody: string | undefined;
+			(mockCAPIClientService.makeRequest as ReturnType<typeof vi.fn>).mockImplementation((req: any, opts: any) => {
+				if (opts?.type === RequestType.ModelRouter) {
+					capturedBody = req.body;
+					return Promise.resolve({
+						ok: true,
+						status: 200,
+						headers: createMockHeaders(),
+						text: vi.fn().mockResolvedValue(JSON.stringify({
+							predicted_label: 'no_reasoning',
+							confidence: 0.96,
+							latency_ms: 23,
+							chosen_model: 'gpt-4o',
+							candidate_models: ['gpt-4o'],
+							scores: { needs_reasoning: 0.04, no_reasoning: 0.96 },
+							sticky_override: false
+						}))
+					});
+				}
+				return Promise.resolve(
+					makeMockTokenResponse({
+						available_models: ['claude-haiku-4.5', 'gpt-4o', 'claude-sonnet-4.6'],
+						expires_at: Math.floor(Date.now() / 1000) + 3600,
+						session_token: 'test-token',
+					})
+				);
+			});
+
+			automodeService = createService();
+			const chatRequest: Partial<ChatRequest> = {
+				location: ChatLocation.Panel,
+				prompt: 'what day is today',
+				sessionId: 'session-filter-models'
+			};
+
+			await automodeService.resolveAutoModeEndpoint(chatRequest as ChatRequest, [gpt4oEndpoint]);
+
+			expect(capturedBody).toBeDefined();
+			const parsed = JSON.parse(capturedBody!);
+			expect(parsed.available_models).toEqual(['gpt-4o']);
+			expect(parsed.available_models).not.toContain('claude-haiku-4.5');
+			expect(parsed.available_models).not.toContain('claude-sonnet-4.6');
+			expect(mockLogService.info).toHaveBeenCalledWith(
+				expect.stringContaining('Filtered 2 unresolvable model(s)')
+			);
+		});
+
+		it('should iterate all candidate_models when first candidate has no endpoint', async () => {
+			enableRouter();
+			const gpt41Endpoint = createEndpoint('gpt-4.1', 'OpenAI');
+
+			mockRouterResponse(
+				['gpt-4.1'],
+				{ chosen_model: 'gpt-4.1', candidate_models: ['unknown-new-model', 'gpt-4.1'] }
+			);
+
+			automodeService = createService();
+			const chatRequest: Partial<ChatRequest> = {
+				location: ChatLocation.Panel,
+				prompt: 'what day is today',
+				sessionId: 'session-iterate-candidates'
+			};
+
+			const result = await automodeService.resolveAutoModeEndpoint(chatRequest as ChatRequest, [gpt41Endpoint]);
+			expect(result.model).toBe('gpt-4.1');
+		});
+
+		it('should throw when all available_models are unknown to knownEndpoints', async () => {
+			enableRouter();
+			const gpt4oEndpoint = createEndpoint('gpt-4o', 'OpenAI');
+
+			(mockCAPIClientService.makeRequest as ReturnType<typeof vi.fn>).mockImplementation((_body: any, opts: any) => {
+				if (opts?.type === RequestType.ModelRouter) {
+					throw new Error('Router should not be called when no models are routable');
+				}
+				return Promise.resolve(
+					makeMockTokenResponse({
+						available_models: ['unknown-model-a', 'unknown-model-b'],
+						expires_at: Math.floor(Date.now() / 1000) + 3600,
+						session_token: 'test-token',
+					})
+				);
+			});
+
+			automodeService = createService();
+			const chatRequest: Partial<ChatRequest> = {
+				location: ChatLocation.Panel,
+				prompt: 'test prompt',
+				sessionId: 'session-all-unknown'
+			};
+
+			await expect(
+				automodeService.resolveAutoModeEndpoint(chatRequest as ChatRequest, [gpt4oEndpoint])
+			).rejects.toThrow('no available model found');
+			expect(mockLogService.warn).toHaveBeenCalledWith(
+				expect.stringContaining('No available_models matched knownEndpoints')
+			);
+		});
+	});
 });

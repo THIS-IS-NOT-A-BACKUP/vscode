@@ -45,7 +45,7 @@ import { IDefaultIntentRequestHandlerOptions } from '../../prompt/node/defaultIn
 import { IDocumentContext } from '../../prompt/node/documentContext';
 import { IBuildPromptResult, IIntent, IIntentInvocation } from '../../prompt/node/intents';
 import { AgentPrompt, AgentPromptProps } from '../../prompts/node/agent/agentPrompt';
-import { BackgroundSummarizationState, BackgroundSummarizer, IBackgroundSummarizationResult } from '../../prompts/node/agent/backgroundSummarizer';
+import { BackgroundSummarizationState, BackgroundSummarizer, IBackgroundSummarizationResult, shouldKickOffBackgroundSummarization } from '../../prompts/node/agent/backgroundSummarizer';
 import { AgentPromptCustomizations, PromptRegistry } from '../../prompts/node/agent/promptRegistry';
 import { extractInlineSummary, InlineSummarizationUserMessage, SummarizedConversationHistory, SummarizedConversationHistoryMetadata, SummarizedConversationHistoryPropsBuilder } from '../../prompts/node/agent/summarizedConversationHistory';
 import { PromptRenderer, renderPromptElement } from '../../prompts/node/base/promptRenderer';
@@ -360,6 +360,12 @@ export class AgentIntentInvocation extends EditCodeIntentInvocation implements I
 	/** Cached model capabilities from the most recent main agent render, reused by the background summarizer. */
 	private _lastModelCapabilities: { enableThinking: boolean; reasoningEffort: string | undefined; enableToolSearch: boolean; enableContextEditing: boolean } | undefined;
 
+	/**
+	 * RNG used to jitter the inline-summarization trigger threshold around 0.80.
+	 * Tests may overwrite this directly (e.g. `(invocation as any)._thresholdRng = () => 0.5`).
+	 */
+	private _thresholdRng: () => number = Math.random;
+
 	constructor(
 		intent: IIntent,
 		location: ChatLocation,
@@ -539,6 +545,7 @@ export class AgentIntentInvocation extends EditCodeIntentInvocation implements I
 					endpoint: this.endpoint,
 					promptContext: renderProps.promptContext,
 					triggerSummarize: true,
+					forceSimpleSummary: true,
 				});
 				return await renderer.render(progress, token);
 			} catch (e) {
@@ -659,13 +666,26 @@ export class AgentIntentInvocation extends EditCodeIntentInvocation implements I
 			));
 		}
 
-		// Post-render: kick off background compaction at ≥ 80% if idle.
+		// Post-render: kick off background compaction if idle and over the
+		// threshold. For the inline-summarization path we care about prompt
+		// cache parity with the main agent fetch — so we gate kick-off on a
+		// completed tool call (cache has been warmed) and jitter the threshold
+		// around 0.80 to avoid firing at the same exact boundary every time.
+		// The non-inline path forks its own prompt and sees no cache benefit,
+		// so it keeps the simple >= 0.80 behavior.
 		if (summarizationEnabled && backgroundSummarizer && !didSummarizeThisIteration) {
 			const postRenderRatio = baseBudget > 0
 				? (result.tokenCount + toolTokens) / baseBudget
 				: 0;
 
-			if (postRenderRatio >= 0.80 && (backgroundSummarizer.state === BackgroundSummarizationState.Idle || backgroundSummarizer.state === BackgroundSummarizationState.Failed)) {
+			const idleOrFailed = backgroundSummarizer.state === BackgroundSummarizationState.Idle
+				|| backgroundSummarizer.state === BackgroundSummarizationState.Failed;
+
+			const cacheWarm = (promptContext.toolCallRounds?.length ?? 0) > 0;
+
+			const kickOff = shouldKickOffBackgroundSummarization(postRenderRatio, useInlineSummarization, cacheWarm, this._thresholdRng);
+
+			if (kickOff && idleOrFailed) {
 				if (useInlineSummarization) {
 					// Compute and cache model capabilities from the current render's
 					// messages. These must match the main agent fetch for cache parity.
@@ -862,7 +882,6 @@ export class AgentIntentInvocation extends EditCodeIntentInvocation implements I
 							"outcome": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "comment": "The success state." },
 							"model": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "comment": "The model ID." },
 							"summarizationMode": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "comment": "The summarization mode." },
-							"source": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "comment": "Whether background or foreground." },
 							"conversationId": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "comment": "Session id." },
 							"chatRequestId": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "comment": "The chat request ID." },
 							"lastUsedTool": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "comment": "The last tool used before summarization." },
@@ -881,7 +900,6 @@ export class AgentIntentInvocation extends EditCodeIntentInvocation implements I
 						outcome: 'success',
 						model: this.endpoint.model,
 						summarizationMode: 'inline',
-						source: 'background',
 						conversationId,
 						chatRequestId: associatedRequestId,
 						lastUsedTool,
@@ -925,7 +943,6 @@ export class AgentIntentInvocation extends EditCodeIntentInvocation implements I
 						endpoint: this.endpoint,
 						promptContext: snapshotProps.promptContext,
 						triggerSummarize: true,
-						summarizationSource: 'background',
 					});
 					const bgProgress: vscode.Progress<vscode.ChatResponseReferencePart | vscode.ChatResponseProgressPart> = { report: () => { } };
 					const bgRenderResult = await bgRenderer.render(bgProgress, bgToken);
@@ -960,7 +977,6 @@ export class AgentIntentInvocation extends EditCodeIntentInvocation implements I
 							"detailedOutcome": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "comment": "Detailed failure reason." },
 							"model": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "comment": "The model ID." },
 							"summarizationMode": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "comment": "The summarization mode." },
-							"source": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "comment": "Whether background or foreground." },
 							"conversationId": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "comment": "Session id." },
 							"chatRequestId": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "comment": "The chat request ID." },
 							"duration": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "comment": "Duration in ms." }
@@ -971,7 +987,6 @@ export class AgentIntentInvocation extends EditCodeIntentInvocation implements I
 						detailedOutcome: err instanceof Error ? err.message : String(err),
 						model: this.endpoint.model,
 						summarizationMode: 'inline',
-						source: 'background',
 						conversationId,
 						chatRequestId: associatedRequestId,
 					}, {
