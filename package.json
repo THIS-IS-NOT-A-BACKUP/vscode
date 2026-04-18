@@ -79,6 +79,8 @@
     "extensions-ci": "npm run gulp extensions-ci",
     "extensions-ci-pr": "npm run gulp extensions-ci-pr",
     "perf": "node scripts/code-perf.js",
+    "perf:chat": "node scripts/chat-simulation/test-chat-perf-regression.js",
+    "perf:chat-leak": "node scripts/chat-simulation/test-chat-mem-leaks.js",
     "copilot:setup": "npm --prefix extensions/copilot run setup",
     "copilot:get_token": "npm --prefix extensions/copilot run get_token",
     "update-build-ts-version": "npm install -D typescript@next && npm install -D @typescript/native-preview && (cd build && npm run typecheck)",

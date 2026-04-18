@@ -594,7 +594,11 @@ export class BrowserView extends Disposable {
 	/**
 	 * Focus this view
 	 */
-	async focus(): Promise<void> {
+	async focus(force?: boolean): Promise<void> {
+		// By default, only focus the view if its window is already focused.
+		if (!force && !this._window?.win?.isFocused()) {
+			return;
+		}
 		this._view.webContents.focus();
 	}
 

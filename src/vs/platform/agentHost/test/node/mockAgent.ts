@@ -205,6 +205,21 @@ export class ScriptedMockAgent implements IAgent {
 	constructor() {
 		// Seed the pre-existing session so it appears in listSessions()
 		this._sessions.set(AgentSession.id(PRE_EXISTING_SESSION_URI), PRE_EXISTING_SESSION_URI);
+
+		// Allow integration tests to seed additional pre-existing sessions across
+		// server restarts via env var. The value is a comma-separated list of
+		// session URIs (e.g. `mock://pre-1,mock://pre-2`).
+		const seeded = process.env['VSCODE_AGENT_HOST_MOCK_SEED_SESSIONS'];
+		if (seeded) {
+			for (const raw of seeded.split(',')) {
+				const trimmed = raw.trim();
+				if (!trimmed) {
+					continue;
+				}
+				const uri = URI.parse(trimmed);
+				this._sessions.set(AgentSession.id(uri), uri);
+			}
+		}
 	}
 
 	getDescriptor(): IAgentDescriptor {

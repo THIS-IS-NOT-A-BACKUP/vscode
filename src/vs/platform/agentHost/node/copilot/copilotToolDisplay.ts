@@ -9,6 +9,7 @@ import { URI } from '../../../../base/common/uri.js';
 import { localize } from '../../../../nls.js';
 import type { IAgentToolReadyEvent } from '../../common/agentService.js';
 import { StringOrMarkdown } from '../../common/state/protocol/state.js';
+import { basename } from '../../../../base/common/resources.js';
 
 // =============================================================================
 // Copilot CLI built-in tool interfaces
@@ -160,7 +161,8 @@ function truncate(text: string, maxLength: number): string {
  * as a clickable file widget in the chat UI.
  */
 function formatPathAsMarkdownLink(path: string): string {
-	return `[](${URI.file(path).toString()})`;
+	const uri = URI.file(path);
+	return `[${basename(uri)}](${uri})`;
 }
 
 /**

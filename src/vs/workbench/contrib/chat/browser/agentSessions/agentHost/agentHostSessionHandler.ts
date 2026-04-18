@@ -11,7 +11,7 @@ import { Emitter, Event } from '../../../../../../base/common/event.js';
 import { MarkdownString } from '../../../../../../base/common/htmlContent.js';
 import { Disposable, DisposableResourceMap, DisposableStore, IReference, MutableDisposable, toDisposable, type IDisposable } from '../../../../../../base/common/lifecycle.js';
 import { ResourceMap } from '../../../../../../base/common/map.js';
-import { autorun, derived, IObservable, observableValue } from '../../../../../../base/common/observable.js';
+import { autorun, derived, IObservable, observableValue, transaction } from '../../../../../../base/common/observable.js';
 import { isEqual } from '../../../../../../base/common/resources.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { localize } from '../../../../../../nls.js';
@@ -43,7 +43,7 @@ import { ILanguageModelToolsService, IToolData, IToolInvocation, IToolResult, To
 import { getAgentHostIcon } from '../agentSessions.js';
 import { AgentHostEditingSession } from './agentHostEditingSession.js';
 import { IAgentHostSessionWorkingDirectoryResolver } from './agentHostSessionWorkingDirectoryResolver.js';
-import { activeTurnToProgress, completedToolCallToEditParts, completedToolCallToSerialized, finalizeToolInvocation, getTerminalContentUri, makeAhpTerminalToolSessionId, parseAhpTerminalToolSessionId, toolCallStateToInvocation, turnsToHistory, updateRunningToolSpecificData, type IToolCallFileEdit } from './stateToProgressAdapter.js';
+import { activeTurnToProgress, completedToolCallToEditParts, completedToolCallToSerialized, finalizeToolInvocation, getTerminalContentUri, makeAhpTerminalToolSessionId, parseAhpTerminalToolSessionId, rawMarkdownToString, stringOrMarkdownToString, toolCallStateToInvocation, turnsToHistory, updateRunningToolSpecificData, type IToolCallFileEdit } from './stateToProgressAdapter.js';
 
 // =============================================================================
 // AgentHostSessionHandler - renderer-side handler for a single agent host
@@ -180,7 +180,7 @@ class AgentHostChatSession extends Disposable implements IChatSession {
 	private readonly _onDidStartServerRequest = this._register(new Emitter<{ prompt: string }>());
 	readonly onDidStartServerRequest = this._onDidStartServerRequest.event;
 
-	interruptActiveResponseCallback: IChatSession['interruptActiveResponseCallback'];
+	readonly interruptActiveResponseCallback: IChatSession['interruptActiveResponseCallback'];
 	readonly forkSession: IChatSession['forkSession'];
 
 	constructor(
@@ -189,6 +189,7 @@ class AgentHostChatSession extends Disposable implements IChatSession {
 		private readonly _forkSession: ((request: IChatSessionRequestHistoryItem | undefined, token: CancellationToken) => Promise<IChatSessionItem>),
 		initialProgress: IChatProgress[] | undefined,
 		onDispose: () => void,
+		interruptActiveResponse: () => boolean,
 		@ILogService private readonly _logService: ILogService,
 	) {
 		super();
@@ -202,11 +203,10 @@ class AgentHostChatSession extends Disposable implements IChatSession {
 		this._register(toDisposable(() => this._onWillDispose.fire()));
 		this._register(toDisposable(onDispose));
 
-		// Provide interrupt callback when reconnecting to an active turn or
-		// when this is a brand-new session (no history yet).
-		this.interruptActiveResponseCallback = (hasActiveTurn || history.length === 0) ? async () => {
-			return true;
-		} : undefined;
+		// Always provide an interrupt callback so the chat UI's stop button
+		// can cancel a remote turn at any time. The callback resolves the
+		// current active turn at call time and dispatches SessionTurnCancelled.
+		this.interruptActiveResponseCallback = async () => interruptActiveResponse();
 
 		this.forkSession = this._forkSession;
 	}
@@ -241,8 +241,10 @@ class AgentHostChatSession extends Disposable implements IChatSession {
 	 */
 	startServerRequest(prompt: string): void {
 		this._logService.info('[AgentHost] Server-initiated request started');
-		this.progressObs.set([], undefined);
-		this.isCompleteObs.set(false, undefined);
+		transaction(tx => {
+			this.progressObs.set([], tx);
+			this.isCompleteObs.set(false, tx);
+		});
 		this._onDidStartServerRequest.fire({ prompt });
 	}
 }
@@ -455,7 +457,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 				const sessionState = this._getSessionState(resolvedSession.toString());
 				if (sessionState) {
 					const modelId = this._toLanguageModelId(sessionResource, sessionState.summary.model?.id);
-					history.push(...turnsToHistory(resolvedSession, sessionState.turns, this._config.agentId, modelId));
+					history.push(...turnsToHistory(resolvedSession, sessionState.turns, this._config.agentId, this._config.connectionAuthority, modelId));
 
 					// Enrich history with inner tool calls from subagent
 					// child sessions. Subscribes to each child session so
@@ -523,6 +525,27 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 				if (resolvedSession) {
 					this._releaseSessionSubscription(resolvedSession.toString());
 				}
+			},
+			() => {
+				const backend = resolvedSession ?? this._sessionToBackend.get(sessionResource);
+				if (!backend) {
+					// Nothing to cancel. Treat as a successful noop so ChatService
+					// does not install a phantom pending request.
+					return true;
+				}
+				const sessionKey = backend.toString();
+				const turnId = this._getSessionState(sessionKey)?.activeTurn?.id;
+				if (!turnId) {
+					// No active turn (likely a race with completion). Noop-success.
+					return true;
+				}
+				this._logService.info(`[AgentHost] Cancellation requested for ${sessionKey}, dispatching turnCancelled`);
+				this._config.connection.dispatch({
+					type: ActionType.SessionTurnCancelled,
+					session: sessionKey,
+					turnId,
+				});
+				return true;
 			},
 		);
 		this._activeSessions.set(sessionResource, session);
@@ -1128,11 +1151,9 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 				existing = confirmInvocation;
 			}
 		} else if (tc.status === ToolCallStatus.Running || tc.status === ToolCallStatus.PendingResultConfirmation) {
-			existing.invocationMessage = typeof tc.invocationMessage === 'string'
-				? tc.invocationMessage
-				: new MarkdownString(tc.invocationMessage.markdown);
+			existing.invocationMessage = stringOrMarkdownToString(tc.invocationMessage, this._config.connectionAuthority);
 			this._reviveTerminalIfNeeded(existing, tc, ctx.backendSession);
-			updateRunningToolSpecificData(existing, tc);
+			updateRunningToolSpecificData(existing, tc, this._config.connectionAuthority);
 		}
 
 		// Finalize terminal-state tools
@@ -1141,7 +1162,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 			// Running was skipped due to throttling and terminal content
 			// only appears at Completed time.
 			this._reviveTerminalIfNeeded(existing, tc, ctx.backendSession);
-			fileEdits = finalizeToolInvocation(existing, tc, ctx.backendSession);
+			fileEdits = finalizeToolInvocation(existing, tc, ctx.backendSession, this._config.connectionAuthority);
 		}
 
 		return { invocation: existing, fileEdits };
@@ -1533,7 +1554,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 							// string gets merged into the edit part in chatModel.ts
 							// which breaks rendering because the thinking content
 							// part does not deal with this.
-							ctx.progress([{ kind: 'markdownContent', content: new MarkdownString(delta, { supportHtml: true }) }]);
+							ctx.progress([{ kind: 'markdownContent', content: rawMarkdownToString(delta, this._config.connectionAuthority, { supportHtml: true }) }]);
 						}
 						break;
 					}
@@ -1708,7 +1729,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 			/* resolveId */ undefined,
 			/* data */ undefined,
 			/* isUsed */ undefined,
-			/* message */ new MarkdownString(inputReq.message),
+			/* message */ rawMarkdownToString(inputReq.message, this._config.connectionAuthority),
 		);
 
 		progress([carousel]);
@@ -1836,7 +1857,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 									if (tc.status === ToolCallStatus.Completed || tc.status === ToolCallStatus.Cancelled) {
 										const completedTc = tc as ICompletedToolCall;
 										const fileEditParts = completedToolCallToEditParts(completedTc);
-										const serialized = completedToolCallToSerialized(completedTc, toolCallId, URI.parse(childSessionUri));
+										const serialized = completedToolCallToSerialized(completedTc, toolCallId, URI.parse(childSessionUri), this._config.connectionAuthority);
 										if (fileEditParts.length > 0) {
 											serialized.presentation = ToolInvocationPresentation.Hidden;
 										}
@@ -1904,11 +1925,11 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 							this._awaitToolConfirmation(confirmInvocation, tc.toolCallId, URI.parse(childSessionUri), turnId, childCts.token);
 						}
 					} else if (tc.status === ToolCallStatus.Running) {
-						updateRunningToolSpecificData(existing, tc);
+						updateRunningToolSpecificData(existing, tc, this._config.connectionAuthority);
 					}
 
 					if (existing && (tc.status === ToolCallStatus.Completed || tc.status === ToolCallStatus.Cancelled) && !IChatToolInvocation.isComplete(existing)) {
-						finalizeToolInvocation(existing, tc, URI.parse(childSessionUri));
+						finalizeToolInvocation(existing, tc, URI.parse(childSessionUri), this._config.connectionAuthority);
 					}
 				}
 			}
@@ -2000,18 +2021,6 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 		const observedSubagentToolIds = new Set<string>();
 		const throttler = new Throttler();
 		reconnectDisposables.add(throttler);
-
-		// Set up the interrupt callback so the user can actually cancel the
-		// remote turn. This dispatches session/turnCancelled to the server.
-		chatSession.interruptActiveResponseCallback = async () => {
-			this._logService.info(`[AgentHost] Reconnect cancellation requested for ${sessionKey}, dispatching turnCancelled`);
-			this._config.connection.dispatch({
-				type: ActionType.SessionTurnCancelled,
-				session: sessionKey,
-				turnId,
-			});
-			return true;
-		};
 
 		// Wire up awaitConfirmation for tool calls that were already pending
 		// confirmation at snapshot time so the user can approve/deny them.

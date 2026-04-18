@@ -16,7 +16,7 @@ import { IChatWidgetService } from '../../../../chat/browser/chat.js';
 import { IChatService, IChatMultiSelectAnswer, IChatQuestionAnswerValue, IChatQuestionCarousel, IChatSingleSelectAnswer } from '../../../../chat/common/chatService/chatService.js';
 import { ToolDataSource, type CountTokensCallback, type IPreparedToolInvocation, type IToolData, type IToolImpl, type IToolInvocation, type IToolInvocationPreparationContext, type IToolResult, type ToolProgress } from '../../../../chat/common/tools/languageModelToolsService.js';
 import { URI } from '../../../../../../base/common/uri.js';
-import { ITerminalService } from '../../../../terminal/browser/terminal.js';
+import { ITerminalChatService, ITerminalService } from '../../../../terminal/browser/terminal.js';
 import { getOutput } from '../outputHelpers.js';
 import { buildCommandDisplayText, normalizeCommandForExecution } from '../runInTerminalHelpers.js';
 import { RunInTerminalTool } from './runInTerminalTool.js';
@@ -99,6 +99,7 @@ export class SendToTerminalTool extends Disposable implements IToolImpl {
 		@IConfigurationService private readonly _configurationService: IConfigurationService,
 		@IChatService private readonly _chatService: IChatService,
 		@IChatWidgetService private readonly _chatWidgetService: IChatWidgetService,
+		@ITerminalChatService private readonly _terminalChatService: ITerminalChatService,
 		@ITerminalService private readonly _terminalService: ITerminalService,
 	) {
 		super();
@@ -153,7 +154,10 @@ export class SendToTerminalTool extends Disposable implements IToolImpl {
 
 		// Determine auto-approval, aligned with runInTerminal
 		const chatSessionResource = context.chatSessionResource;
-		const isSessionAutoApproved = chatSessionResource && isSessionAutoApproveLevel(chatSessionResource, this._configurationService, this._chatWidgetService, this._chatService);
+		const isSessionAutoApproved = chatSessionResource && (
+			isSessionAutoApproveLevel(chatSessionResource, this._configurationService, this._chatWidgetService, this._chatService) ||
+			this._terminalChatService.hasChatSessionAutoApproval(chatSessionResource)
+		);
 
 		// send_to_terminal normally requires confirmation in default approvals mode
 		// because the text may be arbitrary input (passwords, confirmations, etc.)
