@@ -3,10 +3,12 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import type { CopilotSession, SessionEventPayload, SessionEventType, TypedSessionEventHandler } from '@github/copilot-sdk';
 import assert from 'assert';
 import { Disposable, type DisposableStore, type IDisposable, type IReference } from '../../../../base/common/lifecycle.js';
 import { URI } from '../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
+import { INativeEnvironmentService } from '../../../environment/common/environment.js';
 import { FileService } from '../../../files/common/fileService.js';
 import { IFileService } from '../../../files/common/files.js';
 import { IInstantiationService } from '../../../instantiation/common/instantiation.js';
@@ -21,6 +23,9 @@ import { ISessionCustomization, ICustomizationRef } from '../../common/state/ses
 import { IAgentHostGitService } from '../../node/agentHostGitService.js';
 import { IAgentHostTerminalManager } from '../../node/agentHostTerminalManager.js';
 import { CopilotAgent, getCopilotWorktreeBranchName, getCopilotWorktreeName, getCopilotWorktreesRoot, type ICopilotClient } from '../../node/copilot/copilotAgent.js';
+import { CopilotAgentSession, type SessionWrapperFactory } from '../../node/copilot/copilotAgentSession.js';
+import { CopilotSessionWrapper } from '../../node/copilot/copilotSessionWrapper.js';
+import { ShellManager } from '../../node/copilot/copilotShellTools.js';
 import { SessionDatabase } from '../../node/sessionDatabase.js';
 import { createNullSessionDataService } from '../common/sessionTestHelpers.js';
 
@@ -109,6 +114,20 @@ class TestCopilotClient implements ICopilotClient {
 	resumeSession: ICopilotClient['resumeSession'] = async () => { throw new Error('not implemented'); };
 }
 
+class MockCopilotSession {
+	readonly sessionId = 'test-session-1';
+
+	on<K extends SessionEventType>(_eventType: K, _handler: TypedSessionEventHandler<K>): () => void {
+		return () => { };
+	}
+
+	async send(): Promise<string> { return ''; }
+	async abort(): Promise<void> { }
+	async setModel(): Promise<void> { }
+	async getMessages(): Promise<SessionEventPayload<SessionEventType>[]> { return []; }
+	async destroy(): Promise<void> { }
+}
+
 class TestableCopilotAgent extends CopilotAgent {
 	constructor(
 		private readonly _copilotClient: ICopilotClient,
@@ -127,7 +146,7 @@ class TestableCopilotAgent extends CopilotAgent {
 	}
 }
 
-function createTestAgent(disposables: Pick<DisposableStore, 'add'>, options?: { sessionDataService?: ISessionDataService; copilotClient?: ICopilotClient }): CopilotAgent {
+function createTestAgentContext(disposables: Pick<DisposableStore, 'add'>, options?: { sessionDataService?: ISessionDataService; copilotClient?: ICopilotClient; environmentServiceRegistration?: 'native' | 'none' }): { agent: CopilotAgent; instantiationService: IInstantiationService } {
 	const services = new ServiceCollection();
 	const logService = new NullLogService();
 	const fileService = disposables.add(new FileService(logService));
@@ -137,12 +156,32 @@ function createTestAgent(disposables: Pick<DisposableStore, 'add'>, options?: { 
 	services.set(IAgentPluginManager, new TestAgentPluginManager());
 	services.set(IAgentHostGitService, new TestAgentHostGitService());
 	services.set(IAgentHostTerminalManager, new TestAgentHostTerminalManager());
+	if (options?.environmentServiceRegistration !== 'none') {
+		const environmentService = {
+			_serviceBrand: undefined,
+			userHome: URI.file('/mock-home'),
+		} as INativeEnvironmentService;
+		services.set(INativeEnvironmentService, environmentService);
+	}
 	const instantiationService: IInstantiationService = disposables.add(new InstantiationService(services));
 	services.set(IInstantiationService, instantiationService);
-	if (options?.copilotClient) {
-		return instantiationService.createInstance(TestableCopilotAgent, options.copilotClient);
-	}
-	return instantiationService.createInstance(CopilotAgent);
+	const agent = options?.copilotClient
+		? instantiationService.createInstance(TestableCopilotAgent, options.copilotClient)
+		: instantiationService.createInstance(CopilotAgent);
+	return { agent, instantiationService };
+}
+
+function createTestAgent(disposables: Pick<DisposableStore, 'add'>, options?: { sessionDataService?: ISessionDataService; copilotClient?: ICopilotClient; environmentServiceRegistration?: 'native' | 'none' }): CopilotAgent {
+	return createTestAgentContext(disposables, options).agent;
+}
+
+function createAgentSessionThroughAgent(agent: CopilotAgent, instantiationService: IInstantiationService): CopilotAgentSession {
+	const sessionUri = AgentSession.uri('copilot', 'test-session-1');
+	const shellManager = instantiationService.createInstance(ShellManager, sessionUri, undefined);
+	const wrapperFactory: SessionWrapperFactory = async () => new CopilotSessionWrapper(new MockCopilotSession() as unknown as CopilotSession);
+	return (agent as unknown as {
+		_createAgentSession: (wrapperFactory: SessionWrapperFactory, sessionId: string, shellManager: ShellManager) => CopilotAgentSession;
+	})._createAgentSession(wrapperFactory, 'test-session-1', shellManager);
 }
 
 function withoutUndefinedProperties(metadata: IAgentSessionMetadata): Record<string, unknown> {
@@ -216,6 +255,35 @@ suite('CopilotAgent', () => {
 				(error: Error) => error instanceof ProtocolError && error.code === AHP_AUTH_REQUIRED,
 			);
 		} finally {
+			await disposeAgent(agent);
+		}
+	});
+
+	test('agent-created sessions can resolve session-state paths via INativeEnvironmentService', async () => {
+		const sessionDataService = disposables.add(new TestSessionDataService());
+		const { agent, instantiationService } = createTestAgentContext(disposables, {
+			environmentServiceRegistration: 'native',
+			sessionDataService,
+		});
+		const previousXdgStateHome = process.env['XDG_STATE_HOME'];
+		delete process.env['XDG_STATE_HOME'];
+		try {
+			const agentSession = disposables.add(createAgentSessionThroughAgent(agent, instantiationService));
+			await agentSession.initializeSession();
+
+			const result = await agentSession.handlePermissionRequest({
+				kind: 'read',
+				path: URI.file('/mock-home/.copilot/session-state/test-session-1/plan.md').fsPath,
+				toolCallId: 'tc-read-plan-agent-composition',
+			});
+
+			assert.strictEqual(result.kind, 'approved');
+		} finally {
+			if (previousXdgStateHome === undefined) {
+				delete process.env['XDG_STATE_HOME'];
+			} else {
+				process.env['XDG_STATE_HOME'] = previousXdgStateHome;
+			}
 			await disposeAgent(agent);
 		}
 	});
