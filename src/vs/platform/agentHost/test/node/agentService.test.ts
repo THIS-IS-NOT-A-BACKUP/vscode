@@ -19,7 +19,7 @@ import { AgentSession } from '../../common/agentService.js';
 import { ISessionDatabase, ISessionDataService } from '../../common/sessionDataService.js';
 import { SessionDatabase } from '../../node/sessionDatabase.js';
 import { ActionType, IActionEnvelope } from '../../common/state/sessionActions.js';
-import { ResponsePartKind, SessionLifecycle, ToolCallConfirmationReason, ToolCallStatus, ToolResultContentType, TurnState, buildSubagentSessionUri, type IMarkdownResponsePart, type IToolCallCompletedState, type IToolCallResponsePart } from '../../common/state/sessionState.js';
+import { ISessionActiveClient, ResponsePartKind, SessionLifecycle, ToolCallConfirmationReason, ToolCallStatus, ToolResultContentType, TurnState, buildSubagentSessionUri, type IMarkdownResponsePart, type IToolCallCompletedState, type IToolCallResponsePart } from '../../common/state/sessionState.js';
 import { IProductService } from '../../../product/common/productService.js';
 import { AgentService } from '../../node/agentService.js';
 import { MockAgent } from './mockAgent.js';
@@ -248,6 +248,36 @@ suite('AgentService (node dispatcher)', () => {
 
 			assert.deepStrictEqual(service.stateManager.getSessionState(session.toString())?.config?.values, config);
 		});
+
+		test('seeds activeClient into the initial session state when provided', async () => {
+			service.registerProvider(copilotAgent);
+
+			const envelopes: IActionEnvelope[] = [];
+			disposables.add(service.onDidAction(env => envelopes.push(env)));
+
+			const activeClient: ISessionActiveClient = {
+				clientId: 'client-eager',
+				tools: [{ name: 't1', description: 'd', inputSchema: { type: 'object' } }],
+				customizations: [{ uri: 'file:///plugin-a', displayName: 'A' }],
+			};
+			const session = await service.createSession({ provider: 'copilot', activeClient });
+
+			assert.deepStrictEqual({
+				activeClient: service.stateManager.getSessionState(session.toString())?.activeClient,
+				dispatchedActiveClientChanged: envelopes.some(e => e.action.type === ActionType.SessionActiveClientChanged),
+			}, {
+				activeClient,
+				dispatchedActiveClientChanged: false,
+			});
+		});
+
+		test('omits activeClient from the initial session state when not provided', async () => {
+			service.registerProvider(copilotAgent);
+
+			const session = await service.createSession({ provider: 'copilot' });
+
+			assert.strictEqual(service.stateManager.getSessionState(session.toString())?.activeClient, undefined);
+		});
 	});
 
 	// ---- authenticate ---------------------------------------------------
@@ -381,7 +411,7 @@ suite('AgentService (node dispatcher)', () => {
 			copilotAgent.sessionMessages = [
 				{ type: 'message', session, role: 'user', messageId: 'msg-1', content: 'Review this code', toolRequests: [] },
 				{ type: 'message', session, role: 'assistant', messageId: 'msg-2', content: '', toolRequests: [{ toolCallId: 'tc-sub', name: 'task' }] },
-				{ type: 'tool_start', session, toolCallId: 'tc-sub', toolName: 'task', displayName: 'Task', invocationMessage: 'Delegating...', toolKind: 'subagent' as const, toolArguments: JSON.stringify({ description: 'Find related files', agentName: 'explore' }) },
+				{ type: 'tool_start', session, toolCallId: 'tc-sub', toolName: 'task', displayName: 'Task', invocationMessage: 'Delegating...', toolKind: 'subagent' as const, subagentDescription: 'Find related files', subagentAgentName: 'explore' },
 				{ type: 'subagent_started', session, toolCallId: 'tc-sub', agentName: 'explore', agentDisplayName: 'Explore', agentDescription: 'Explores the codebase' },
 				// Inner tool calls from the subagent (have parentToolCallId)
 				{ type: 'tool_start', session, toolCallId: 'tc-inner-1', toolName: 'bash', displayName: 'Bash', invocationMessage: 'Running ls...', parentToolCallId: 'tc-sub' },

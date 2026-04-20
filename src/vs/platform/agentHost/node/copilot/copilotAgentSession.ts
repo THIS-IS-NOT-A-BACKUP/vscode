@@ -23,7 +23,7 @@ import type { IFileEdit, IToolDefinition } from '../../common/state/protocol/sta
 import { SessionInputAnswerState, SessionInputAnswerValueKind, SessionInputQuestionKind, SessionInputResponseKind, ToolResultContentType, type IPendingMessage, type ISessionInputAnswer, type ISessionInputRequest, type IToolCallResult, type IToolResultContent } from '../../common/state/sessionState.js';
 import { CopilotSessionWrapper } from './copilotSessionWrapper.js';
 import type { ShellManager } from './copilotShellTools.js';
-import { getEditFilePath, getInvocationMessage, getPastTenseMessage, getPermissionDisplay, getShellLanguage, getToolDisplayName, getToolInputString, getToolKind, isEditTool, isHiddenTool, isShellTool, tryStringify, type ITypedPermissionRequest } from './copilotToolDisplay.js';
+import { getEditFilePath, getInvocationMessage, getPastTenseMessage, getPermissionDisplay, getShellLanguage, getSubagentMetadata, getToolDisplayName, getToolInputString, getToolKind, isEditTool, isHiddenTool, isShellTool, tryStringify, type ITypedPermissionRequest } from './copilotToolDisplay.js';
 import { FileEditTracker } from './fileEditTracker.js';
 import { mapSessionEvents } from './mapSessionEvents.js';
 import { buildPendingEditContentUri } from './pendingEditContentStore.js';
@@ -699,6 +699,7 @@ export class CopilotAgentSession extends Disposable {
 			const displayName = getToolDisplayName(e.data.toolName);
 			this._activeToolCalls.set(e.data.toolCallId, { toolName: e.data.toolName, displayName, parameters, content: [] });
 			const toolKind = getToolKind(e.data.toolName);
+			const subagentMeta = toolKind === 'subagent' ? getSubagentMetadata(parameters) : undefined;
 
 			this._onDidSessionProgress.fire({
 				session,
@@ -711,6 +712,8 @@ export class CopilotAgentSession extends Disposable {
 				toolKind,
 				language: toolKind === 'terminal' ? getShellLanguage(e.data.toolName) : undefined,
 				toolArguments: toolArgs,
+				subagentAgentName: subagentMeta?.agentName,
+				subagentDescription: subagentMeta?.description,
 				mcpServerName: e.data.mcpServerName,
 				mcpToolName: e.data.mcpToolName,
 				parentToolCallId: e.data.parentToolCallId,
