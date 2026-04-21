@@ -3,37 +3,41 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import './media/agentHostSessionConfigPicker.css';
-import * as dom from '../../../../base/browser/dom.js';
-import { renderIcon } from '../../../../base/browser/ui/iconLabel/iconLabels.js';
-import { ActionListItemKind, IActionListDelegate, IActionListItem } from '../../../../platform/actionWidget/browser/actionList.js';
-import { IActionWidgetService } from '../../../../platform/actionWidget/browser/actionWidget.js';
-import { BaseActionViewItem } from '../../../../base/browser/ui/actionbar/actionViewItems.js';
-import { Delayer } from '../../../../base/common/async.js';
-import { Codicon } from '../../../../base/common/codicons.js';
-import { MarkdownString } from '../../../../base/common/htmlContent.js';
-import { Disposable, DisposableMap, DisposableStore, IDisposable } from '../../../../base/common/lifecycle.js';
-import { autorun } from '../../../../base/common/observable.js';
-import Severity from '../../../../base/common/severity.js';
-import { ThemeIcon } from '../../../../base/common/themables.js';
-import { localize, localize2 } from '../../../../nls.js';
-import { IActionViewItemService } from '../../../../platform/actions/browser/actionViewItemService.js';
-import { Action2, MenuId, registerAction2 } from '../../../../platform/actions/common/actions.js';
-import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
-import { ContextKeyExpr } from '../../../../platform/contextkey/common/contextkey.js';
-import { IDialogService } from '../../../../platform/dialogs/common/dialogs.js';
-import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
-import { AgentHostSessionConfigBranchNameHintKey } from '../../../../platform/agentHost/common/agentService.js';
-import type { ISessionConfigPropertySchema, ISessionConfigValueItem } from '../../../../platform/agentHost/common/state/protocol/commands.js';
-import { ChatConfiguration } from '../../../../workbench/contrib/chat/common/constants.js';
-import { ChatContextKeyExprs } from '../../../../workbench/contrib/chat/common/actions/chatContextKeys.js';
-import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../../workbench/common/contributions.js';
-import { Menus } from '../../../browser/menus.js';
-import { ActiveSessionProviderIdContext } from '../../../common/contextkeys.js';
-import { ISessionsProvidersService } from '../../../services/sessions/browser/sessionsProvidersService.js';
-import { ISessionsManagementService } from '../../../services/sessions/common/sessionsManagement.js';
-import type { ISessionsProvider } from '../../../services/sessions/common/sessionsProvider.js';
-import { type IAgentHostSessionsProvider, isAgentHostProvider } from '../../../common/agentHostSessionsProvider.js';
+import '../media/agentHostSessionConfigPicker.css';
+import * as dom from '../../../../../base/browser/dom.js';
+import { renderIcon } from '../../../../../base/browser/ui/iconLabel/iconLabels.js';
+import { ActionListItemKind, IActionListDelegate, IActionListItem } from '../../../../../platform/actionWidget/browser/actionList.js';
+import { IActionWidgetService } from '../../../../../platform/actionWidget/browser/actionWidget.js';
+import { BaseActionViewItem } from '../../../../../base/browser/ui/actionbar/actionViewItems.js';
+import { Delayer } from '../../../../../base/common/async.js';
+import { Codicon } from '../../../../../base/common/codicons.js';
+import { MarkdownString } from '../../../../../base/common/htmlContent.js';
+import { Disposable, DisposableMap, DisposableStore, IDisposable } from '../../../../../base/common/lifecycle.js';
+import { autorun, observableValue } from '../../../../../base/common/observable.js';
+import Severity from '../../../../../base/common/severity.js';
+import { ThemeIcon } from '../../../../../base/common/themables.js';
+import { localize, localize2 } from '../../../../../nls.js';
+import { IActionViewItemService, type IActionViewItemFactory } from '../../../../../platform/actions/browser/actionViewItemService.js';
+import { Action2, MenuId, MenuItemAction, registerAction2 } from '../../../../../platform/actions/common/actions.js';
+import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
+import { ContextKeyExpr } from '../../../../../platform/contextkey/common/contextkey.js';
+import { IDialogService } from '../../../../../platform/dialogs/common/dialogs.js';
+import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
+import { AgentHostSessionConfigBranchNameHintKey } from '../../../../../platform/agentHost/common/agentService.js';
+import type { ISessionConfigPropertySchema, ISessionConfigValueItem } from '../../../../../platform/agentHost/common/state/protocol/commands.js';
+import { ChatConfiguration } from '../../../../../workbench/contrib/chat/common/constants.js';
+import { ChatContextKeyExprs } from '../../../../../workbench/contrib/chat/common/actions/chatContextKeys.js';
+import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../../../workbench/common/contributions.js';
+import { type IChatInputPickerOptions } from '../../../../../workbench/contrib/chat/browser/widget/input/chatInputPickerActionItem.js';
+import { Menus } from '../../../../browser/menus.js';
+import { ActiveSessionProviderIdContext } from '../../../../common/contextkeys.js';
+import { ISessionsProvidersService } from '../../../../services/sessions/browser/sessionsProvidersService.js';
+import { ISessionsManagementService } from '../../../../services/sessions/common/sessionsManagement.js';
+import type { ISessionsProvider } from '../../../../services/sessions/common/sessionsProvider.js';
+import { type IAgentHostSessionsProvider, isAgentHostProvider } from '../../../../common/agentHostSessionsProvider.js';
+import { PermissionPicker } from '../../../copilotChatSessions/browser/permissionPicker.js';
+import { AgentHostPermissionPickerActionItem } from './agentHostPermissionPickerActionItem.js';
+import { AgentHostPermissionPickerDelegate, AUTO_APPROVE_PROPERTY, isWellKnownAutoApproveSchema } from './agentHostPermissionPickerDelegate.js';
 
 const IsActiveSessionRemoteAgentHost = ContextKeyExpr.regex(ActiveSessionProviderIdContext.key, /^agenthost-/);
 const IsActiveSessionLocalAgentHost = ContextKeyExpr.equals(ActiveSessionProviderIdContext.key, 'local-agent-host');
@@ -120,12 +124,6 @@ function renderPickerTrigger(slot: HTMLElement, disabled: boolean, disposables: 
 
 	return trigger;
 }
-
-/**
- * Special-cased property name for auto-approve session config.
- * Used to apply confirmation dialogs and policy enforcement.
- */
-const AUTO_APPROVE_PROPERTY = 'autoApprove';
 
 // Track whether auto-approve warnings have been shown this VS Code session
 const shownAutoApproveWarnings = new Set<string /* enum value */>();
@@ -285,7 +283,15 @@ class AgentHostSessionConfigPicker extends Disposable {
 		}
 
 		for (const [property, schema] of Object.entries(resolvedConfig.schema.properties)) {
-			if (property === AgentHostSessionConfigBranchNameHintKey || property === AUTO_APPROVE_PROPERTY) {
+			if (property === AgentHostSessionConfigBranchNameHintKey) {
+				continue;
+			}
+			// When the autoApprove property uses the well-known schema, the
+			// workbench `PermissionPickerActionItem` (registered separately for
+			// `Menus.NewSessionControl`) handles it — skip it here to avoid
+			// double-rendering. Non-conforming schemas still fall through to
+			// the generic per-property picker below.
+			if (property === AUTO_APPROVE_PROPERTY && isWellKnownAutoApproveSchema(schema)) {
 				continue;
 			}
 			const value = resolvedConfig.values[property] ?? schema.default;
@@ -404,8 +410,11 @@ interface IConfigPickerWidget extends IDisposable {
 }
 
 class PickerActionViewItem extends BaseActionViewItem {
-	constructor(private readonly _picker: IConfigPickerWidget) {
+	constructor(private readonly _picker: IConfigPickerWidget, disposable?: IDisposable) {
 		super(undefined, { id: '', label: '', enabled: true, class: undefined, tooltip: '', run: () => { } });
+		if (disposable) {
+			this._register(disposable);
+		}
 	}
 
 	override render(container: HTMLElement): void {
@@ -423,24 +432,57 @@ class AgentHostSessionConfigPickerContribution extends Disposable implements IWo
 
 	constructor(
 		@IActionViewItemService actionViewItemService: IActionViewItemService,
-		@IInstantiationService instantiationService: IInstantiationService,
+		@IInstantiationService private readonly _instantiationService: IInstantiationService,
 	) {
 		super();
 		this._register(actionViewItemService.register(
 			Menus.NewSessionRepositoryConfig,
 			'sessions.agentHost.sessionConfigPicker',
-			() => new PickerActionViewItem(instantiationService.createInstance(AgentHostSessionConfigPicker)),
+			() => new PickerActionViewItem(this._instantiationService.createInstance(AgentHostSessionConfigPicker)),
 		));
 		this._register(actionViewItemService.register(
 			Menus.NewSessionControl,
 			NEW_SESSION_APPROVE_PICKER_ID,
-			() => new PickerActionViewItem(instantiationService.createInstance(AgentHostNewSessionApprovePicker)),
+			() => this._createNewSessionPermissionPicker(),
 		));
 		this._register(actionViewItemService.register(
 			MenuId.ChatInputSecondary,
 			RUNNING_SESSION_CONFIG_PICKER_ID,
-			() => new PickerActionViewItem(instantiationService.createInstance(AgentHostRunningSessionConfigPicker)),
+			this._createRunningSessionPermissionPickerFactory(),
 		));
+	}
+
+	/**
+	 * On the new-chat page (left of the toolbar), use the sessions
+	 * {@link PermissionPicker} so the styling matches the surrounding sessions
+	 * pickers (font size, padding, icon size).
+	 */
+	private _createNewSessionPermissionPicker(): PickerActionViewItem {
+		const delegate = this._instantiationService.createInstance(AgentHostPermissionPickerDelegate);
+		const picker = this._instantiationService.createInstance(PermissionPicker, delegate);
+		return new PickerActionViewItem(picker, delegate);
+	}
+
+	/**
+	 * Inside a running chat widget (`ChatInputSecondary`), use the workbench
+	 * {@link PermissionPickerActionItem} so it matches the rest of the
+	 * chat-input secondary toolbar (which is what the extension-host CLI
+	 * already uses).
+	 */
+	private _createRunningSessionPermissionPickerFactory(): IActionViewItemFactory {
+		return (action, _options, instantiationService) => {
+			if (!(action instanceof MenuItemAction)) {
+				return undefined;
+			}
+			const pickerOptions: IChatInputPickerOptions = {
+				hideChevrons: observableValue('hideChevrons', false),
+			};
+			return instantiationService.createInstance(
+				AgentHostPermissionPickerActionItem,
+				action,
+				pickerOptions,
+			);
+		};
 	}
 }
 
@@ -466,160 +508,6 @@ registerAction2(class extends Action2 {
 	override async run(): Promise<void> { }
 });
 
-/**
- * Renders the auto-approve picker in the new session welcome view (left side).
- * Only renders the autoApprove property from the session config.
- */
-class AgentHostNewSessionApprovePicker extends Disposable {
-	private readonly _renderDisposables = this._register(new DisposableStore());
-	private readonly _providerListeners = this._register(new DisposableMap<string>());
-	private _container: HTMLElement | undefined;
-
-	constructor(
-		@IActionWidgetService private readonly _actionWidgetService: IActionWidgetService,
-		@IConfigurationService private readonly _configurationService: IConfigurationService,
-		@IDialogService private readonly _dialogService: IDialogService,
-		@ISessionsManagementService private readonly _sessionsManagementService: ISessionsManagementService,
-		@ISessionsProvidersService private readonly _sessionsProvidersService: ISessionsProvidersService,
-	) {
-		super();
-
-		this._register(autorun(reader => {
-			const session = this._sessionsManagementService.activeSession.read(reader);
-			if (session) {
-				session.loading.read(reader);
-			}
-			this._render();
-		}));
-
-		this._register(this._sessionsProvidersService.onDidChangeProviders(e => {
-			for (const provider of e.removed) {
-				this._providerListeners.deleteAndDispose(provider.id);
-			}
-			this._watchProviders(e.added);
-			this._render();
-		}));
-		this._watchProviders(this._sessionsProvidersService.getProviders());
-	}
-
-	private _watchProviders(providers: readonly ISessionsProvider[]): void {
-		for (const provider of providers) {
-			if (!isAgentHostProvider(provider) || this._providerListeners.has(provider.id)) {
-				continue;
-			}
-			this._providerListeners.set(provider.id, provider.onDidChangeSessionConfig(() => this._render()));
-		}
-	}
-
-	render(container: HTMLElement): void {
-		this._container = dom.append(container, dom.$('.sessions-chat-agent-host-config'));
-		this._render();
-	}
-
-	private _render(): void {
-		if (!this._container) {
-			return;
-		}
-
-		this._renderDisposables.clear();
-		dom.clearNode(this._container);
-
-		const session = this._sessionsManagementService.activeSession.get();
-		const rawProvider = session ? this._sessionsProvidersService.getProvider(session.providerId) : undefined;
-		const provider = rawProvider && isAgentHostProvider(rawProvider) ? rawProvider : undefined;
-		const config = session && provider?.getSessionConfig(session.sessionId);
-		// `getSessionConfig` may return undefined for sessions whose config
-		// hasn't been seeded yet (e.g. opened from list, no in-window create).
-		// The provider lazily acquires a session-state subscription and will fire
-		// `onDidChangeSessionConfig` once the snapshot arrives, re-rendering us.
-		if (!session || !provider || !config) {
-			return;
-		}
-
-		const schema = config.schema.properties[AUTO_APPROVE_PROPERTY];
-		if (!schema) {
-			return;
-		}
-
-		const value = config.values[AUTO_APPROVE_PROPERTY] ?? schema.default;
-		const slot = dom.append(this._container, dom.$('.sessions-chat-picker-slot'));
-		const trigger = renderPickerTrigger(slot, false, this._renderDisposables, () => this._showPicker(provider, session.sessionId, schema, trigger));
-		this._renderTrigger(trigger, schema, value);
-	}
-
-	private _renderTrigger(trigger: HTMLElement, schema: ISessionConfigPropertySchema, value: string | undefined): void {
-		dom.clearNode(trigger);
-		const icon = getConfigIcon(AUTO_APPROVE_PROPERTY, value);
-		if (icon) {
-			dom.append(trigger, renderIcon(icon));
-		}
-		const labelSpan = dom.append(trigger, dom.$('span.sessions-chat-dropdown-label'));
-		const label = this._getLabel(schema, value);
-		labelSpan.textContent = label;
-		trigger.setAttribute('aria-label', localize('agentHostNewSessionApprove.triggerAria', "{0}: {1}", schema.title, label));
-		dom.append(trigger, renderIcon(Codicon.chevronDown));
-		applyAutoApproveTriggerStyles(trigger, AUTO_APPROVE_PROPERTY, value);
-	}
-
-	private async _showPicker(provider: IAgentHostSessionsProvider, sessionId: string, schema: ISessionConfigPropertySchema, trigger: HTMLElement): Promise<void> {
-		if (this._actionWidgetService.isVisible) {
-			return;
-		}
-
-		const rawItems = (schema.enum ?? []).map((value, index) => ({
-			value,
-			label: schema.enumLabels?.[index] ?? value,
-			description: schema.enumDescriptions?.[index],
-		}));
-
-		const { items, policyRestricted } = applyAutoApproveFiltering(rawItems, AUTO_APPROVE_PROPERTY, this._configurationService);
-
-		if (items.length === 0) {
-			return;
-		}
-
-		const currentValue = provider.getSessionConfig(sessionId)?.values[AUTO_APPROVE_PROPERTY];
-		const actionItems = toActionItems(AUTO_APPROVE_PROPERTY, items, currentValue, policyRestricted);
-
-		const delegate: IActionListDelegate<IConfigPickerItem> = {
-			onSelect: async item => {
-				this._actionWidgetService.hide();
-
-				if (item.value === 'autoApprove' || item.value === 'autopilot') {
-					const confirmed = await confirmAutoApproveLevel(item.value, this._dialogService);
-					if (!confirmed) {
-						return;
-					}
-				}
-
-				provider.setSessionConfigValue(sessionId, AUTO_APPROVE_PROPERTY, item.value).catch(() => { /* best-effort */ });
-			},
-			onHide: () => trigger.focus(),
-		};
-
-		this._actionWidgetService.show<IConfigPickerItem>(
-			`agentHostNewSessionConfig.${AUTO_APPROVE_PROPERTY}`,
-			false,
-			actionItems,
-			delegate,
-			trigger,
-			undefined,
-			[],
-			{
-				getAriaLabel: item => item.label ?? '',
-				getWidgetAriaLabel: () => localize('agentHostNewSessionApprove.ariaLabel', "{0} Picker", schema.title),
-			},
-		);
-	}
-
-	private _getLabel(schema: ISessionConfigPropertySchema, value: string | undefined): string {
-		if (typeof value === 'string') {
-			const index = schema.enum?.indexOf(value) ?? -1;
-			return index >= 0 ? schema.enumLabels?.[index] ?? value : value;
-		}
-		return schema.title;
-	}
-}
 
 // ---- Running session config picker (ChatInputSecondary) ----
 
@@ -643,160 +531,5 @@ registerAction2(class extends Action2 {
 	override async run(): Promise<void> { }
 });
 
-/**
- * Renders a single picker trigger in the titlebar for the auto-approve session
- * config property during a running agent host session.
- */
-class AgentHostRunningSessionConfigPicker extends Disposable {
-	private readonly _renderDisposables = this._register(new DisposableStore());
-	private readonly _providerListeners = this._register(new DisposableMap<string>());
-	private _container: HTMLElement | undefined;
-
-	constructor(
-		@IActionWidgetService private readonly _actionWidgetService: IActionWidgetService,
-		@IConfigurationService private readonly _configurationService: IConfigurationService,
-		@IDialogService private readonly _dialogService: IDialogService,
-		@ISessionsManagementService private readonly _sessionsManagementService: ISessionsManagementService,
-		@ISessionsProvidersService private readonly _sessionsProvidersService: ISessionsProvidersService,
-	) {
-		super();
-
-		this._register(autorun(reader => {
-			const session = this._sessionsManagementService.activeSession.read(reader);
-			if (session) {
-				session.loading.read(reader);
-			}
-			this._render();
-		}));
-
-		this._register(this._sessionsProvidersService.onDidChangeProviders(e => {
-			for (const provider of e.removed) {
-				this._providerListeners.deleteAndDispose(provider.id);
-			}
-			this._watchProviders(e.added);
-			this._render();
-		}));
-		this._watchProviders(this._sessionsProvidersService.getProviders());
-	}
-
-	private _watchProviders(providers: readonly ISessionsProvider[]): void {
-		for (const provider of providers) {
-			if (!isAgentHostProvider(provider) || this._providerListeners.has(provider.id)) {
-				continue;
-			}
-			this._providerListeners.set(provider.id, provider.onDidChangeSessionConfig(() => this._render()));
-		}
-	}
-
-	render(container: HTMLElement): void {
-		this._container = dom.append(container, dom.$('.sessions-chat-agent-host-config'));
-		this._render();
-	}
-
-	private _render(): void {
-		if (!this._container) {
-			return;
-		}
-
-		this._renderDisposables.clear();
-		dom.clearNode(this._container);
-
-		const session = this._sessionsManagementService.activeSession.get();
-		const rawProvider = session ? this._sessionsProvidersService.getProvider(session.providerId) : undefined;
-		const provider = rawProvider && isAgentHostProvider(rawProvider) ? rawProvider : undefined;
-		const config = session && provider?.getSessionConfig(session.sessionId);
-		// See note in `AgentHostNewSessionApprovePicker._render`: `config` may be
-		// undefined until the lazy session-state subscription hydrates and the
-		// provider fires `onDidChangeSessionConfig`.
-		if (!session || !provider || !config) {
-			return;
-		}
-
-		// Only render session-mutable properties (i.e., autoApprove)
-		for (const [property, schema] of Object.entries(config.schema.properties)) {
-			if (!schema.sessionMutable) {
-				continue;
-			}
-			const value = config.values[property] ?? schema.default;
-			const slot = dom.append(this._container, dom.$('.sessions-chat-picker-slot'));
-			const trigger = renderPickerTrigger(slot, false, this._renderDisposables, () => this._showPicker(provider, session.sessionId, property, schema, trigger));
-			this._renderTrigger(trigger, schema, value, property);
-		}
-	}
-
-	private _renderTrigger(trigger: HTMLElement, schema: ISessionConfigPropertySchema, value: string | undefined, property: string): void {
-		dom.clearNode(trigger);
-		const icon = getConfigIcon(property, value);
-		if (icon) {
-			dom.append(trigger, renderIcon(icon));
-		}
-		const labelSpan = dom.append(trigger, dom.$('span.sessions-chat-dropdown-label'));
-		const label = this._getLabel(schema, value);
-		labelSpan.textContent = label;
-		trigger.setAttribute('aria-label', localize('agentHostRunningSessionConfig.triggerAria', "{0}: {1}", schema.title, label));
-		dom.append(trigger, renderIcon(Codicon.chevronDown));
-		applyAutoApproveTriggerStyles(trigger, property, value);
-	}
-
-	private async _showPicker(provider: IAgentHostSessionsProvider, sessionId: string, property: string, schema: ISessionConfigPropertySchema, trigger: HTMLElement): Promise<void> {
-		if (this._actionWidgetService.isVisible) {
-			return;
-		}
-
-		const rawItems = (schema.enum ?? []).map((value, index) => ({
-			value,
-			label: schema.enumLabels?.[index] ?? value,
-			description: schema.enumDescriptions?.[index],
-		}));
-
-		const { items, policyRestricted } = applyAutoApproveFiltering(rawItems, property, this._configurationService);
-		const isAutoApproveProperty = property === AUTO_APPROVE_PROPERTY;
-
-		if (items.length === 0) {
-			return;
-		}
-
-		const currentValue = provider.getSessionConfig(sessionId)?.values[property];
-		const actionItems = toActionItems(property, items, currentValue, policyRestricted);
-
-		const delegate: IActionListDelegate<IConfigPickerItem> = {
-			onSelect: async item => {
-				this._actionWidgetService.hide();
-
-				if (isAutoApproveProperty && (item.value === 'autoApprove' || item.value === 'autopilot')) {
-					const confirmed = await confirmAutoApproveLevel(item.value, this._dialogService);
-					if (!confirmed) {
-						return;
-					}
-				}
-
-				provider.setSessionConfigValue(sessionId, property, item.value).catch(() => { /* best-effort */ });
-			},
-			onHide: () => trigger.focus(),
-		};
-
-		this._actionWidgetService.show<IConfigPickerItem>(
-			`agentHostRunningSessionConfig.${property}`,
-			false,
-			actionItems,
-			delegate,
-			trigger,
-			undefined,
-			[],
-			{
-				getAriaLabel: item => item.label ?? '',
-				getWidgetAriaLabel: () => localize('agentHostRunningSessionConfig.ariaLabel', "{0} Picker", schema.title),
-			},
-		);
-	}
-
-	private _getLabel(schema: ISessionConfigPropertySchema, value: string | undefined): string {
-		if (typeof value === 'string') {
-			const index = schema.enum?.indexOf(value) ?? -1;
-			return index >= 0 ? schema.enumLabels?.[index] ?? value : value;
-		}
-		return schema.title;
-	}
-}
 
 registerWorkbenchContribution2(AgentHostSessionConfigPickerContribution.ID, AgentHostSessionConfigPickerContribution, WorkbenchPhase.AfterRestored);
