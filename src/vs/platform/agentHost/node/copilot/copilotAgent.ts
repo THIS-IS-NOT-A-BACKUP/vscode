@@ -31,6 +31,7 @@ import { AHP_AUTH_REQUIRED, ProtocolError } from '../../common/state/sessionProt
 import { CustomizationStatus, ICustomizationRef, SessionInputResponseKind, type IPendingMessage, type ISessionInputAnswer, type IToolCallResult, type PolicyState } from '../../common/state/sessionState.js';
 import { IAgentHostGitService } from '../agentHostGitService.js';
 import { IAgentHostTerminalManager } from '../agentHostTerminalManager.js';
+import { SessionPermissionManager } from '../sessionPermissions.js';
 import { CopilotAgentSession, SessionWrapperFactory, type IActiveClientSnapshot } from './copilotAgentSession.js';
 import { ICopilotSessionContext, projectFromCopilotContext } from './copilotGitProject.js';
 import { parsedPluginsEqual, toSdkCustomAgents, toSdkHooks, toSdkMcpServers, toSdkSkillDirectories } from './copilotPluginConverters.js';
@@ -558,7 +559,11 @@ export class CopilotAgent extends Disposable implements IAgent {
 			? params.config.autoApprove
 			: 'default';
 
-		const values: Record<string, string> = { isolation: isolationValue, autoApprove: autoApproveValue };
+		const values: Record<string, unknown> = {
+			isolation: isolationValue,
+			autoApprove: autoApproveValue,
+			[SessionPermissionManager.PERMISSIONS_CONFIG_KEY]: params.config?.[SessionPermissionManager.PERMISSIONS_CONFIG_KEY] || { allow: [], deny: [] },
+		};
 		if (gitInfo) {
 			const branchForMode = isolationValue === 'worktree' ? gitInfo.defaultBranch : gitInfo.currentBranch;
 			values.branch = typeof params.config?.branch === 'string' && isolationValue === 'worktree'
@@ -593,6 +598,31 @@ export class CopilotAgent extends Disposable implements IAgent {
 					localize('agentHost.sessionConfig.autoApprove.autopilotDescription', "Autonomously iterates from start to finish"),
 				],
 				default: 'default',
+				sessionMutable: true,
+			},
+			[SessionPermissionManager.PERMISSIONS_CONFIG_KEY]: {
+				type: 'object',
+				title: localize('agentHost.sessionConfig.permissions', "Permissions"),
+				description: localize('agentHost.sessionConfig.permissionsDescription', "Per-tool session permissions. Updated automatically when approving a tool \"in this Session\"."),
+				properties: {
+					allow: {
+						type: 'array',
+						title: localize('agentHost.sessionConfig.permissions.allow', "Allowed tools"),
+						items: {
+							type: 'string',
+							title: localize('agentHost.sessionConfig.permissions.toolName', "Tool name"),
+						},
+					},
+					deny: {
+						type: 'array',
+						title: localize('agentHost.sessionConfig.permissions.deny', "Denied tools"),
+						items: {
+							type: 'string',
+							title: localize('agentHost.sessionConfig.permissions.toolName', "Tool name"),
+						},
+					},
+				},
+				default: { allow: [], deny: [] },
 				sessionMutable: true,
 			},
 		};
@@ -972,11 +1002,16 @@ export class CopilotAgent extends Disposable implements IAgent {
 		}
 
 		const worktreesRoot = getCopilotWorktreesRoot(repositoryRoot);
-		const branchNameHint = config.config[AgentHostSessionConfigBranchNameHintKey];
+		const branchNameHintRaw = config.config[AgentHostSessionConfigBranchNameHintKey];
+		const branchNameHint = typeof branchNameHintRaw === 'string' ? branchNameHintRaw : undefined;
 		const branchName = getCopilotWorktreeBranchName(sessionId, branchNameHint);
 		const worktree = URI.joinPath(worktreesRoot, getCopilotWorktreeName(branchName));
 		await fs.mkdir(worktreesRoot.fsPath, { recursive: true });
-		await this._gitService.addWorktree(repositoryRoot, worktree, branchName, config.config.branch);
+		const baseBranch = typeof config.config.branch === 'string' ? config.config.branch : undefined;
+		// `addWorktree`'s signature requires a startPoint, but historically the
+		// runtime accepted undefined when `branch` was not set in config. Preserve
+		// that behavior by passing through whatever value (or undefined) was set.
+		await this._gitService.addWorktree(repositoryRoot, worktree, branchName, baseBranch as string);
 		this._createdWorktrees.set(sessionId, { repositoryRoot, worktree });
 		// Queue the worktree announcement so the first turn (live) and any
 		// subsequent restore (history) both surface the message in the chat.
