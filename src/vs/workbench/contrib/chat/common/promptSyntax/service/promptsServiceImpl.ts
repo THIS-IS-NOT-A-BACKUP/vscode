@@ -791,73 +791,24 @@ export class PromptsService extends Disposable implements IPromptsService {
 			try {
 				const ast = await this.parseNew(uri, token);
 
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
-				let metadata: any | undefined;
-				if (ast.header) {
-					const advanced = ast.header.getAttribute(PromptHeaderAttributes.advancedOptions);
-					if (advanced && advanced.value.type === 'map') {
-						metadata = {};
-						for (const [key, value] of Object.entries(advanced.value)) {
-							if (value.type === 'scalar') {
-								metadata[key] = value;
-							}
-						}
-					}
-				}
-				const toolReferences: IVariableReference[] = [];
-				if (ast.body) {
-					const bodyOffset = ast.body.offset;
-					const bodyVarRefs = ast.body.variableReferences;
-					for (let i = bodyVarRefs.length - 1; i >= 0; i--) { // in reverse order
-						const { name, offset, fullLength } = bodyVarRefs[i];
-						const range = new OffsetRange(offset - bodyOffset, offset - bodyOffset + fullLength);
-						toolReferences.push({ name, range });
-					}
-				}
-
-				const agentInstructions = {
-					content: ast.body?.getContent() ?? '',
-					toolReferences,
-					metadata,
-				} satisfies IAgentInstructions;
-
-				const name = ast.header?.name ?? promptPath.name ?? getCleanPromptName(uri);
-				const description = ast.header?.description ?? promptPath.description;
-				const target = getTarget(PromptsType.agent, ast.header ?? uri);
-
-				const source: IAgentSource = IAgentSource.fromPromptPath(promptPath);
-				const when = isExtensionPromptPath(promptPath) && promptPath.when
-					? ContextKeyExpr.deserialize(promptPath.when) ?? undefined
-					: undefined;
-				if (!ast.header) {
-					const agent: ICustomAgent = { uri, name, agentInstructions, source, target, visibility: { userInvocable: true, agentInvocable: true }, sessionTypes: promptPath.sessionTypes, ...(when !== undefined ? { when } : undefined) };
-					return { status: 'loaded', promptPath: this.withPromptPathMetadata(promptPath, name, description), agent };
-				}
-				const visibility = {
-					userInvocable: ast.header.userInvocable !== false,
-					agentInvocable: ast.header.infer !== undefined ? ast.header.infer === true : ast.header.disableModelInvocation !== true,
-				} satisfies ICustomAgentVisibility;
-
-				let model = ast.header.model;
-				if (target === Target.Claude && model) {
-					model = mapClaudeModels(model);
-				}
-				let { tools, handOffs, argumentHint, agents } = ast.header;
-				if (target === Target.Claude && tools) {
-					tools = mapClaudeTools(tools);
-				}
-
 				// Parse hooks from the frontmatter if present
 				let hooks: ChatRequestHooks | undefined;
-				const hooksRaw = ast.header.hooksRaw;
+				const hooksRaw = ast.header?.hooksRaw;
 				if (useChatHooks && isWorkspaceTrusted && hooksRaw) {
 					const hookWorkspaceFolder = this.workspaceService.getWorkspaceFolder(uri) ?? defaultFolder;
 					const workspaceRootUri = hookWorkspaceFolder?.uri;
+					const target = getTarget(PromptsType.agent, ast.header ?? promptPath.uri);
 					hooks = parseSubagentHooksFromYaml(hooksRaw, workspaceRootUri, userHome, target);
 				}
-
-				const agent: ICustomAgent = { uri, name, description, model, tools, handOffs, argumentHint, target, visibility, agents, hooks, agentInstructions, source, sessionTypes: promptPath.sessionTypes, ...(when !== undefined ? { when } : undefined) };
-				return { status: 'loaded', promptPath: this.withPromptPathMetadata(promptPath, name, description), agent };
+				const extra = {
+					sessionTypes: promptPath.sessionTypes,
+					hooks,
+					name: promptPath.name,
+					description: promptPath.description,
+					source: IAgentSource.fromPromptPath(promptPath)
+				};
+				const agent = CustomAgent.fromParsedPromptFile(ast, extra);
+				return { status: 'loaded', promptPath: this.withPromptPathMetadata(promptPath, agent.name, agent.description), agent };
 			} catch (e) {
 				const error = e instanceof Error ? e : new Error(String(e));
 				if (error instanceof FileOperationError && error.fileOperationResult === FileOperationResult.FILE_NOT_FOUND) {
@@ -1788,13 +1739,70 @@ class ModelChangeTracker extends Disposable {
 	}
 }
 
+export namespace CustomAgent {
+	export function fromParsedPromptFile(ast: ParsedPromptFile, extra: { name?: string; description?: string; when?: string; source: IAgentSource; hooks?: ChatRequestHooks; sessionTypes: readonly string[] | undefined }): ICustomAgent {
+		const uri = ast.uri;
+		const { hooks, sessionTypes } = extra;
+
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		let metadata: any | undefined;
+		if (ast.header) {
+			const advanced = ast.header.getAttribute(PromptHeaderAttributes.advancedOptions);
+			if (advanced && advanced.value.type === 'map') {
+				metadata = {};
+				for (const [key, value] of Object.entries(advanced.value)) {
+					if (value.type === 'scalar') {
+						metadata[key] = value;
+					}
+				}
+			}
+		}
+		const toolReferences: IVariableReference[] = [];
+		if (ast.body) {
+			const bodyOffset = ast.body.offset;
+			const bodyVarRefs = ast.body.variableReferences;
+			for (let i = bodyVarRefs.length - 1; i >= 0; i--) { // in reverse order
+				const { name, offset, fullLength } = bodyVarRefs[i];
+				const range = new OffsetRange(offset - bodyOffset, offset - bodyOffset + fullLength);
+				toolReferences.push({ name, range });
+			}
+		}
+
+		const agentInstructions = { content: ast.body?.getContent() ?? '', toolReferences, metadata } satisfies IAgentInstructions;
+
+		const name = ast.header?.name ?? extra.name ?? getCleanPromptName(uri);
+		const description = ast.header?.description ?? extra.description;
+		const target = getTarget(PromptsType.agent, ast.header ?? uri);
+
+		const when = extra.when ? ContextKeyExpr.deserialize(extra.when) ?? undefined : undefined;
+		const source = extra.source;
+		if (!ast.header) {
+			return { uri, name, agentInstructions, source, target, visibility: { userInvocable: true, agentInvocable: true }, sessionTypes, hooks, when };
+		}
+		const visibility = {
+			userInvocable: ast.header.userInvocable !== false,
+			agentInvocable: ast.header.infer !== undefined ? ast.header.infer === true : ast.header.disableModelInvocation !== true,
+		} satisfies ICustomAgentVisibility;
+
+		let model = ast.header.model;
+		if (target === Target.Claude && model) {
+			model = mapClaudeModels(model);
+		}
+		let { tools, handOffs, argumentHint, agents } = ast.header;
+		if (target === Target.Claude && tools) {
+			tools = mapClaudeTools(tools);
+		}
+		return { uri, name, description, model, tools, handOffs, argumentHint, target, visibility, agents, agentInstructions, source, sessionTypes, hooks, when };
+
+	}
+}
+
 namespace IAgentSource {
 	export function fromPromptPath(promptPath: IPromptPath): IAgentSource {
 		if (promptPath.storage === PromptsStorage.extension) {
 			return {
 				storage: PromptsStorage.extension,
-				extensionId: promptPath.extension.identifier,
-				type: promptPath.source
+				extensionId: promptPath.extension.identifier
 			};
 		} else if (promptPath.storage === PromptsStorage.plugin) {
 			return {

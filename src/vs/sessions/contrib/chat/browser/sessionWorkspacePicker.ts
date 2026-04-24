@@ -8,19 +8,19 @@ import * as touch from '../../../../base/browser/touch.js';
 import { IAction, SubmenuAction, toAction } from '../../../../base/common/actions.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
-import { MarkdownString } from '../../../../base/common/htmlContent.js';
 import { Disposable, DisposableStore, MutableDisposable } from '../../../../base/common/lifecycle.js';
 import { URI, UriComponents } from '../../../../base/common/uri.js';
 import { basename } from '../../../../base/common/resources.js';
-import { isNative } from '../../../../base/common/platform.js';
 import { localize } from '../../../../nls.js';
 import { IActionWidgetService } from '../../../../platform/actionWidget/browser/actionWidget.js';
 import { ActionListItemKind, IActionListDelegate, IActionListItem } from '../../../../platform/actionWidget/browser/actionList.js';
-import { IRemoteAgentHostService, RemoteAgentHostConnectionStatus, RemoteAgentHostsEnabledSettingId } from '../../../../platform/agentHost/common/remoteAgentHostService.js';
+import { IMenuService, MenuItemAction } from '../../../../platform/actions/common/actions.js';
+import { IRemoteAgentHostService, RemoteAgentHostConnectionStatus } from '../../../../platform/agentHost/common/remoteAgentHostService.js';
 import { TUNNEL_ADDRESS_PREFIX } from '../../../../platform/agentHost/common/tunnelAgentHost.js';
 import { IClipboardService } from '../../../../platform/clipboard/common/clipboardService.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
+import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
 import { IPreferencesService } from '../../../../workbench/services/preferences/common/preferences.js';
 import { IOutputService } from '../../../../workbench/services/output/common/output.js';
 import { IQuickInputService, IQuickPickItem } from '../../../../platform/quickinput/common/quickInput.js';
@@ -35,6 +35,7 @@ import { ISessionsManagementService } from '../../../services/sessions/common/se
 import { IAgentHostSessionsProvider, isAgentHostProvider } from '../../../common/agentHostSessionsProvider.js';
 import { COPILOT_PROVIDER_ID } from '../../copilotChatSessions/browser/copilotChatSessionsProvider.js';
 import { IWorkspacesService, isRecentFolder } from '../../../../platform/workspaces/common/workspaces.js';
+import { Menus } from '../../../browser/menus.js';
 
 const LEGACY_STORAGE_KEY_RECENT_PROJECTS = 'sessions.recentlyPickedProjects';
 const STORAGE_KEY_RECENT_WORKSPACES = 'sessions.recentlyPickedWorkspaces';
@@ -66,8 +67,6 @@ export interface IWorkspacePickerItem {
 	readonly selection?: IWorkspaceSelection;
 	readonly browseActionIndex?: number;
 	readonly checked?: boolean;
-	/** Remote provider reference for gear menu actions. */
-	readonly remoteProvider?: IAgentHostSessionsProvider;
 	/** Command to execute when this item is selected. */
 	readonly commandId?: string;
 }
@@ -109,9 +108,11 @@ export class WorkspacePicker extends Disposable {
 		@IClipboardService private readonly clipboardService: IClipboardService,
 		@IPreferencesService private readonly preferencesService: IPreferencesService,
 		@IOutputService private readonly outputService: IOutputService,
-		@IConfigurationService private readonly configurationService: IConfigurationService,
+		@IConfigurationService _configurationService: IConfigurationService,
 		@ICommandService private readonly commandService: ICommandService,
 		@IWorkspacesService private readonly workspacesService: IWorkspacesService,
+		@IMenuService private readonly menuService: IMenuService,
+		@IContextKeyService private readonly contextKeyService: IContextKeyService,
 	) {
 		super();
 
@@ -209,14 +210,7 @@ export class WorkspacePicker extends Disposable {
 					// Workspace belongs to an unavailable remote — ignore selection
 					return;
 				}
-				if (item.remoteProvider && item.browseActionIndex === undefined) {
-					if (!item.remoteProvider.remoteAddress?.startsWith(TUNNEL_ADDRESS_PREFIX)) {
-						// Disconnected SSH host — show options menu after widget hides.
-						// (Disconnected tunnels are rendered as disabled with a
-						// refresh toolbar action, so onSelect doesn't fire for them.)
-						this._showRemoteHostOptionsDelayed(item.remoteProvider);
-					}
-				} else if (item.browseActionIndex !== undefined) {
+				if (item.browseActionIndex !== undefined) {
 					this._executeBrowseAction(item.browseActionIndex);
 				} else if (item.selection) {
 					this._selectProject(item.selection);
@@ -229,8 +223,8 @@ export class WorkspacePicker extends Disposable {
 		};
 
 		const listOptions = showFilter
-			? { showFilter: true, filterPlaceholder: localize('workspacePicker.filter', "Search Workspaces..."), reserveSubmenuSpace: false, inlineDescription: true, showGroupTitleOnFirstItem: true, fixedWidth: 600 }
-			: { reserveSubmenuSpace: false, inlineDescription: true, showGroupTitleOnFirstItem: true, fixedWidth: 600 };
+			? { showFilter: true, filterPlaceholder: localize('workspacePicker.filter', "Search Workspaces..."), reserveSubmenuSpace: false, inlineDescription: true, showGroupTitleOnFirstItem: true }
+			: { reserveSubmenuSpace: false, inlineDescription: true, showGroupTitleOnFirstItem: true };
 		triggerElement.setAttribute('aria-expanded', 'true');
 
 		this.actionWidgetService.show<IWorkspacePickerItem>(
@@ -332,12 +326,9 @@ export class WorkspacePicker extends Disposable {
 	/**
 	 * Builds the picker items list from recent workspaces.
 	 *
-	 * Ordering:
-	 * 1. Own recents (from sessions picker storage) come first, followed by
-	 *    VS Code recent folders — both retain their original storage order.
-	 * 2. Items are grouped by provider/group title. Groups are sorted by
-	 *    first-appearance index so the first group encountered stays on top.
-	 * 3. Within each group the original insertion order is preserved (stable sort).
+	 * Items are shown in a flat recency-sorted list (most recently used first)
+	 * without source grouping. Own recents come first, followed by VS Code
+	 * recent folders.
 	 */
 	protected _buildItems(): IActionListItem<IWorkspacePickerItem>[] {
 		const items: IActionListItem<IWorkspacePickerItem>[] = [];
@@ -352,52 +343,20 @@ export class WorkspacePicker extends Disposable {
 		const ownRecentCount = ownRecentWorkspaces.length;
 		const recentWorkspaces = [...ownRecentWorkspaces, ...vsCodeRecents];
 
-		// Build flat list of workspace entries with their group info
-		const workspaceEntries: { workspace: ISessionWorkspace; providerId: string; isOwnRecent: boolean; groupTitle: string; isDisconnected: boolean }[] = [];
-		const providersWithWorkspaces = allProviders.filter(p => recentWorkspaces.some(w => w.providerId === p.id));
-		for (const provider of providersWithWorkspaces) {
-			const connectionStatus = isAgentHostProvider(provider) ? provider.connectionStatus?.get() : undefined;
+		// Build flat list in recency order (no source grouping)
+		for (let i = 0; i < recentWorkspaces.length; i++) {
+			const { workspace, providerId } = recentWorkspaces[i];
+			const isOwnRecent = i < ownRecentCount;
+			const provider = allProviders.find(p => p.id === providerId);
+			const connectionStatus = provider && isAgentHostProvider(provider) ? provider.connectionStatus?.get() : undefined;
 			const isDisconnected = connectionStatus === RemoteAgentHostConnectionStatus.Disconnected;
-			const isConnecting = connectionStatus === RemoteAgentHostConnectionStatus.Connecting;
-			const providerWorkspaces = recentWorkspaces
-				.map((w, idx) => ({ ...w, isOwnRecent: idx < ownRecentCount }))
-				.filter(w => w.providerId === provider.id);
-			for (const { workspace, providerId, isOwnRecent } of providerWorkspaces) {
-				const groupName = workspace.group ?? provider.label;
-				const groupTitle = isDisconnected
-					? localize('workspacePicker.groupOffline', "{0} (Offline)", groupName)
-					: isConnecting
-						? localize('workspacePicker.groupConnecting', "{0} (Connecting)", groupName)
-						: groupName;
-				workspaceEntries.push({ workspace, providerId, isOwnRecent, groupTitle, isDisconnected });
-			}
-		}
-
-		// Group entries by groupTitle, preserving the original order within each group
-		const groupOrder = new Map<string, number>();
-		workspaceEntries.forEach((entry, index) => {
-			if (!groupOrder.has(entry.groupTitle)) {
-				groupOrder.set(entry.groupTitle, index);
-			}
-		});
-		workspaceEntries.sort((a, b) => {
-			return (groupOrder.get(a.groupTitle) ?? 0) - (groupOrder.get(b.groupTitle) ?? 0);
-		});
-
-		// Add items with separators between groups
-		let lastGroupTitle: string | undefined;
-		for (const { workspace, providerId, isOwnRecent, groupTitle, isDisconnected } of workspaceEntries) {
-			if (lastGroupTitle !== undefined && lastGroupTitle !== groupTitle) {
-				items.push({ kind: ActionListItemKind.Separator, label: '' });
-			}
-			lastGroupTitle = groupTitle;
 			const selection: IWorkspaceSelection = { providerId, workspace };
 			const selected = this._isSelectedWorkspace(selection);
 			items.push({
 				kind: ActionListItemKind.Action,
 				label: workspace.label,
 				description: workspace.description,
-				group: { title: groupTitle, icon: workspace.icon },
+				group: { title: '', icon: workspace.icon },
 				disabled: isDisconnected,
 				item: { selection, checked: selected || undefined },
 				onRemove: isOwnRecent ? () => this._removeRecentWorkspace(selection) : () => this._removeVSCodeRecentWorkspace(selection),
@@ -412,159 +371,154 @@ export class WorkspacePicker extends Disposable {
 		if (items.length > 0 && (allBrowseActions.length > 0 || remoteProviders.length > 0)) {
 			items.push({ kind: ActionListItemKind.Separator, label: '' });
 		}
-		if (allProviders.length > 1 && (allBrowseActions.length + remoteProviders.length) > 1) {
-			// Show a single "Select..." entry with provider-grouped submenu actions
-			// that also includes remote host entries
-			const providerMap = new Map<string, { provider: typeof allProviders[0]; actions: { action: ISessionWorkspaceBrowseAction; index: number }[] }>();
-			allBrowseActions.forEach((action, i) => {
-				let entry = providerMap.get(action.providerId);
-				if (!entry) {
-					const provider = allProviders.find(p => p.id === action.providerId);
-					if (!provider) { return; }
-					entry = { provider, actions: [] };
-					providerMap.set(action.providerId, entry);
-				}
-				entry.actions.push({ action, index: i });
-			});
-			const remoteProviderIds = new Map(remoteProviders.map(p => [p.id, p]));
-			const submenuActions = [...providerMap.values()].map(({ provider, actions }) => {
-				const remoteProvider = remoteProviderIds.get(provider.id);
-				const remoteStatus = remoteProvider?.connectionStatus?.get();
-				const actionItems = actions.map(({ action, index }, ci) => toAction({
-					id: `workspacePicker.browse.${index}`,
-					label: localize(`workspacePicker.browseAction`, "{0}...", action.label),
-					tooltip: ci === 0 ? provider.label : '',
-					enabled: remoteStatus !== RemoteAgentHostConnectionStatus.Disconnected && remoteStatus !== RemoteAgentHostConnectionStatus.Connecting,
-					run: () => this._executeBrowseAction(index),
-				}));
 
-				return new SubmenuAction(
-					`workspacePicker.browse.${provider.id}`,
-					'',
-					actionItems,
-				);
-			});
+		// Group browse actions by their `group` property so that actions
+		// sharing the same group appear as a single entry with a submenu.
+		// Actions without a group are shown individually.
+		const browseByGroup = new Map<string, { label: string; icon: ThemeIcon; actions: { action: ISessionWorkspaceBrowseAction; index: number }[] }>();
+		const ungrouped: { action: ISessionWorkspaceBrowseAction; index: number }[] = [];
+		allBrowseActions.forEach((action, i) => {
+			if (!action.group) {
+				ungrouped.push({ action, index: i });
+				return;
+			}
+			let entry = browseByGroup.get(action.group);
+			if (!entry) {
+				entry = { label: action.label, icon: action.icon, actions: [] };
+				browseByGroup.set(action.group, entry);
+			}
+			entry.actions.push({ action, index: i });
+		});
 
-			items.push({
-				kind: ActionListItemKind.Action,
-				label: localize('workspacePicker.browseSelect', "Select..."),
-				group: { title: '', icon: Codicon.folderOpened },
-				item: {},
-				submenuActions,
-			});
-		} else {
-			for (let i = 0; i < allBrowseActions.length; i++) {
-				const action = allBrowseActions[i];
+		for (const [groupKey, { label, icon, actions }] of browseByGroup) {
+			if (actions.length === 1) {
+				// Single provider for this group — show directly
+				const { action, index } = actions[0];
+				const provider = allProviders.find(p => p.id === action.providerId);
+				const connectionStatus = provider && isAgentHostProvider(provider) ? provider.connectionStatus?.get() : undefined;
+				const isUnavailable = connectionStatus === RemoteAgentHostConnectionStatus.Disconnected || connectionStatus === RemoteAgentHostConnectionStatus.Connecting;
 				items.push({
 					kind: ActionListItemKind.Action,
-					label: localize(`workspacePicker.browseSelectAction`, "Select {0}...", action.label),
-					group: { title: '', icon: action.icon },
-					item: { browseActionIndex: i },
+					label: localize(`workspacePicker.browseSelectAction`, "Select {0}...", label),
+					description: action.description,
+					group: { title: '', icon },
+					disabled: isUnavailable,
+					item: { browseActionIndex: index },
+				});
+			} else {
+				// Multiple providers for this group — show submenu
+				const submenuActions = actions.map(({ action, index }) => {
+					const provider = allProviders.find(p => p.id === action.providerId);
+					const connectionStatus = provider && isAgentHostProvider(provider) ? provider.connectionStatus?.get() : undefined;
+					const isUnavailable = connectionStatus === RemoteAgentHostConnectionStatus.Disconnected || connectionStatus === RemoteAgentHostConnectionStatus.Connecting;
+					return {
+						...toAction({
+							id: `workspacePicker.browse.${index}`,
+							label: action.description ?? provider?.label ?? label,
+							tooltip: '',
+							enabled: !isUnavailable,
+							run: () => this._executeBrowseAction(index),
+						}),
+						icon: action.icon,
+					};
+				});
+				items.push({
+					kind: ActionListItemKind.Action,
+					label: localize('workspacePicker.browseSelectAction', "Select {0}...", label),
+					group: { title: '', icon },
+					item: {},
+					submenuActions: [new SubmenuAction(`workspacePicker.browse.group.${groupKey}`, '', submenuActions)],
 				});
 			}
 		}
 
-		if (items.length > 0 && items[items.length - 1].kind !== ActionListItemKind.Separator && remoteProviders.length) {
-			items.push({ kind: ActionListItemKind.Separator, label: '' });
-		}
-
-		for (const provider of remoteProviders) {
-			const status = provider.connectionStatus!.get();
-			const isConnected = status === RemoteAgentHostConnectionStatus.Connected;
-			const providerBrowseIndex = allBrowseActions.findIndex(a => a.providerId === provider.id);
-			const isTunnel = provider.remoteAddress?.startsWith(TUNNEL_ADDRESS_PREFIX);
-
-			const toolbarActions: IAction[] = [];
-
-			if (isTunnel) {
-				// Offline/connecting tunnels: surface a refresh button that
-				// attempts to (re)connect in case the cached status is stale.
-				if (!isConnected && providerBrowseIndex >= 0) {
-					const browseIndex = providerBrowseIndex;
-					toolbarActions.push(toAction({
-						id: `workspacePicker.remote.refresh.${provider.id}`,
-						label: localize('workspacePicker.refreshTunnel', "Attempt to Connect"),
-						class: ThemeIcon.asClassName(Codicon.refresh),
-						run: () => {
-							this.actionWidgetService.hide();
-							this._executeBrowseAction(browseIndex);
-						},
-					}));
-				}
-			} else {
-				// Gear menu only for SSH hosts, not tunnel providers
-				toolbarActions.push(toAction({
-					id: `workspacePicker.remote.gear.${provider.id}`,
-					label: localize('workspacePicker.remoteOptions', "Options"),
-					class: ThemeIcon.asClassName(Codicon.gear),
-					run: () => {
-						this.actionWidgetService.hide();
-						this._showRemoteHostOptionsDelayed(provider);
-					},
-				}));
-			}
-
+		// Ungrouped actions shown individually
+		for (const { action, index } of ungrouped) {
+			const provider = allProviders.find(p => p.id === action.providerId);
+			const connectionStatus = provider && isAgentHostProvider(provider) ? provider.connectionStatus?.get() : undefined;
+			const isUnavailable = connectionStatus === RemoteAgentHostConnectionStatus.Disconnected || connectionStatus === RemoteAgentHostConnectionStatus.Connecting;
 			items.push({
 				kind: ActionListItemKind.Action,
-				label: provider.label,
-				description: this._getStatusDescription(status),
-				hover: { content: this._getStatusHover(status, provider.remoteAddress) },
-				group: { title: '', icon: isTunnel ? Codicon.cloud : Codicon.remote },
-				disabled: !isConnected,
-				item: {
-					browseActionIndex: isConnected && providerBrowseIndex >= 0 ? providerBrowseIndex : undefined,
-					remoteProvider: provider,
-				},
-				toolbarActions,
+				label: localize('workspacePicker.browseSelectAction', "Select {0}...", action.label),
+				description: action.description,
+				group: { title: '', icon: action.icon },
+				disabled: isUnavailable,
+				item: { browseActionIndex: index },
 			});
 		}
 
-		// "Tunnels..." and "SSH..." entries — shown when remote agent hosts are enabled
-		if (this.configurationService.getValue<boolean>(RemoteAgentHostsEnabledSettingId)) {
+		// "Manage" submenu: dynamic remote provider entries + menu-contributed actions
+
+		// Dynamic remote provider entries
+		const remoteProviderActions: IAction[] = [];
+		for (const provider of remoteProviders) {
+			const status = provider.connectionStatus!.get();
+			const isTunnel = provider.remoteAddress?.startsWith(TUNNEL_ADDRESS_PREFIX);
+			const action = toAction({
+				id: `workspacePicker.remote.${provider.id}`,
+				label: provider.label,
+				tooltip: this._getStatusLabel(status),
+				enabled: true,
+				run: () => {
+					this.actionWidgetService.hide();
+					this._showRemoteHostOptionsDelayed(provider);
+				},
+			});
+			const extended = action as IAction & { icon?: ThemeIcon; hoverContent?: string };
+			extended.icon = isTunnel ? Codicon.cloud : Codicon.remote;
+			extended.hoverContent = this._getStatusHover(status, provider.remoteAddress);
+			remoteProviderActions.push(action);
+		}
+
+		// Menu-contributed actions (e.g. Tunnels..., SSH...)
+		const menuContributedActions: IAction[] = [];
+		const menuActions = this.menuService.getMenuActions(Menus.SessionWorkspaceManage, this.contextKeyService, { renderShortTitle: true });
+		for (const [, actions] of menuActions) {
+			for (const menuAction of actions) {
+				if (menuAction instanceof MenuItemAction) {
+					const icon = ThemeIcon.isThemeIcon(menuAction.item.icon) ? menuAction.item.icon : undefined;
+					menuContributedActions.push(Object.assign(menuAction, { icon }));
+				}
+			}
+		}
+
+		// Build submenu groups — each SubmenuAction becomes a visual group with
+		// automatic separators between them.
+		const manageSubmenuActions: SubmenuAction[] = [];
+		if (remoteProviderActions.length > 0) {
+			manageSubmenuActions.push(new SubmenuAction('workspacePicker.manage.remotes', '', remoteProviderActions));
+		}
+		if (menuContributedActions.length > 0) {
+			manageSubmenuActions.push(new SubmenuAction('workspacePicker.manage.menu', '', menuContributedActions));
+		}
+
+		if (manageSubmenuActions.length > 0) {
 			if (items.length > 0 && items[items.length - 1].kind !== ActionListItemKind.Separator) {
 				items.push({ kind: ActionListItemKind.Separator, label: '' });
 			}
 			items.push({
 				kind: ActionListItemKind.Action,
-				label: localize('workspacePicker.tunnels', "Tunnels..."),
-				group: { title: '', icon: Codicon.cloud },
-				item: { commandId: 'workbench.action.sessions.connectViaTunnel' },
+				label: localize('workspacePicker.manage', "Manage..."),
+				group: { title: '', icon: Codicon.settingsGear },
+				item: {},
+				submenuActions: manageSubmenuActions,
 			});
-			if (isNative) {
-				items.push({
-					kind: ActionListItemKind.Action,
-					label: localize('workspacePicker.ssh', "SSH..."),
-					group: { title: '', icon: Codicon.remote },
-					item: { commandId: 'workbench.action.sessions.connectViaSSH' },
-				});
-			}
 		}
 
 		return items;
 	}
 
-	/**
-	 * Returns a short status indicator with a colored circle icon for the description field.
-	 */
-	private _getStatusDescription(status: RemoteAgentHostConnectionStatus): MarkdownString {
-		const md = new MarkdownString(undefined, { supportThemeIcons: true });
+	private _getStatusLabel(status: RemoteAgentHostConnectionStatus): string {
 		switch (status) {
 			case RemoteAgentHostConnectionStatus.Connected:
-				md.appendText(localize('workspacePicker.statusOnline', "Online"));
-				break;
+				return localize('workspacePicker.statusOnline', "Online");
 			case RemoteAgentHostConnectionStatus.Connecting:
-				md.appendText(localize('workspacePicker.statusConnecting', "Connecting"));
-				break;
+				return localize('workspacePicker.statusConnecting', "Connecting");
 			case RemoteAgentHostConnectionStatus.Disconnected:
-				md.appendText(localize('workspacePicker.statusOffline', "Offline"));
-				break;
+				return localize('workspacePicker.statusOffline', "Offline");
 		}
-		return md;
 	}
 
-	/**
-	 * Returns detailed hover text for a remote host's connection status.
-	 */
 	private _getStatusHover(status: RemoteAgentHostConnectionStatus, address?: string): string {
 		switch (status) {
 			case RemoteAgentHostConnectionStatus.Connected:
@@ -577,8 +531,8 @@ export class WorkspacePicker extends Disposable {
 					: localize('workspacePicker.hoverConnecting', "Attempting to connect to remote agent host...");
 			case RemoteAgentHostConnectionStatus.Disconnected:
 				return address
-					? localize('workspacePicker.hoverDisconnectedAddr', "Remote agent host is disconnected. Click the gear icon for options.\n\nAddress: {0}", address)
-					: localize('workspacePicker.hoverDisconnected', "Remote agent host is disconnected. Click the gear icon for options.");
+					? localize('workspacePicker.hoverDisconnectedAddr', "Remote agent host is disconnected.\n\nAddress: {0}", address)
+					: localize('workspacePicker.hoverDisconnected', "Remote agent host is disconnected.");
 		}
 	}
 

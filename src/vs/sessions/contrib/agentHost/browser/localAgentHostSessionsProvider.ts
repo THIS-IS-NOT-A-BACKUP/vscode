@@ -59,6 +59,8 @@ export class LocalAgentHostSessionsProvider extends BaseAgentHostSessionsProvide
 
 		this.browseActions = [{
 			label: localize('folders', "Folders"),
+			description: this.label,
+			group: 'folders',
 			icon: Codicon.folderOpened,
 			providerId: this.id,
 			run: () => this._browseForFolder(),
@@ -69,9 +71,11 @@ export class LocalAgentHostSessionsProvider extends BaseAgentHostSessionsProvide
 		const rootStateValue = this._agentHostService.rootState.value;
 		if (rootStateValue && !(rootStateValue instanceof Error)) {
 			this._syncSessionTypesFromRootState(rootStateValue);
+			this._syncRootConfigFromRootState(rootStateValue);
 		}
 		this._register(this._agentHostService.rootState.onDidChange(rootState => {
 			this._syncSessionTypesFromRootState(rootState);
+			this._syncRootConfigFromRootState(rootState);
 		}));
 
 		// Eagerly populate the session cache once authentication has settled.

@@ -202,6 +202,8 @@ export class RemoteAgentHostSessionsProvider extends BaseAgentHostSessionsProvid
 
 		this.browseActions = [{
 			label: localize('folders', "Folders"),
+			description: displayName,
+			group: 'folders',
 			icon: Codicon.remote,
 			providerId: this.id,
 			run: () => this._browseForFolder(),
@@ -359,9 +361,11 @@ export class RemoteAgentHostSessionsProvider extends BaseAgentHostSessionsProvid
 		const rootStateValue = connection.rootState.value;
 		if (rootStateValue && !(rootStateValue instanceof Error)) {
 			this._syncSessionTypesFromRootState(rootStateValue);
+			this._syncRootConfigFromRootState(rootStateValue);
 		}
 		this._connectionListeners.add(connection.rootState.onDidChange(rootState => {
 			this._syncSessionTypesFromRootState(rootState);
+			this._syncRootConfigFromRootState(rootState);
 		}));
 
 		this._attachConnectionListeners(connection, this._connectionListeners);
