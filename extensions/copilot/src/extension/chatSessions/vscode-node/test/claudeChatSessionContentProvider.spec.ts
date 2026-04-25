@@ -84,6 +84,7 @@ beforeAll(() => {
 						groups,
 						sessionResource: undefined,
 						onDidChange: emitter.event,
+						onDidDispose: Event.None,
 					};
 					// Proxy that fires onDidChange when groups are replaced
 					return new Proxy(state, {
@@ -325,7 +326,7 @@ async function runHandlerAndCapture(
 				resource: ClaudeSessionUri.forSessionId(sessionId),
 				label: 'Test Session',
 			},
-			inputState: { groups, sessionResource: undefined, onDidChange: Event.None },
+			inputState: { groups, sessionResource: undefined, onDidChange: Event.None, onDidDispose: Event.None },
 		},
 	} as vscode.ChatContext;
 
@@ -660,7 +661,7 @@ describe('ChatSessionContentProvider', () => {
 						resource: ClaudeSessionUri.forSessionId(sessionId),
 						label: 'Test Session',
 					},
-					inputState: { groups: buildInputStateGroups(options), sessionResource: undefined, onDidChange: Event.None },
+					inputState: { groups: buildInputStateGroups(options), sessionResource: undefined, onDidChange: Event.None, onDidDispose: Event.None },
 				},
 			} as vscode.ChatContext;
 		}
@@ -775,6 +776,7 @@ describe('ChatSessionContentProvider', () => {
 						}),
 						sessionResource: undefined,
 						onDidChange: Event.None,
+						onDidDispose: Event.None,
 					},
 				},
 			} as vscode.ChatContext;
@@ -845,7 +847,7 @@ describe('ChatSessionContentProvider', () => {
 						resource: ClaudeSessionUri.forSessionId(sessionId),
 						label: 'Test Session',
 					},
-					inputState: { groups: buildInputStateGroups(), sessionResource: undefined, onDidChange: Event.None },
+					inputState: { groups: buildInputStateGroups(), sessionResource: undefined, onDidChange: Event.None, onDidDispose: Event.None },
 				},
 			} as vscode.ChatContext;
 		}
@@ -945,7 +947,7 @@ describe('ChatSessionContentProvider', () => {
 						resource: ClaudeSessionUri.forSessionId(sessionId),
 						label: 'Test Session',
 					},
-					inputState: { groups: buildInputStateGroups(), sessionResource: undefined, onDidChange: Event.None },
+					inputState: { groups: buildInputStateGroups(), sessionResource: undefined, onDidChange: Event.None, onDidDispose: Event.None },
 				},
 			} as vscode.ChatContext;
 		}
@@ -1102,6 +1104,30 @@ describe('ChatSessionContentProvider', () => {
 			expect(getGroup(state, 'permissionMode')!.selected?.id).toBe('default');
 		});
 
+		it('external permission change syncs into a previousInputState-restored pipeline', async () => {
+			const mocks = createDefaultMocks();
+			const { accessor: localAccessor } = createProviderWithServices(store, [workspaceFolderUri], mocks);
+			const sessionStateService = localAccessor.get(IClaudeSessionStateService);
+
+			const existingSession = { id: 'prev-state-session', messages: [], subagents: [] };
+			vi.mocked(mocks.mockSessionService.getSession).mockResolvedValue(existingSession as any);
+
+			const sessionUri = createClaudeSessionUri('prev-state-session');
+			const firstState = await getInputState(sessionUri);
+
+			// Simulate getChatSessionInputState being called again with previousInputState
+			// (e.g. user refocuses the chat window). The pipeline is rebuilt from scratch.
+			const restoredState = await getInputState(sessionUri, firstState);
+			expect(getGroup(restoredState, 'permissionMode')!.selected?.id).not.toBe('plan');
+
+			// Permission mode changes externally (e.g. EnterPlanMode tool call)
+			sessionStateService.setPermissionModeForSession('prev-state-session', 'plan');
+			expect(getGroup(restoredState, 'permissionMode')!.selected?.id).toBe('plan');
+
+			sessionStateService.setPermissionModeForSession('prev-state-session', 'acceptEdits');
+			expect(getGroup(restoredState, 'permissionMode')!.selected?.id).toBe('acceptEdits');
+		});
+
 		it('markSessionStarted locks the folder group mid-session', async () => {
 			const mocks = createDefaultMocks();
 			createProviderWithServices(store, [folderA, folderB], mocks);
@@ -1163,6 +1189,7 @@ describe('ChatSessionContentProvider', () => {
 				groups: lockedGroups,
 				sessionResource: undefined,
 				onDidChange: Event.None,
+				onDidDispose: Event.None,
 			};
 			// sanity check
 			expect(initialGroup.items.map(i => i.id)).toEqual([folderA.fsPath, folderB.fsPath]);
