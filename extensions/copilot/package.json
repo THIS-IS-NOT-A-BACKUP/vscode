@@ -3815,6 +3815,15 @@
 							"clear-both"
 						]
 					},
+					"github.copilot.chat.anthropic.cacheBreakpoints.lastTwoMessages": {
+						"type": "boolean",
+						"default": false,
+						"markdownDescription": "%github.copilot.config.anthropic.cacheBreakpoints.lastTwoMessages%",
+						"tags": [
+							"experimental",
+							"onExp"
+						]
+					},
 					"github.copilot.chat.responsesApiReasoningSummary": {
 						"type": "string",
 						"default": "detailed",
@@ -4507,7 +4516,7 @@
 					},
 					"github.copilot.chat.agentHistorySummarizationInline": {
 						"type": "boolean",
-						"default": false,
+						"default": true,
 						"markdownDescription": "%github.copilot.config.agentHistorySummarizationInline%",
 						"tags": [
 							"advanced",
