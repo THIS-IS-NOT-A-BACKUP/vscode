@@ -20,7 +20,7 @@ import { SessionConfigKey } from '../../../../../../platform/agentHost/common/se
 import { IAgentSubscription } from '../../../../../../platform/agentHost/common/state/agentSubscription.js';
 import { SessionTruncatedAction } from '../../../../../../platform/agentHost/common/state/protocol/actions.js';
 import { ConfirmationOptionKind, CustomizationRef, TerminalClaimKind, ToolResultContentType, type ConfirmationOption, type ProtectedResourceMetadata, type ToolDefinition } from '../../../../../../platform/agentHost/common/state/protocol/state.js';
-import { ActionType, SessionTurnStartedAction, type SessionAction } from '../../../../../../platform/agentHost/common/state/sessionActions.js';
+import { ActionType, SessionTurnStartedAction, type ClientSessionAction } from '../../../../../../platform/agentHost/common/state/sessionActions.js';
 import { AHP_AUTH_REQUIRED, ProtocolError } from '../../../../../../platform/agentHost/common/state/sessionProtocol.js';
 import { AttachmentType, buildSubagentSessionUri, getToolFileEdits, getToolSubagentContent, PendingMessageKind, ResponsePartKind, SessionInputAnswerState, SessionInputAnswerValueKind, SessionInputQuestionKind, SessionInputResponseKind, StateComponents, ToolCallCancellationReason, ToolCallConfirmationReason, ToolCallStatus, TurnState, type ICompletedToolCall, type MessageAttachment, type ModelSelection, type ResponsePart, type RootState, type SessionInputAnswer, type SessionInputRequest, type SessionState, type ToolCallState, type Turn } from '../../../../../../platform/agentHost/common/state/sessionState.js';
 import { IConfigurationService } from '../../../../../../platform/configuration/common/configuration.js';
@@ -732,7 +732,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 		}
 	}
 
-	private _dispatchAction(action: SessionAction): void {
+	private _dispatchAction(action: ClientSessionAction): void {
 		this._config.connection.dispatch(action);
 	}
 
@@ -1736,7 +1736,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 			questions.push({
 				id: 'answer',
 				type: 'text',
-				title: inputReq.message,
+				title: inputReq.message ?? '',
 				required: true,
 			});
 		}
@@ -1747,7 +1747,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 			/* resolveId */ undefined,
 			/* data */ undefined,
 			/* isUsed */ undefined,
-			/* message */ rawMarkdownToString(inputReq.message, this._config.connectionAuthority),
+			/* message */ inputReq.message ? rawMarkdownToString(inputReq.message, this._config.connectionAuthority) : undefined,
 		);
 
 		progress([carousel]);

@@ -17,7 +17,7 @@ import { ServiceCollection } from '../../instantiation/common/serviceCollection.
 import { ILogService } from '../../log/common/log.js';
 import { AgentProvider, AgentSession, IAgent, IAgentCreateSessionConfig, IAgentResolveSessionConfigParams, IAgentService, IAgentSessionConfigCompletionsParams, IAgentSessionMetadata, IAgentSubagentStartedEvent, IAgentToolStartEvent, SessionHistoryEvent, AuthenticateParams, AuthenticateResult } from '../common/agentService.js';
 import { ISessionDataService } from '../common/sessionDataService.js';
-import { ActionType, ActionEnvelope, INotification, RootAction, SessionAction, TerminalAction, isSessionAction } from '../common/state/sessionActions.js';
+import { ActionType, ActionEnvelope, INotification, type IRootConfigChangedAction, type SessionAction, type TerminalAction } from '../common/state/sessionActions.js';
 import type { CreateTerminalParams, ResolveSessionConfigResult, SessionConfigCompletionsResult } from '../common/state/protocol/commands.js';
 import { AhpErrorCodes, AHP_SESSION_NOT_FOUND, ContentEncoding, JSON_RPC_INTERNAL_ERROR, ProtocolError, type DirectoryEntry, type ResourceCopyParams, type ResourceCopyResult, type ResourceDeleteParams, type ResourceDeleteResult, type ResourceListResult, type ResourceMoveParams, type ResourceMoveResult, type ResourceReadResult, type ResourceWriteParams, type ResourceWriteResult, type IStateSnapshot } from '../common/state/sessionProtocol.js';
 import { ResponsePartKind, SessionStatus, ToolCallConfirmationReason, ToolCallStatus, ToolResultContentType, TurnState, buildSubagentSessionUri, parseSubagentSessionUri, readSessionGitState, withSessionGitState, type ResponsePart, type SessionConfigState, type ISessionFileDiff, type SessionSummary, type ToolCallCompletedState, type ToolResultSubagentContent, type Turn } from '../common/state/sessionState.js';
@@ -26,6 +26,7 @@ import { AgentConfigurationService, IAgentConfigurationService } from './agentCo
 import { AgentSideEffects } from './agentSideEffects.js';
 import { AgentHostTerminalManager, type IAgentHostTerminalManager } from './agentHostTerminalManager.js';
 import { ISessionDbUriFields, parseSessionDbUri } from './copilot/fileEditTracker.js';
+import { IGitBlobUriFields, parseGitBlobUri } from './gitDiffContent.js';
 import { AgentHostStateManager } from './agentHostStateManager.js';
 import { IAgentHostGitService } from './agentHostGitService.js';
 
@@ -67,6 +68,9 @@ export class AgentService extends Disposable implements IAgentService {
 	/** Exposes the state manager for co-hosting a WebSocket protocol server. */
 	get stateManager(): AgentHostStateManager { return this._stateManager; }
 
+	/** Exposes the configuration service so agent providers can share root config plumbing. */
+	get configurationService(): IAgentConfigurationService { return this._configurationService; }
+
 	/** Registered providers keyed by their {@link AgentProvider} id. */
 	private readonly _providers = new Map<AgentProvider, IAgent>();
 	/** Maps each active session URI (toString) to its owning provider. */
@@ -81,6 +85,7 @@ export class AgentService extends Disposable implements IAgentService {
 	private readonly _sideEffects: AgentSideEffects;
 	/** Manages PTY-backed terminals for the agent host protocol. */
 	private readonly _terminalManager: AgentHostTerminalManager;
+	private readonly _configurationService: IAgentConfigurationService;
 
 	/** Exposes the terminal manager for use by agent providers. */
 	get terminalManager(): IAgentHostTerminalManager { return this._terminalManager; }
@@ -91,6 +96,7 @@ export class AgentService extends Disposable implements IAgentService {
 		private readonly _sessionDataService: ISessionDataService,
 		private readonly _productService: IProductService,
 		private readonly _gitService: IAgentHostGitService,
+		private readonly _rootConfigResource?: URI,
 	) {
 		super();
 		this._logService.info('AgentService initialized');
@@ -101,10 +107,12 @@ export class AgentService extends Disposable implements IAgentService {
 		// Build a local instantiation scope so downstream components can
 		// consume {@link IAgentConfigurationService} (and later {@link ILogService})
 		// via DI rather than being plumbed plain-class references.
-		const configurationService: IAgentConfigurationService = this._register(new AgentConfigurationService(this._stateManager, this._logService));
+		const configurationService: IAgentConfigurationService = this._register(new AgentConfigurationService(this._stateManager, this._logService, this._rootConfigResource));
+		this._configurationService = configurationService;
 		const services = new ServiceCollection(
 			[ILogService, this._logService],
 			[IAgentConfigurationService, configurationService],
+			[IAgentHostGitService, this._gitService],
 		);
 		const instantiationService = this._register(new InstantiationService(services, /*strict*/ true));
 
@@ -470,17 +478,15 @@ export class AgentService extends Disposable implements IAgentService {
 		// in Phase 4 (multi-client). For now this is a no-op.
 	}
 
-	dispatchAction(action: RootAction | SessionAction | TerminalAction, clientId: string, clientSeq: number): void {
+	dispatchAction(action: SessionAction | TerminalAction | IRootConfigChangedAction, clientId: string, clientSeq: number): void {
 		this._logService.trace(`[AgentService] dispatchAction: type=${action.type}, clientId=${clientId}, clientSeq=${clientSeq}`, action);
 
 		const origin = { clientId, clientSeq };
-
-		if (isSessionAction(action)) {
-			this._stateManager.dispatchClientAction(action, origin);
-			this._sideEffects.handleAction(action);
-		} else {
-			this._stateManager.dispatchClientAction(action, origin);
+		this._stateManager.dispatchClientAction(action, origin);
+		if (action.type === ActionType.RootConfigChanged) {
+			this._configurationService.persistRootConfig();
 		}
+		this._sideEffects.handleAction(action);
 	}
 
 	async resourceList(uri: URI): Promise<ResourceListResult> {
@@ -646,6 +652,15 @@ export class AgentService extends Disposable implements IAgentService {
 		const dbFields = parseSessionDbUri(uri.toString());
 		if (dbFields) {
 			return this._fetchSessionDbContent(dbFields);
+		}
+
+		// Handle git-blob: URIs that reference file content at a specific
+		// git commit (the merge-base used as diff baseline). The URI
+		// encodes the session it belongs to so we can find the right
+		// working directory to run `git show` from.
+		const blobFields = parseGitBlobUri(uri.toString());
+		if (blobFields) {
+			return this._fetchGitBlobContent(blobFields);
 		}
 
 		try {
@@ -1029,6 +1044,25 @@ export class AgentService extends Disposable implements IAgentService {
 		} finally {
 			ref.dispose();
 		}
+	}
+
+	private async _fetchGitBlobContent(fields: IGitBlobUriFields): Promise<ResourceReadResult> {
+		if (!this._gitService) {
+			throw new ProtocolError(AhpErrorCodes.NotFound, `git service unavailable for: ${fields.repoRelativePath}`);
+		}
+		const workingDirectory = this._stateManager.getSessionState(fields.sessionUri)?.summary.workingDirectory;
+		if (!workingDirectory) {
+			throw new ProtocolError(AhpErrorCodes.NotFound, `Session has no working directory for git-blob URI: ${fields.sessionUri}`);
+		}
+		const blob = await this._gitService.showBlob(URI.parse(workingDirectory), fields.sha, fields.repoRelativePath);
+		if (!blob) {
+			throw new ProtocolError(AhpErrorCodes.NotFound, `git blob not found: ${fields.sha}:${fields.repoRelativePath}`);
+		}
+		return {
+			data: blob.toString(),
+			encoding: ContentEncoding.Utf8,
+			contentType: 'text/plain',
+		};
 	}
 
 	/**
