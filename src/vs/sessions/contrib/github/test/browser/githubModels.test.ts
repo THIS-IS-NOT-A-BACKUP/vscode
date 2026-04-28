@@ -20,11 +20,11 @@ import { GitHubCIOverallStatus, GitHubCheckConclusion, GitHubCheckStatus, GitHub
 class MockRepositoryFetcher {
 	nextResult: IGitHubRepository | undefined;
 
-	async getRepository(_owner: string, _repo: string): Promise<IGitHubRepository> {
+	async getRepository(_owner: string, _repo: string, _etag?: string): Promise<{ data: IGitHubRepository | undefined; statusCode: number; etag?: string }> {
 		if (!this.nextResult) {
 			throw new Error('No mock result');
 		}
-		return this.nextResult;
+		return { data: this.nextResult, statusCode: 200 };
 	}
 }
 
@@ -35,15 +35,15 @@ class MockPRFetcher {
 	postReviewCommentCalls: { body: string; inReplyTo: number }[] = [];
 	postIssueCommentCalls: { body: string }[] = [];
 
-	async getPullRequest(_owner: string, _repo: string, _prNumber: number): Promise<IGitHubPullRequest> {
+	async getPullRequest(_owner: string, _repo: string, _prNumber: number, _etag?: string): Promise<{ data: IGitHubPullRequest | undefined; statusCode: number; etag?: string }> {
 		if (!this.nextPR) {
 			throw new Error('No mock PR');
 		}
-		return this.nextPR;
+		return { data: this.nextPR, statusCode: 200 };
 	}
 
-	async getReviews(_owner: string, _repo: string, _prNumber: number): Promise<readonly IGitHubPullRequestReview[]> {
-		return this.nextReviews;
+	async getReviews(_owner: string, _repo: string, _prNumber: number, _etag?: string): Promise<{ data: readonly IGitHubPullRequestReview[] | undefined; statusCode: number; etag?: string }> {
+		return { data: this.nextReviews, statusCode: 200 };
 	}
 
 	async getReviewThreads(_owner: string, _repo: string, _prNumber: number): Promise<IGitHubPullRequestReviewThread[]> {
@@ -68,8 +68,8 @@ class MockPRFetcher {
 class MockCIFetcher {
 	nextChecks: IGitHubCICheck[] = [];
 
-	async getCheckRuns(_owner: string, _repo: string, _ref: string): Promise<IGitHubCICheck[]> {
-		return this.nextChecks;
+	async getCheckRuns(_owner: string, _repo: string, _ref: string, _etag?: string): Promise<{ data: readonly IGitHubCICheck[] | undefined; statusCode: number; etag?: string }> {
+		return { data: this.nextChecks, statusCode: 200 };
 	}
 
 	async getCheckRunAnnotations(_owner: string, _repo: string, _checkRunId: number): Promise<string> {

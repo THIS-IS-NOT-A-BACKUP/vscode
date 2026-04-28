@@ -176,6 +176,7 @@ export abstract class ToolCallingLoop<TOptions extends IToolCallingLoopOptions =
 	private agentSpan: ISpanHandle | undefined;
 	private chatSessionIdForTools: string | undefined;
 	private toolsAvailableEmitted = false;
+	private lastHeaderRequestId: string | undefined;
 
 	public appendAdditionalHookContext(context: string): void {
 		if (!context) {
@@ -269,6 +270,7 @@ export abstract class ToolCallingLoop<TOptions extends IToolCallingLoopOptions =
 			hasStopHookQuery,
 			modeInstructions: this.options.request.modeInstructions2,
 			additionalHookContext: this.additionalHookContext,
+			parentHeaderRequestId: this.lastHeaderRequestId,
 		};
 	}
 
@@ -839,6 +841,8 @@ export abstract class ToolCallingLoop<TOptions extends IToolCallingLoopOptions =
 				// Accumulate token usage across all LLM turns per GenAI agent span spec
 				let totalInputTokens = 0;
 				let totalOutputTokens = 0;
+				let totalCacheReadTokens = 0;
+				let totalCacheCreationTokens = 0;
 				let lastResolvedModel: string | undefined;
 				let turnIndex = 0;
 				const tokenListener = this.onDidReceiveResponse(({ response }) => {
@@ -847,6 +851,8 @@ export abstract class ToolCallingLoop<TOptions extends IToolCallingLoopOptions =
 					if (response.type === ChatFetchResponseType.Success && response.usage) {
 						totalInputTokens += turnInputTokens;
 						totalOutputTokens += turnOutputTokens;
+						totalCacheReadTokens += (response.usage.prompt_tokens_details?.cached_tokens || 0);
+						totalCacheCreationTokens += (response.usage.prompt_tokens_details?.cache_creation_input_tokens || 0);
 					}
 					if (response.type === ChatFetchResponseType.Success && response.resolvedModel) {
 						lastResolvedModel = response.resolvedModel;
@@ -861,6 +867,8 @@ export abstract class ToolCallingLoop<TOptions extends IToolCallingLoopOptions =
 						[CopilotChatAttr.TURN_COUNT]: result.toolCallRounds.length,
 						[GenAiAttr.USAGE_INPUT_TOKENS]: totalInputTokens,
 						[GenAiAttr.USAGE_OUTPUT_TOKENS]: totalOutputTokens,
+						...(totalCacheReadTokens ? { [GenAiAttr.USAGE_CACHE_READ_INPUT_TOKENS]: totalCacheReadTokens } : {}),
+						...(totalCacheCreationTokens ? { [GenAiAttr.USAGE_CACHE_CREATION_INPUT_TOKENS]: totalCacheCreationTokens } : {}),
 						...(lastResolvedModel ? { [GenAiAttr.RESPONSE_MODEL]: lastResolvedModel } : {}),
 					});
 					// Always capture agent output message and tool definitions for the debug panel
@@ -1376,6 +1384,14 @@ export abstract class ToolCallingLoop<TOptions extends IToolCallingLoopOptions =
 			this.stopHookUserInitiated = false;
 		});
 		markChatExt(this.options.conversation.sessionId, ChatExtPerfMark.DidFetch);
+
+		// Store the headerRequestId from the fetch response for subagent telemetry linking.
+		// Use requestId (the client-generated UUID sent as X-Request-Id header), not serverRequestId
+		// (the server's response header value), because requestId is what appears as headerRequestId
+		// across all telemetry events.
+		if (fetchResult.type === ChatFetchResponseType.Success) {
+			this.lastHeaderRequestId = fetchResult.requestId;
+		}
 
 		const promptTokenDetails = await computePromptTokenDetails({
 			messages: effectiveBuildPromptResult.messages,

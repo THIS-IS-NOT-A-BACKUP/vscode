@@ -217,6 +217,7 @@ export class ChatMLFetcherImpl extends AbstractChatMLFetcher {
 				const countTokens = () => tokenCountPromise ??= chatEndpoint.acquireTokenizer().countMessagesTokens(messages);
 				const copilotToken = await this._authenticationService.getCopilotToken();
 				usernameToScrub = copilotToken.username;
+
 				const fetchResult = await this._fetchAndStreamChat(
 					chatEndpoint,
 					requestBody,
@@ -389,6 +390,9 @@ export class ChatMLFetcherImpl extends AbstractChatMLFetcher {
 							[GenAiAttr.RESPONSE_FINISH_REASONS]: ['stop'],
 							...(result.usage.prompt_tokens_details?.cached_tokens
 								? { [GenAiAttr.USAGE_CACHE_READ_INPUT_TOKENS]: result.usage.prompt_tokens_details.cached_tokens }
+								: {}),
+							...(result.usage.prompt_tokens_details?.cache_creation_input_tokens
+								? { [GenAiAttr.USAGE_CACHE_CREATION_INPUT_TOKENS]: result.usage.prompt_tokens_details.cache_creation_input_tokens }
 								: {}),
 							[CopilotChatAttr.TIME_TO_FIRST_TOKEN]: timeToFirstToken,
 							...(result.serverRequestId ? { [CopilotChatAttr.SERVER_REQUEST_ID]: result.serverRequestId } : {}),

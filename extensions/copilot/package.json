@@ -128,8 +128,10 @@
 		"chatReferenceBinaryData",
 		"languageModelSystem",
 		"languageModelCapabilities",
+		"languageModelPricing",
 		"inlineCompletionsAdditions",
 		"chatStatusItem",
+		"chatInputNotification",
 		"taskProblemMatcherStatus",
 		"contribLanguageModelToolSets",
 		"textDocumentChangeReason",
@@ -1568,6 +1570,11 @@
 					{
 						"name": "chronicle:tips",
 						"description": "%copilot.chronicle.tips.description%",
+						"when": "github.copilot.sessionSearch.enabled"
+					},
+					{
+						"name": "chronicle:reindex",
+						"description": "%copilot.chronicle.reindex.description%",
 						"when": "github.copilot.sessionSearch.enabled"
 					},
 					{
@@ -6603,7 +6610,7 @@
 		"@anthropic-ai/claude-agent-sdk": "0.2.112",
 		"@anthropic-ai/sdk": "^0.82.0",
 		"@github/blackbird-external-ingest-utils": "^0.3.0",
-		"@github/copilot": "^1.0.34",
+		"@github/copilot": "^1.0.38",
 		"@google/genai": "^1.22.0",
 		"@humanwhocodes/gitignore-to-minimatch": "1.0.2",
 		"@microsoft/tiktokenizer": "^1.0.10",
@@ -6622,7 +6629,7 @@
 		"@opentelemetry/sdk-trace-node": "^2.5.1",
 		"@opentelemetry/semantic-conventions": "^1.39.0",
 		"@sinclair/typebox": "^0.34.41",
-		"@vscode/copilot-api": "^0.2.19",
+		"@vscode/copilot-api": "^0.3.0",
 		"@vscode/extension-telemetry": "^1.5.1",
 		"@vscode/l10n": "^0.0.18",
 		"@vscode/prompt-tsx": "^0.4.0-alpha.8",
