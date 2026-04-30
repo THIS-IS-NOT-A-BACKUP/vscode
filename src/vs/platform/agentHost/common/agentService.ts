@@ -265,7 +265,7 @@ export interface IAgentToolPendingConfirmationSignal {
 	/** Protocol-shaped pending-confirmation state, dispatched verbatim into `SessionToolCallReady`. */
 	readonly state: ToolCallPendingConfirmationState;
 	/** Host-only auto-approval kind (not part of the dispatched action). */
-	readonly permissionKind?: 'shell' | 'write' | 'mcp' | 'read' | 'url' | 'custom-tool';
+	readonly permissionKind?: 'shell' | 'write' | 'mcp' | 'read' | 'url' | 'custom-tool' | 'hook' | 'memory';
 	/** Host-only auto-approval path target (not part of the dispatched action). */
 	readonly permissionPath?: string;
 }
@@ -428,6 +428,14 @@ export interface IAgent {
 	 * Optional — not all providers support truncation.
 	 */
 	truncateSession?(session: URI, turnId?: string): Promise<void>;
+
+	/**
+	 * Notifies the provider that a session's archived state has changed.
+	 * Providers may use this to clean up or restore per-session resources
+	 * (for example, removing a session-owned worktree on archive and
+	 * recreating it on unarchive). Optional.
+	 */
+	onArchivedChanged?(session: URI, isArchived: boolean): Promise<void>;
 
 	/**
 	 * Receives client-provided customization refs and syncs them (e.g. copies
