@@ -82,6 +82,8 @@ export interface IAgentSessionMetadata {
 	readonly project?: IAgentSessionProjectInfo;
 	readonly summary?: string;
 	readonly status?: SessionStatus;
+	/** Human-readable description of what the session is currently doing. */
+	readonly activity?: string;
 	readonly model?: ModelSelection;
 	readonly workingDirectory?: URI;
 	readonly customizationDirectory?: URI;
@@ -268,6 +270,14 @@ export interface IAgentToolPendingConfirmationSignal {
 	readonly permissionKind?: 'shell' | 'write' | 'mcp' | 'read' | 'url' | 'custom-tool' | 'hook' | 'memory';
 	/** Host-only auto-approval path target (not part of the dispatched action). */
 	readonly permissionPath?: string;
+	/**
+	 * If set, the tool call belongs to the subagent rooted at this
+	 * parent tool call. Used by the host to route the resulting
+	 * `SessionToolCallReady` to the subagent session — otherwise the
+	 * action would land on the parent session, where there is no
+	 * matching `SessionToolCallStart`.
+	 */
+	readonly parentToolCallId?: string;
 }
 
 /**
@@ -533,12 +543,28 @@ export interface IAgentService {
 	/**
 	 * Subscribe to state at the given URI. Returns a snapshot of the current
 	 * state and the serverSeq at snapshot time. Subsequent actions for this
-	 * resource arrive via {@link onDidAction}.
+	 * resource arrive via {@link onDidAction}. Registers `clientId` against
+	 * the resource so the server-side refcount knows who is watching, so the
+	 * caller does not need to invoke {@link addSubscriber} separately. Pair
+	 * with {@link unsubscribe} when the subscription is released.
 	 */
-	subscribe(resource: URI): Promise<IStateSnapshot>;
+	subscribe(resource: URI, clientId: string): Promise<IStateSnapshot>;
 
-	/** Unsubscribe from state updates for the given URI. */
-	unsubscribe(resource: URI): void;
+	/**
+	 * Counterpart to {@link subscribe}. Drops `clientId` from the refcount
+	 * for `resource`; when the last subscriber is removed, idle session state
+	 * for `resource` may be evicted from the server.
+	 */
+	unsubscribe(resource: URI, clientId: string): void;
+
+	/**
+	 * Register `clientId` against `resource` without going through
+	 * {@link subscribe}. Only needed by callers that hand out snapshots
+	 * synchronously (e.g. the JSON-RPC handshake serving `initialSubscriptions`
+	 * out of the in-memory state cache); regular subscribers should call
+	 * {@link subscribe} instead. Counterpart cleanup is {@link unsubscribe}.
+	 */
+	addSubscriber(resource: URI, clientId: string): void;
 
 	/**
 	 * Fires when the server applies an action to subscribable state.
