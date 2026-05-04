@@ -484,6 +484,14 @@ export class RunInTerminalTool extends Disposable implements IToolImpl {
 	protected readonly _osBackend: Promise<OperatingSystem>;
 
 	private static readonly _activeExecutions = new Map<string, IActiveTerminalExecution & { dispose(): void }>();
+
+	/**
+	 * Terminal IDs currently being disposed by `kill_terminal`. Used to
+	 * suppress redundant steering messages in `_registerCompletionNotification`'s
+	 * `onDisposed` handler — the agent already receives the output through the
+	 * `kill_terminal` tool result.
+	 */
+	private static readonly _killedByTool = new Set<string>();
 	public static getBackgroundOutput(id: string): string {
 		const execution = RunInTerminalTool._activeExecutions.get(id);
 		if (!execution) {
@@ -512,6 +520,15 @@ export class RunInTerminalTool extends Disposable implements IToolImpl {
 		execution.dispose();
 		RunInTerminalTool._activeExecutions.delete(id);
 		return true;
+	}
+
+	/**
+	 * Marks a terminal ID as being killed by the `kill_terminal` tool so that
+	 * the `onDisposed` handler in `_registerCompletionNotification` skips the
+	 * redundant steering message.
+	 */
+	public static markKilledByTool(id: string): void {
+		RunInTerminalTool._killedByTool.add(id);
 	}
 
 	private _resolveExecutionOptions(args: IRunInTerminalInputParams): IResolvedExecutionOptions {
@@ -995,10 +1012,15 @@ export class RunInTerminalTool extends Disposable implements IToolImpl {
 		};
 	}
 
-	private async _confirmAutomaticUnsandboxRetry(sessionResource: URI | undefined, command: string, shell: string, blockedDomains: string[] | undefined, token: CancellationToken): Promise<boolean> {
+	private async _confirmAutomaticUnsandboxRetry(sessionResource: URI | undefined, command: string, shell: string, blockedDomains: string[] | undefined, riskAssessment: { toolId: string; parameters: unknown } | undefined, token: CancellationToken): Promise<boolean> {
 		const chatModel = sessionResource && this._chatService.getSession(sessionResource);
 		if (!(chatModel instanceof ChatModel)) {
 			return false;
+		}
+
+		// In Autopilot/Bypass Approvals modes, follow the picker
+		if (sessionResource && isSessionAutoApproveLevel(sessionResource, this._configurationService, this._chatWidgetService, this._chatService)) {
+			return true;
 		}
 
 		const request = chatModel.getRequests().at(-1);
@@ -1045,6 +1067,7 @@ export class RunInTerminalTool extends Disposable implements IToolImpl {
 				undefined,
 				undefined,
 				() => resolveOnce(false),
+				riskAssessment,
 			);
 
 			chatModel.acceptResponseProgress(request, part);
@@ -1635,7 +1658,11 @@ export class RunInTerminalTool extends Disposable implements IToolImpl {
 			});
 			const rewrittenRetryReason = retryRewriteResult.requestUnsandboxedExecutionReason ?? retryReason;
 			const retryConfirmationCommand = toolSpecificData.presentationOverrides?.commandLine ?? command;
-			const shouldRetry = await this._confirmAutomaticUnsandboxRetry(invocation.context.sessionResource, retryConfirmationCommand, shell, retryRewriteResult.blockedDomains, token);
+			const retryRiskAssessment = {
+				toolId: TerminalToolId.RunInTerminal,
+				parameters: { ...args, command: retryRewriteResult.rewrittenCommand, requestUnsandboxedExecution: true },
+			};
+			const shouldRetry = await this._confirmAutomaticUnsandboxRetry(invocation.context.sessionResource, retryConfirmationCommand, shell, retryRewriteResult.blockedDomains, retryRiskAssessment, token);
 			if (shouldRetry) {
 				const retryToolSpecificData: IChatTerminalToolInvocationData = {
 					...toolSpecificData,
@@ -2310,6 +2337,13 @@ export class RunInTerminalTool extends Disposable implements IToolImpl {
 		// _activeExecutions.
 		const executionForDisposal = RunInTerminalTool._activeExecutions.get(termId);
 		store.add(terminalInstance.onDisposed(() => {
+			// If kill_terminal is disposing this terminal, the agent will
+			// receive the output through the normal tool-result flow —
+			// skip the redundant steering message.
+			if (RunInTerminalTool._killedByTool.has(termId)) {
+				disposeNotification();
+				return;
+			}
 			if (handleSessionCancelled()) {
 				return;
 			}
