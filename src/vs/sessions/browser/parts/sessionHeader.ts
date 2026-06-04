@@ -7,14 +7,14 @@ import './media/chatCompositeBar.css';
 import { Disposable, DisposableStore, MutableDisposable } from '../../../base/common/lifecycle.js';
 import { Emitter, Event } from '../../../base/common/event.js';
 import { $, addDisposableListener, DisposableResizeObserver, EventType, reset } from '../../../base/browser/dom.js';
-import { autorun, IReader } from '../../../base/common/observable.js';
+import { autorun, IObservable, IReader, observableSignalFromEvent } from '../../../base/common/observable.js';
 import { IThemeService } from '../../../platform/theme/common/themeService.js';
 import { Codicon } from '../../../base/common/codicons.js';
-import { ThemeIcon, themeColorFromId } from '../../../base/common/themables.js';
+import { ThemeIcon } from '../../../base/common/themables.js';
 import { asCssVariable } from '../../../platform/theme/common/colorUtils.js';
 import { localize } from '../../../nls.js';
-import { SessionStatus } from '../../services/sessions/common/session.js';
 import { IActiveSession } from '../../services/sessions/common/sessionsManagement.js';
+import { ISessionsListModelService } from '../../services/sessions/browser/sessionsListModelService.js';
 import { IInstantiationService } from '../../../platform/instantiation/common/instantiation.js';
 import { HiddenItemStrategy, MenuWorkbenchToolBar } from '../../../platform/actions/browser/toolbar.js';
 import { Menus } from '../menus.js';
@@ -39,8 +39,6 @@ export class SessionHeader extends Disposable {
 	private readonly _titleEl: HTMLElement;
 	private readonly _metaRow: HTMLElement;
 	private readonly _toolbar: MenuWorkbenchToolBar;
-	private readonly _inlineToolbar: MenuWorkbenchToolBar;
-	private readonly _inlineToolbarContainer: HTMLElement;
 	private readonly _titleActionsEl: HTMLElement;
 
 	private readonly _sessionDisposables = this._register(new MutableDisposable<DisposableStore>());
@@ -55,6 +53,8 @@ export class SessionHeader extends Disposable {
 	private _visible = false;
 
 	private readonly _sessionTransfer = LocalSelectionTransfer.getInstance<DraggedSessionIdentifier>();
+
+	private readonly _readStateSignal: IObservable<void>;
 
 	get element(): HTMLElement {
 		return this._container;
@@ -71,8 +71,11 @@ export class SessionHeader extends Disposable {
 	constructor(
 		@IThemeService private readonly _themeService: IThemeService,
 		@IInstantiationService instantiationService: IInstantiationService,
+		@ISessionsListModelService private readonly _sessionsListModelService: ISessionsListModelService,
 	) {
 		super();
+
+		this._readStateSignal = observableSignalFromEvent(this, this._sessionsListModelService.onDidChange);
 
 		this._container = $('.chat-composite-bar.session-header-bar');
 
@@ -99,19 +102,15 @@ export class SessionHeader extends Disposable {
 		titleRow.appendChild(titleActions);
 		this._titleActionsEl = titleActions;
 
-		this._inlineToolbarContainer = $('.chat-composite-bar-inline-toolbar');
-		this._inlineToolbar = this._register(instantiationService.createInstance(MenuWorkbenchToolBar, this._inlineToolbarContainer, Menus.SessionBarInlineToolbar, {
-			hiddenItemStrategy: HiddenItemStrategy.Ignore,
-			menuOptions: { shouldForwardArgs: true },
-			highlightToggledItems: true,
-		}));
-
 		const toolbarContainer = $('.chat-composite-bar-toolbar');
 		titleActions.appendChild(toolbarContainer);
 		this._toolbar = this._register(instantiationService.createInstance(MenuWorkbenchToolBar, toolbarContainer, Menus.SessionBarToolbar, {
 			hiddenItemStrategy: HiddenItemStrategy.Ignore,
 			menuOptions: { shouldForwardArgs: true },
 			highlightToggledItems: true,
+			// Render every group in the primary slot with a separator between groups
+			// so the New Chat action sits visually separated from the pin/maximize/close cluster.
+			toolbarOptions: { primaryGroup: () => true, useSeparatorsInPrimaryActions: true },
 		}));
 
 		this._metaRow = $('.chat-composite-bar-meta-row');
@@ -140,12 +139,12 @@ export class SessionHeader extends Disposable {
 				return;
 			}
 
-			// Don't initiate a drag when the gesture starts inside one of the
-			// header toolbars (Run, Open in VS Code, New Chat). A small pointer
+			// Don't initiate a drag when the gesture starts inside the header
+			// toolbar (Run, Open in VS Code, New Chat, pin, close). A small pointer
 			// move during a button click would otherwise start a session drag
 			// and swallow the click.
 			const target = e.target as Node | null;
-			if (target && (this._titleActionsEl.contains(target) || this._inlineToolbarContainer.contains(target))) {
+			if (target && this._titleActionsEl.contains(target)) {
 				e.preventDefault();
 				return;
 			}
@@ -176,7 +175,6 @@ export class SessionHeader extends Disposable {
 		}
 		this._session = session;
 		this._toolbar.context = session;
-		this._inlineToolbar.context = session;
 
 		const store = new DisposableStore();
 		this._sessionDisposables.value = store;
@@ -187,6 +185,7 @@ export class SessionHeader extends Disposable {
 		}
 
 		store.add(autorun(reader => {
+			this._readStateSignal.read(reader);
 			this._updateHeader(session, reader);
 		}));
 
@@ -198,10 +197,10 @@ export class SessionHeader extends Disposable {
 	private _updateHeader(session: IActiveSession, reader: IReader): void {
 		// Session icon — mirror the status-based icon shown in the sessions list.
 		const status = session.status.read(reader);
-		const isRead = session.isRead.read(reader);
+		const isRead = this._sessionsListModelService.isSessionRead(session);
 		const isArchived = session.isArchived.read(reader);
 		const pullRequestIcon = session.workspace.read(reader)?.folders[0]?.gitRepository?.gitHubInfo.read(reader)?.pullRequest?.icon;
-		const icon = this._getStatusIcon(status, isRead, isArchived, pullRequestIcon);
+		const icon = this._sessionsListModelService.getStatusIcon(status, isRead, isArchived, pullRequestIcon);
 		this._iconEl.className = 'chat-composite-bar-session-icon';
 		this._iconEl.classList.add(...ThemeIcon.asClassNameArray(icon));
 		this._iconEl.style.color = icon.color ? asCssVariable(icon.color.id) : '';
@@ -267,36 +266,8 @@ export class SessionHeader extends Disposable {
 			hasMeta = true;
 		}
 
-		// The New Chat (`+`) toolbar always lives in the meta row (next to the diff
-		// stats), so the meta row is never empty.
-		this._metaRow.appendChild(this._inlineToolbarContainer);
-
+		this._metaRow.style.display = hasMeta ? '' : 'none';
 		this._onDidChangeHeight.fire();
-	}
-
-	/**
-	 * The status-based icon shown next to the session title. Mirrors the icon logic used by
-	 * the sessions list (`SessionsListRenderer.getStatusIcon`) so both surfaces stay in sync.
-	 * Replicated inline because the list renderer lives in the `contrib/` layer, which the
-	 * core `browser/parts/` layer must not import from.
-	 */
-	private _getStatusIcon(status: SessionStatus, isRead: boolean, isArchived: boolean, pullRequestIcon?: ThemeIcon): ThemeIcon {
-		switch (status) {
-			case SessionStatus.InProgress:
-				return { ...Codicon.sessionInProgress, color: themeColorFromId('textLink.foreground') };
-			case SessionStatus.NeedsInput:
-				return { ...Codicon.circleFilled, color: themeColorFromId('list.warningForeground') };
-			case SessionStatus.Error:
-				return { ...Codicon.error, color: themeColorFromId('errorForeground') };
-			default:
-				if (pullRequestIcon) {
-					return pullRequestIcon;
-				}
-				if (!isRead && !isArchived) {
-					return { ...Codicon.circleFilled, color: themeColorFromId('textLink.foreground') };
-				}
-				return { ...Codicon.circleSmallFilled, color: themeColorFromId('agentSessionReadIndicator.foreground') };
-		}
 	}
 
 	private _setVisible(visible: boolean): void {
@@ -345,6 +316,7 @@ export class SessionViewFloatingToolbar extends Disposable {
 			hiddenItemStrategy: HiddenItemStrategy.Ignore,
 			menuOptions: { shouldForwardArgs: true },
 			highlightToggledItems: true,
+			toolbarOptions: { primaryGroup: () => true, useSeparatorsInPrimaryActions: true },
 		}));
 
 		this._setVisible(false);

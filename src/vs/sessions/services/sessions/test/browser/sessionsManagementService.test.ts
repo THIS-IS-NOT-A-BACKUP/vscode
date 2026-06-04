@@ -25,7 +25,8 @@ import { IChatService } from '../../../../../workbench/contrib/chat/common/chatS
 import { IChatEditorOptions } from '../../../../../workbench/contrib/chat/browser/widgetHosts/editor/chatEditor.js';
 import { PreferredGroup } from '../../../../../workbench/services/editor/common/editorService.js';
 import { IChat, ISession, ISessionType, ISessionWorkspace } from '../../common/session.js';
-import { ISessionChangeEvent, ISendRequestOptions, ISessionsProvider } from '../../common/sessionsProvider.js';
+import { ILanguageModelChatMetadataAndIdentifier } from '../../../../../workbench/contrib/chat/common/languageModels.js';
+import { ISessionChangeEvent, ISendRequestOptions, ISessionModelPickerOptions, ISessionsProvider } from '../../common/sessionsProvider.js';
 import { SessionsManagementService } from '../../browser/sessionsManagementService.js';
 import { ISessionsManagementService } from '../../common/sessionsManagement.js';
 import { ISessionsProvidersService } from '../../browser/sessionsProvidersService.js';
@@ -168,6 +169,9 @@ class TestSessionsProvider extends mock<ISessionsProvider>() {
 	override createNewSession(): ISession { return this._session; }
 	override getSessionTypes(): ISessionType[] { return [...this.sessionTypes]; }
 	override async renameChat(): Promise<void> { }
+	override getModels(): readonly ILanguageModelChatMetadataAndIdentifier[] { return []; }
+	override getModelPickerOptions(): ISessionModelPickerOptions { return { useGroupedModelPicker: true, showFeatured: true, showUnavailableFeatured: false, showManageModelsAction: false }; }
+	override readonly onDidChangeModels = Event.None;
 	override setModel(): void { }
 	override async archiveSession(): Promise<void> { }
 	override async unarchiveSession(): Promise<void> { }
@@ -279,7 +283,7 @@ suite('SessionsManagementService', () => {
 		const storage = disposables.add(new InMemoryStorageService());
 		storage.store(
 			'agentSessions.activeSessionStates',
-			JSON.stringify([{ sessionResource: targetSession.resource.toString(), isActive: true }]),
+			JSON.stringify([{ sessionResource: targetSession.resource.toString(), visibleOrder: 0, isActive: true }]),
 			1 /* StorageScope.WORKSPACE */,
 			1 /* StorageTarget.MACHINE */,
 		);
@@ -469,55 +473,6 @@ suite('SessionsManagementService', () => {
 			visible: ['a', 'b', 'c'],
 			sticky: [true, false, false],
 			active: 'b',
-		});
-	});
-
-	test('restoreVisibleSessions restores an active new-session slot alongside pinned sessions', async () => {
-		const sessionA = stubSession({ sessionId: 'a', providerId: 'test' });
-		const sessionB = stubSession({ sessionId: 'b', providerId: 'test' });
-		const sessions = [sessionA, sessionB];
-
-		const provider = new class extends TestSessionsProvider {
-			constructor() { super(sessionA); }
-			override getSessions(): ISession[] { return sessions; }
-		};
-
-		const instantiationService = disposables.add(new TestInstantiationService());
-		const storage = disposables.add(new InMemoryStorageService());
-		// Persisted grid: [A (sticky), B] with the empty new-session slot active.
-		storage.store(
-			'agentSessions.activeSessionStates',
-			JSON.stringify([
-				{ sessionResource: sessionA.resource.toString(), visibleOrder: 0, isSticky: true, isActive: false },
-				{ sessionResource: sessionB.resource.toString(), visibleOrder: 1, isSticky: false, isActive: false },
-			]),
-			1 /* StorageScope.WORKSPACE */,
-			1 /* StorageTarget.MACHINE */,
-		);
-		storage.store('agentSessions.newSessionSlotActive', true, 1 /* StorageScope.WORKSPACE */, 1 /* StorageTarget.MACHINE */);
-
-		instantiationService.stub(IStorageService, storage);
-		instantiationService.stub(ILogService, new NullLogService());
-		instantiationService.stub(IContextKeyService, disposables.add(new MockContextKeyService()));
-		instantiationService.stub(ISessionsProvidersService, new TestSessionsProvidersService([provider]));
-		instantiationService.stub(IUriIdentityService, { extUri: extUriBiasedIgnorePathCase });
-		instantiationService.stub(IChatWidgetService, new TestChatWidgetService());
-		instantiationService.stub(IAgentSessionsService, new TestAgentSessionsService());
-		instantiationService.stub(IProgressService, new TestProgressService());
-		instantiationService.stub(IChatService, new class extends mock<IChatService>() {
-			override readonly onDidSubmitRequest = Event.None;
-		});
-
-		const service = disposables.add(instantiationService.createInstance(SessionsManagementService));
-
-		await service.restoreVisibleSessions();
-
-		assert.deepStrictEqual({
-			visible: service.visibleSessions.get().map(s => s?.sessionId ?? null),
-			active: service.activeSession.get()?.sessionId ?? null,
-		}, {
-			visible: ['a', 'b', null],
-			active: null,
 		});
 	});
 

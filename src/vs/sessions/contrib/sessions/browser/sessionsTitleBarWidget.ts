@@ -10,9 +10,6 @@ import { MarshalledId } from '../../../../base/common/marshallingIds.js';
 import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
 import { StandardMouseEvent } from '../../../../base/browser/mouseEvent.js';
 import { localize } from '../../../../nls.js';
-import { HoverStyle } from '../../../../base/browser/ui/hover/hover.js';
-import { HoverPosition } from '../../../../base/browser/ui/hover/hoverWidget.js';
-import { IHoverService } from '../../../../platform/hover/browser/hover.js';
 import { BaseActionViewItem, IBaseActionViewItemOptions } from '../../../../base/browser/ui/actionbar/actionViewItems.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { IMenuService, MenuItemAction, MenuRegistry, SubmenuItemAction } from '../../../../platform/actions/common/actions.js';
@@ -25,16 +22,12 @@ import { IActionViewItemService } from '../../../../platform/actions/browser/act
 import { autorun } from '../../../../base/common/observable.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
 import { IsAuxiliaryWindowContext } from '../../../../workbench/common/contextkeys.js';
-import { ChatSessionProviderIdContext, IsNewChatSessionContext, SessionsWelcomeVisibleContext } from '../../../common/contextkeys.js';
+import { ChatSessionProviderIdContext, SessionsWelcomeVisibleContext } from '../../../common/contextkeys.js';
 import { ISessionsProvidersService } from '../../../services/sessions/browser/sessionsProvidersService.js';
-import { ISessionsListModelService } from './views/sessionsListModelService.js';
+import { ISessionsListModelService } from '../../../services/sessions/browser/sessionsListModelService.js';
 import { SHOW_SESSIONS_PICKER_COMMAND_ID } from './sessionsActions.js';
 import { IsSessionArchivedContext, IsSessionPinnedContext, IsSessionReadContext, SessionItemContextMenuId, SessionItemHasBranchNameContext } from './views/sessionsList.js';
 import { ISessionsManagementService } from '../../../services/sessions/common/sessionsManagement.js';
-import { IMarkdownString, MarkdownString } from '../../../../base/common/htmlContent.js';
-import { buildSessionHoverContent } from './sessionHoverContent.js';
-
-const titleBarContextKeys = new Set([IsNewChatSessionContext.key]);
 
 /**
  * Sessions Title Bar Widget - renders the active chat session
@@ -63,7 +56,6 @@ export class SessionsTitleBarWidget extends BaseActionViewItem {
 	constructor(
 		action: SubmenuItemAction,
 		options: IBaseActionViewItemOptions | undefined,
-		@IHoverService private readonly hoverService: IHoverService,
 		@ISessionsManagementService private readonly sessionsManagementService: ISessionsManagementService,
 		@ISessionsListModelService private readonly sessionsListModelService: ISessionsListModelService,
 		@IContextMenuService private readonly contextMenuService: IContextMenuService,
@@ -95,13 +87,6 @@ export class SessionsTitleBarWidget extends BaseActionViewItem {
 		this._register(this.sessionsProvidersService.onDidChangeProviders(() => {
 			this._lastRenderState = undefined;
 			this._render();
-		}));
-
-		this._register(this.contextKeyService.onDidChangeContext(e => {
-			if (e.affectsSome(titleBarContextKeys)) {
-				this._lastRenderState = undefined;
-				this._render();
-			}
 		}));
 	}
 
@@ -136,19 +121,8 @@ export class SessionsTitleBarWidget extends BaseActionViewItem {
 		this._isRendering = true;
 
 		try {
-			const isNewChatSession = this.contextKeyService.getContextKeyValue<boolean>(IsNewChatSessionContext.key);
-			this._container.classList.toggle('agent-sessions-titlebar-hidden', !!isNewChatSession);
-			if (isNewChatSession) {
-				this._dynamicDisposables.clear();
-				this._container.setAttribute('aria-hidden', 'true');
-				this._container.removeAttribute('role');
-				this._container.removeAttribute('aria-label');
-				this._container.tabIndex = -1;
-				return;
-			}
-
 			const icon = this._getActiveSessionIcon();
-			const sessionTitle = this._getSessionTitle();
+			const sessionTitle = this._getSessionTitle() ?? localize('newSession', "New Session");
 			const workspaceLabel = this._getRepositoryLabel();
 
 			// Build a render-state key from all displayed data
@@ -219,14 +193,6 @@ export class SessionsTitleBarWidget extends BaseActionViewItem {
 
 			this._container.appendChild(sessionPill);
 
-			// Beacon-style hover with session details, positioned below center
-			this._dynamicDisposables.add(this.hoverService.setupDelayedHover(sessionPill, () => ({
-				content: this._buildSessionHoverContent(),
-				style: HoverStyle.Pointer,
-				position: { hoverPosition: HoverPosition.BELOW },
-				persistence: { hideOnHover: false },
-			})));
-
 			// Keyboard handler
 			this._dynamicDisposables.add(addDisposableListener(this._container, EventType.KEY_DOWN, (e: KeyboardEvent) => {
 				if (e.key === 'Enter' || e.key === ' ') {
@@ -249,17 +215,6 @@ export class SessionsTitleBarWidget extends BaseActionViewItem {
 			return sessionData.icon;
 		}
 		return undefined;
-	}
-
-	/**
-	 * Build a compact hover markdown for the active session.
-	 */
-	private _buildSessionHoverContent(): IMarkdownString {
-		const sessionData = this.sessionsManagementService.activeSession.get();
-		if (!sessionData) {
-			return new MarkdownString('');
-		}
-		return buildSessionHoverContent(sessionData, this.sessionsProvidersService);
 	}
 
 	/**
@@ -290,7 +245,7 @@ export class SessionsTitleBarWidget extends BaseActionViewItem {
 			return;
 		}
 
-		if (this.contextKeyService.getContextKeyValue<boolean>(IsNewChatSessionContext.key)) {
+		if (!sessionData.isCreated.get()) {
 			return;
 		}
 
