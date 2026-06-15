@@ -185,6 +185,7 @@ import { PluginInstallService } from './pluginInstallService.js';
 import { PluginAutoUpdate } from './pluginAutoUpdate.js';
 import './promptSyntax/promptCodingAgentActionContribution.js';
 import './promptSyntax/promptToolsCodeLensProvider.js';
+import './promptSyntax/promptToolSetsCodeLensProvider.js';
 import { ChatSessionOptionSlashCommandsContribution, ChatSlashCommandsContribution } from './chatSlashCommands.js';
 import './planReviewFeedback/planReviewFeedbackEditorContribution.js';
 import { registerPlanReviewFeedbackEditorActions } from './planReviewFeedback/planReviewFeedbackEditorActions.js';
@@ -931,7 +932,6 @@ configurationRegistry.registerConfiguration({
 			type: 'boolean',
 			description: nls.localize('chat.plugins.enabled', "Enable agent plugin integration in chat."),
 			default: true,
-			tags: ['preview'],
 			policy: {
 				name: 'ChatPluginsEnabled',
 				category: PolicyCategory.InteractiveSession,
@@ -957,7 +957,6 @@ configurationRegistry.registerConfiguration({
 			additionalProperties: { type: 'boolean' },
 			markdownDescription: nls.localize('chat.plugins.enabledPlugins', "Enterprise-managed plugin enablement. Keys are plugin IDs in `<plugin>@<marketplace>` form (resolved to Copilot CLI install paths); values enable (`true`) or disable (`false`) the plugin. Discovered alongside the path-keyed entries in {0}. When set by policy, also restricts which marketplace-discovered plugins are allowed to load (only IDs mapped to `true` here pass the gate).", `\`#${ChatConfiguration.PluginLocations}#\``),
 			scope: ConfigurationScope.APPLICATION,
-			tags: ['experimental'],
 			policy: {
 				name: 'ChatEnabledPlugins',
 				category: PolicyCategory.InteractiveSession,
@@ -1002,7 +1001,6 @@ configurationRegistry.registerConfiguration({
 			default: {},
 			scope: ConfigurationScope.APPLICATION,
 			included: false,
-			tags: ['experimental'],
 			markdownDescription: nls.localize('chat.plugins.extraMarketplaces', "Enterprise-managed additional plugin marketplaces. Unioned with {0}.", `\`#${ChatConfiguration.PluginMarketplaces}#\``),
 			policy: {
 				name: 'ChatExtraMarketplaces',
