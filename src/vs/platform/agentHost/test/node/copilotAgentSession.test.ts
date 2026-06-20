@@ -288,7 +288,7 @@ async function createAgentSession(disposables: DisposableStore, options?: {
 		sessionId: 'test-session-1',
 		workingDirectory: options?.workingDirectory,
 		resolvedAgentName: undefined,
-		snapshot: options?.clientSnapshot ?? { tools: [], plugins: [] },
+		snapshot: options?.clientSnapshot ?? { tools: [], plugins: [], mcpServers: {} },
 		shellManager: undefined,
 		githubToken: undefined,
 		model: undefined,
@@ -896,6 +896,49 @@ suite('CopilotAgentSession', () => {
 				_meta: {
 					cost: 2,
 					copilotUsage: { totalNanoAiu: 1_250_000_000, tokenDetails: [] },
+				},
+			},
+		]);
+	});
+
+	test('forwards account quota snapshots on usage metadata', async () => {
+		const { session, mockSession, signals } = await createAgentSession(disposables);
+
+		session.resetTurnState('turn-quota');
+		mockSession.fire('assistant.usage', {
+			model: 'claude-sonnet-4.6',
+			inputTokens: 10,
+			outputTokens: 20,
+			// `quotaSnapshots` is marked `asInternal` in the SDK schema so it is not on the public type, but is present at runtime.
+			quotaSnapshots: {
+				premium_interactions: {
+					isUnlimitedEntitlement: false,
+					entitlementRequests: 300,
+					usedRequests: 75,
+					usageAllowedWithExhaustedQuota: true,
+					remainingPercentage: 75,
+					overage: 1.5,
+					overageAllowedWithExhaustedQuota: true,
+					resetDate: '2026-07-01T00:00:00.000Z',
+				},
+			},
+		} as unknown as SessionEventPayload<'assistant.usage'>['data']);
+
+		const usageActions = signals
+			.filter((s): s is IAgentActionSignal => s.kind === 'action')
+			.map(s => s.action)
+			.filter(a => a.type === ActionType.ChatUsage);
+
+		assert.deepStrictEqual(usageActions.map(a => a.usage._meta?.quotaSnapshots), [
+			{
+				premium_interactions: {
+					isUnlimitedEntitlement: false,
+					entitlementRequests: 300,
+					usedRequests: 75,
+					remainingPercentage: 75,
+					overage: 1.5,
+					overageAllowedWithExhaustedQuota: true,
+					resetDate: '2026-07-01T00:00:00.000Z',
 				},
 			},
 		]);
@@ -1763,6 +1806,7 @@ suite('CopilotAgentSession', () => {
 				clientSnapshot: {
 					tools,
 					plugins: [],
+					mcpServers: {},
 				},
 				activeClientState,
 			});
@@ -2896,6 +2940,7 @@ suite('CopilotAgentSession', () => {
 				inputSchema: { type: 'object', properties: {} },
 			}],
 			plugins: [],
+			mcpServers: {},
 		};
 
 		/** Builds a live ActiveClientState seeded with the given owning clientId and the snapshot's tools. */
