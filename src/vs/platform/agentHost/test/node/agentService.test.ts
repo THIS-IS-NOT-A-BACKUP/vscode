@@ -79,6 +79,8 @@ class TestCopilotApiService implements ICopilotApiService {
 	async countTokens(): Promise<Anthropic.MessageTokensCount> { throw new Error('not used'); }
 	async models(): Promise<CCAModel[]> { return []; }
 	async responses(): Promise<Response> { throw new Error('not used'); }
+	async resolveRestrictedTelemetryContext() { return { restrictedTelemetryEnabled: false, trackingId: undefined, telemetryEndpoint: undefined }; }
+	async resolveApiEndpoint() { return undefined; }
 	async utilityChatCompletion(githubToken: string, request: ICopilotUtilityChatCompletionRequest, options?: ICopilotApiServiceRequestOptions): Promise<string> {
 		this.utilityCalls.push({ token: githubToken, request, options });
 		if (this.error) {
@@ -1313,6 +1315,9 @@ suite('AgentService (node dispatcher)', () => {
 				updateRef: async () => { },
 				deleteRefs: async () => { },
 				revParse: async () => undefined,
+				resolveBranchBaselineCommit: async () => undefined,
+				overlayPathIntoTree: async () => undefined,
+				diffTreePaths: async () => undefined,
 				computeFileDiffsBetweenRefs: async () => undefined,
 			};
 			const localService = disposables.add(new AgentService(new NullLogService(), fileService, nullSessionDataService, { _serviceBrand: undefined } as IProductService, gitService));
@@ -1409,6 +1414,9 @@ suite('AgentService (node dispatcher)', () => {
 				updateRef: async () => { },
 				deleteRefs: async () => { },
 				revParse: async () => undefined,
+				resolveBranchBaselineCommit: async () => undefined,
+				overlayPathIntoTree: async () => undefined,
+				diffTreePaths: async () => undefined,
 				computeFileDiffsBetweenRefs: async () => undefined,
 			};
 			const localService = disposables.add(new AgentService(new NullLogService(), fileService, nullSessionDataService, { _serviceBrand: undefined } as IProductService, gitService));
@@ -2934,6 +2942,39 @@ suite('AgentService (node dispatcher)', () => {
 				origin: { kind: ChatOriginKind.Tool, chat: parentChat, toolCallId: 'tc-sub' },
 				interactivity: 'read-only',
 				hasStartedTurn: true,
+			});
+		});
+
+		test('the spawned catalog chat is resolvable from the inline pill resource via parseChatUri (the Open-Subagent contract)', async () => {
+			// The inline subagent pill (`ToolResultSubagentContent.resource`) and
+			// the catalog chat are both built from `buildSubagentChatUri`, and the
+			// Agents window resolves the pill to its tab by matching
+			// `parseChatUri(pillResource).chatId` against the catalog chat's
+			// parsed chatId (see `findSubagentChat`/`matchesResource` in
+			// `openSubagentChat.ts`). If the two ever desync, the pill shows the
+			// fallback "Open Subagent" label and clicking it no-ops. Guard the
+			// round-trip so the pill stays resolvable.
+			service.registerProvider(copilotAgent);
+			const session = await service.createSession({ provider: 'copilot' });
+			const parentChat = buildDefaultChatUri(session.toString());
+			startParentTurn(session, 'turn-1');
+
+			copilotAgent.fireProgress({
+				kind: 'subagent_started', chat: URI.parse(parentChat), toolCallId: 'tc-sub',
+				agentName: 'explore', agentDisplayName: 'Explore', agentDescription: 'Explores',
+			});
+
+			// The resource the inline pill carries for this subagent.
+			const pillResource = buildSubagentChatUri(session.toString(), 'tc-sub');
+			const pillChatId = parseChatUri(pillResource)?.chatId;
+			const catalog = service.stateManager.getSessionState(session.toString())?.chats ?? [];
+			const resolvedByPill = catalog.filter(c => parseChatUri(c.resource)?.chatId === pillChatId);
+			assert.deepStrictEqual({
+				pillChatId,
+				resolvedCatalogEntries: resolvedByPill.length,
+			}, {
+				pillChatId: 'subagent/tc-sub',
+				resolvedCatalogEntries: 1,
 			});
 		});
 
