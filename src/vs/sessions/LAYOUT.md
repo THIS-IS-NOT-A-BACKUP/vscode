@@ -201,6 +201,16 @@ The Toggle Secondary Side Bar action collapses or restores the secondary side ba
 
 The main editor part can be explicitly revealed for workflows that target it directly.
 
+### Single-pane redesign (experimental — `sessions.layout.singlePaneDetailPanel`, default OFF)
+
+The entire third-pane redesign is gated behind the experimental setting `sessions.layout.singlePaneDetailPanel`, read **once at startup** (a window reload applies a change). When the setting is **off** (default) the Agents window renders exactly as documented above (auxiliary bar as its own grid column with its composite tab strip + title, the standard multi-diff Changes editor). When **on**, the third pane becomes a **single pane with one full-width tab bar**:
+
+- The auxiliary bar is removed from the workbench grid and **docked inside the editor part** (absolutely positioned on the right, below the editor tab strip); the grid's top-right row becomes `Sessions | Editor`, and the editor part spans the editor + detail-panel width.
+- The editor group's **title/tab strip spans the full width** while its content is inset on the right by the detail-panel width, via the concrete `EditorPart.setContentRightInset(px)` method (`EditorPart`/`EditorGroupView`; not on the `IEditorPart` interface; `0` = no-op for all other layouts).
+- A vertical **sash** on the left edge of the docked panel resizes it (`browser/workbench.ts` `_layoutDockedAuxiliaryBar` / `_ensureDockedAuxiliaryBarSash`), clamped to `[220px, editorWidth − 300px]`; the width persists via the part-sizes snapshot.
+- Changes opens as a **custom `SessionChangesEditor`** (Branch Changes dropdown + diff stats header above the embedded multi-diff), the auxiliary bar's composite tab strip + title are hidden, and `DetailPanelController` maps the active editor tab to the detail container (Changes → files + Checks, File → Explorer, Browser → hidden).
+- CSS is scoped by a `.dock-detail-panel` class on the workbench container; `:not(.dock-detail-panel)` reproduces the original grid-based styling.
+
 ---
 
 ## 6. Feature Support
@@ -271,6 +281,8 @@ Each session independently remembers whether the auxiliary bar is visible and wh
 **The side pane never opens automatically for existing sessions.** It is only shown when the user opens it; the controller never auto-reveals it on session switch or when a chat turn produces new file changes. A session with no explicit "visible" choice (including one that just converted from the new-session view to an existing session) keeps the side pane hidden until the user opens it.
 
 **Default view on new sessions:** An untitled (new-session) session opens the side pane by default — the Files view, or the Changes view once it has changes — and that choice sticks until the user changes it. When a new session is submitted (it converts to a real session while staying active) the side pane is kept as the user left it: if it was open it stays open and switches to the Changes view so changes are visible as soon as they land; if it was closed it stays closed.
+
+The Changes view's body is a vertical `SplitView` of File Changes, Other Files, and Checks. Other Files is the flexible middle pane: while it is expanded, File Changes is capped to its content height and Checks is capped to its checks content height, so Other Files receives the remaining space; when Other Files is hidden or collapsed, File Changes receives the remaining space after Checks reaches its content height. When File Changes has no changed files, it keeps a 140px minimum height for the empty state.
 
 **Editor maximized:** While the editor area is maximized (`IAgentWorkbenchLayoutService.isEditorMaximized()`), the Changes view is always shown in the auxiliary bar, **irrespective of the session's previous or saved state**. This is driven directly from the auxiliary-bar sync autorun, so it holds across session changes and changes-state updates while maximized. The forced visibility is never captured as the session's per-session preference, so when the editor is un-maximized the autorun re-runs and restores the session's real auxiliary bar state.
 
