@@ -16,7 +16,7 @@ import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/
 import { AgentSession, ClaudePreferAgentHostAgentsSettingId, ClaudePreferAgentHostEditorSettingId, IAgentHostService, type IAgentCreateChatOptions, type IAgentCreateSessionConfig, type IAgentSessionMetadata } from '../../../../../../platform/agentHost/common/agentService.js';
 import type { IAgentSubscription } from '../../../../../../platform/agentHost/common/state/agentSubscription.js';
 import type { ResolveSessionConfigResult } from '../../../../../../platform/agentHost/common/state/protocol/commands.js';
-import { ChatInteractivity as ProtocolChatInteractivity, ChatOriginKind as ProtocolChatOriginKind, CustomizationLoadStatus, CustomizationType, MessageKind, SessionLifecycle, type AgentInfo, type ChangesSummary, type Customization, type RootState, type SessionConfigState, type SessionState, type SessionSummary } from '../../../../../../platform/agentHost/common/state/protocol/state.js';
+import { ChatInteractivity as ProtocolChatInteractivity, ChatOriginKind as ProtocolChatOriginKind, CustomizationLoadStatus, CustomizationType, McpServerStatus, MessageKind, SessionLifecycle, type AgentInfo, type ChangesSummary, type Customization, type RootState, type SessionConfigState, type SessionState, type SessionSummary } from '../../../../../../platform/agentHost/common/state/protocol/state.js';
 import { buildChatUri, buildDefaultChatUri, buildSubagentChatUri, ChangesetStatus, SessionStatus as ProtocolSessionStatus, StateComponents, withSessionWorkspaceless, type ChangesetState, type ChatState, type ChatSummary } from '../../../../../../platform/agentHost/common/state/sessionState.js';
 import { ActionType, NotificationType, type ActionEnvelope, type IRootConfigChangedAction, type ChatAction, type SessionAction, type TerminalAction, type INotification, type ClientAnnotationsAction } from '../../../../../../platform/agentHost/common/state/sessionActions.js';
 import { SessionConfigKey } from '../../../../../../platform/agentHost/common/sessionConfigKeys.js';
@@ -1472,6 +1472,45 @@ suite('LocalAgentHostSessionsProvider', () => {
 		]);
 	});
 
+	test('getMcpServers dispatches MCP lifecycle requests', async () => {
+		const provider = createProvider(disposables, agentHost);
+
+		fireSessionAdded(agentHost, 'mcp-lifecycle', { title: 'MCP Lifecycle' });
+		const session = provider.getSessions().find(s => s.title.get() === 'MCP Lifecycle');
+		assert.ok(session);
+
+		const fakeState: SessionState = {
+			provider: 'copilotcli',
+			title: 'MCP Lifecycle',
+			status: ProtocolSessionStatus.Idle,
+			lifecycle: SessionLifecycle.Ready,
+			activeClients: [],
+			chats: [],
+			customizations: [{
+				type: CustomizationType.McpServer,
+				id: 'mcp://docs',
+				uri: 'mcp://docs',
+				name: 'Docs',
+				enabled: true,
+				state: { kind: McpServerStatus.Stopped },
+			}],
+		};
+		provider.getSessionConfig(session!.sessionId);
+		agentHost.setSessionState('mcp-lifecycle', 'copilotcli', fakeState);
+
+		const servers = provider.getMcpServers(session!.sessionId);
+		assert.strictEqual(servers.length, 1);
+		await servers[0].start();
+		await servers[0].stop();
+
+		const actions = agentHost.dispatchedActions.slice(-2);
+		assert.deepStrictEqual(actions.map(({ action }) => action.type), [
+			ActionType.SessionMcpServerStartRequested,
+			ActionType.SessionMcpServerStopRequested,
+		]);
+		assert.deepStrictEqual(actions.map(({ action }) => (action as { id: string }).id), ['mcp://docs', 'mcp://docs']);
+	});
+
 	test('getCustomAgents returns no agents when the session has no SessionState', () => {
 		const provider = createProvider(disposables, agentHost);
 
@@ -1968,6 +2007,21 @@ suite('LocalAgentHostSessionsProvider', () => {
 		}, {
 			seededImmediately: { isolation: 'folder', branch: 'main' },
 			forwardedToAgentHost: { isolation: 'folder', branch: 'main' },
+		});
+	});
+
+	test('createNewSession forwards git.worktreeIncludeFiles as derived session config', () => {
+		const configService = new TestConfigurationService();
+		configService.setUserConfiguration('git.worktreeIncludeFiles', ['product.overrides.json', '**/node_modules/**']);
+		const provider = createProvider(disposables, agentHost, undefined, { configurationService: configService });
+		const session = provider.createNewSession(URI.parse('file:///home/user/project'), provider.sessionTypes[0].id);
+
+		assert.deepStrictEqual({
+			seededImmediately: provider.getSessionConfig(session.sessionId)?.values,
+			forwardedToAgentHost: agentHost.resolveSessionConfigRequests.at(-1)?.config,
+		}, {
+			seededImmediately: { worktreeIncludeFiles: ['product.overrides.json', '**/node_modules/**'] },
+			forwardedToAgentHost: { worktreeIncludeFiles: ['product.overrides.json', '**/node_modules/**'] },
 		});
 	});
 
