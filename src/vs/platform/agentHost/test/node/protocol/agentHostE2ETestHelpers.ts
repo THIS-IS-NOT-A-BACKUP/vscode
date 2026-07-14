@@ -157,10 +157,21 @@ export interface IAgentHostE2EProviderConfig {
 	readonly codexSdkRoot?: string;
 	/**
 	 * Provider implements `config.isolation: 'worktree'` and resolves the
-	 * working directory to a `.worktrees/...` path on materialization.
-	 * Claude has not landed worktree isolation yet (Phase 12 in roadmap).
+	 * working directory to a `.worktrees/...` path on materialization. Now
+	 * shared across all agents (Copilot, Codex, Claude) via the host-owned
+	 * worktree isolation controller.
 	 */
 	readonly supportsWorktreeIsolation: boolean;
+	/**
+	 * Provider routes shell commands through the host-managed custom terminal
+	 * tool (gated by {@link CopilotCliConfigKey.EnableCustomTerminalTool}),
+	 * which exposes a terminal resource whose `cwd` / `pwd` output can be
+	 * asserted. Currently true only for Copilot — Codex and Claude run shell
+	 * commands inside their own SDK subprocess and never surface a host
+	 * terminal resource, so the worktree suite verifies isolation via the
+	 * resolved working directory alone for them.
+	 */
+	readonly supportsHostTerminalTool: boolean;
 	/**
 	 * Provider exposes a subagent tool (`task` / `Task`) that produces
 	 * `ToolResultSubagentContent` and routes inner tool calls to a child
@@ -249,6 +260,7 @@ export function dispatchTurn(c: TestProtocolClient, session: string, turnId: str
 		action: {
 			type: ActionType.ChatTurnStarted,
 			turnId,
+			startedAt: '2025-01-01T00:00:00.000Z',
 			message: { text, origin: { kind: MessageKind.User } },
 		},
 	});
@@ -262,6 +274,7 @@ export function dispatchTurnWithAttachments(c: TestProtocolClient, session: stri
 		action: {
 			type: ActionType.ChatTurnStarted,
 			turnId,
+			startedAt: '2025-01-01T00:00:00.000Z',
 			message: { text, origin: { kind: MessageKind.User }, attachments: [...attachments] },
 		},
 	});
@@ -432,6 +445,14 @@ export function terminalResourceFromContent(content: readonly ToolResultContent[
 	return terminalContent?.resource;
 }
 
+/** Concatenates the text of any {@link ToolResultContentType.Text} parts in a tool result. */
+export function textFromContent(content: readonly ToolResultContent[]): string {
+	return content
+		.filter((c): c is Extract<ToolResultContent, { type: ToolResultContentType.Text }> => c.type === ToolResultContentType.Text)
+		.map(c => c.text)
+		.join('');
+}
+
 export function terminalText(state: TerminalState): string {
 	return removeAnsiEscapeCodes(state.content.map(part => part.type === 'command' ? `${part.commandLine}\n${part.output}` : part.value).join(''));
 }
@@ -552,6 +573,117 @@ export function startBackgroundApprovalLoop(c: TestProtocolClient, options: IBac
 
 // #endregion
 
+// #region Server lease
+
+/**
+ * Manages the agent host server + connected client lifecycle for one e2e test,
+ * hiding the difference between two strategies:
+ *
+ * - **Per-test** (always while recording): start a fresh server + proxy for
+ *   each test and kill it in teardown. Full isolation; every test pays server
+ *   fork + provider SDK client startup.
+ * - **Shared** (the default in replay): start the server + proxy once, then swap
+ *   the per-test fixture via {@link CapiReplayProxy.resetForReplay} and reconnect
+ *   a fresh client each test. The agent host's cached SDK client / CLI subprocess
+ *   is reused, so only the first test pays that startup. Safe as long as no test
+ *   returns mid-turn (see the drain note on the permission test): one server
+ *   serves every test, so a turn left in flight would leak its continuation into
+ *   the next test's fixture window as a strict cache miss.
+ *
+ * Both strategies dispose each test's sessions (abort-first, then
+ * `disposeSession`) and verify the replay traffic; the shared strategy verifies
+ * without stopping the server so the next test can reuse it.
+ */
+export class AgentHostE2EServerLease {
+	private _server: IServerHandle | undefined;
+	private _client: TestProtocolClient | undefined;
+	private readonly _shared: boolean;
+
+	constructor(
+		private readonly _config: IAgentHostE2EProviderConfig,
+		private readonly _startOptions: { readonly claudeSdkRoot?: string; readonly codexSdkRoot?: string; readonly homeDir?: string },
+	) {
+		// Server reuse is a replay-only optimization: recording writes one fixture
+		// per proxy and so needs a fresh proxy (hence a fresh server) per test.
+		// In replay it is always safe because every test drains its turns, so the
+		// reused server carries no in-flight work across tests.
+		this._shared = !RECORD;
+	}
+
+	/** Acquire a server + connected client for a test, returning both. */
+	async acquire(testTitle: string): Promise<{ server: IServerHandle; client: TestProtocolClient }> {
+		const capiReplay = capiReplayFor(this._config.provider, testTitle);
+		if (this._shared && this._server) {
+			const proxy = this._server.capiReplay;
+			if (!proxy) {
+				throw new Error('[agent-host-e2e] shared replay server has no capiReplay proxy to reset');
+			}
+			proxy.resetForReplay(capiReplay.fixturePath);
+		} else {
+			this._server = await startRealServer({ ...this._startOptions, capiReplay });
+		}
+		this._client = new TestProtocolClient(this._server.port);
+		await this._client.connect();
+		return { server: this._server, client: this._client };
+	}
+
+	/**
+	 * Release a test: dispose its sessions, disconnect the client, and verify the
+	 * replay traffic. A shared server is kept alive (with its cached SDK client)
+	 * for the next test; a per-test server is stopped and killed.
+	 */
+	async release(createdSessions: string[]): Promise<void> {
+		const client = this._client;
+		if (client) {
+			for (const session of createdSessions) {
+				try {
+					// Abort first so the SDK query unwinds cleanly before we drop
+					// the session — disposing a mid-turn session directly tends to
+					// leave the agent host wedged. `session/abortTurn` is not part
+					// of the StateAction union, so it bypasses the typed dispatch.
+					client.notify('dispatchAction', {
+						clientSeq: 9999,
+						action: { type: 'session/abortTurn', session },
+					});
+					await client.call('disposeSession', { session }, 30_000);
+				} catch { /* best-effort */ }
+			}
+			client.close();
+		}
+		createdSessions.length = 0;
+		this._client = undefined;
+
+		if (this._shared) {
+			// Surface this test's strict cache-misses but keep the server (and its
+			// cached SDK client) alive for the next test.
+			this._server?.capiReplay?.assertNoCacheMisses();
+		} else {
+			// Flush the recording / surface strict replay cache-misses before the
+			// process goes away. Kill even if the strict check throws.
+			try {
+				await this._server?.capiReplay?.stop();
+			} finally {
+				this._server?.process.kill();
+				this._server = undefined;
+			}
+		}
+	}
+
+	/** Tear down a shared server at the end of the suite (no-op for per-test). */
+	async dispose(): Promise<void> {
+		if (this._server) {
+			try {
+				await this._server.capiReplay?.close();
+			} finally {
+				this._server.process.kill();
+				this._server = undefined;
+			}
+		}
+	}
+}
+
+// #endregion
+
 // #region Shared suite
 
 /**
@@ -562,35 +694,33 @@ export function startBackgroundApprovalLoop(c: TestProtocolClient, options: IBac
 export function defineAgentHostE2ETests(config: IAgentHostE2EProviderConfig): void {
 	(config.enabled ? suite : suite.skip)(config.suiteTitle, function () {
 
-		let server: IServerHandle;
 		let client: TestProtocolClient;
 		const createdSessions: string[] = [];
 		const tempDirs: string[] = [];
+		const lease = new AgentHostE2EServerLease(config, {
+			claudeSdkRoot: config.claudeSdkRoot,
+			codexSdkRoot: config.codexSdkRoot,
+			// Normalize the real home + temp roots out of recorded request
+			// bodies so committed fixtures carry no local absolute paths.
+			homeDir: homedir(),
+		});
 
 		suiteSetup(async function () {
 			this.timeout(60_000);
 		});
 
-		suiteTeardown(function () {
-			// no-op: the server is started/killed per-test in setup/teardown
-			// because some agent host e2e paths (notably Claude's mid-turn dispose)
-			// leave the agent host in a bad state. Per-test isolation costs
-			// ~5s/test at startup but keeps a single broken test from
-			// poisoning every subsequent one.
+		suiteTeardown(async function () {
+			// In replay the lease reuses one server across the suite (swapping the
+			// replay fixture per test); tear it down here. While recording the
+			// lease already killed the per-test server in each teardown and this is
+			// a no-op.
+			this.timeout(60_000);
+			await lease.dispose();
 		});
 
 		setup(async function () {
 			this.timeout(60_000);
-			server = await startRealServer({
-				claudeSdkRoot: config.claudeSdkRoot,
-				codexSdkRoot: config.codexSdkRoot,
-				// Normalize the real home + temp roots out of recorded request
-				// bodies so committed fixtures carry no local absolute paths.
-				homeDir: homedir(),
-				capiReplay: capiReplayFor(config.provider, this.currentTest?.title ?? 'unknown'),
-			});
-			client = new TestProtocolClient(server.port);
-			await client.connect();
+			({ client } = await lease.acquire(this.currentTest?.title ?? 'unknown'));
 		});
 
 		teardown(async function () {
@@ -599,29 +729,7 @@ export function defineAgentHostE2ETests(config: IAgentHostE2EProviderConfig): vo
 			// has to abort an in-flight SDK query before disposeSession
 			// resolves, which can take longer than the default 5s.
 			this.timeout(60_000);
-			for (const session of createdSessions) {
-				try {
-					// Abort first so the SDK query unwinds cleanly before we
-					// drop the session — disposing a mid-turn Claude session
-					// directly tends to leave the agent host wedged.
-					// `session/abortTurn` is not part of the StateAction union,
-					// so it bypasses the typed `dispatch` helper.
-					client.notify('dispatchAction', {
-						clientSeq: 9999,
-						action: { type: 'session/abortTurn', session },
-					});
-					await client.call('disposeSession', { session }, 30_000);
-				} catch { /* best-effort */ }
-			}
-			createdSessions.length = 0;
-			client.close();
-			// Flush the recording / surface strict replay cache-misses before the
-			// process goes away. Kill even if the strict check throws.
-			try {
-				await server?.capiReplay?.stop();
-			} finally {
-				server?.process.kill();
-			}
+			await lease.release(createdSessions);
 
 			for (const dir of tempDirs) {
 				try {
@@ -761,55 +869,23 @@ export function defineAgentHostE2ETests(config: IAgentHostE2EProviderConfig): vo
 			const toolStarts = client.receivedNotifications(n => isActionNotification(n, 'chat/toolCallStart'));
 			assert.ok(toolStarts.length > 0, 'expected at least one shell tool call');
 
-			// Regression guard (SDK >= 1.0.6 permission/tool-start reorder): for a
-			// tool that surfaced a confirmation prompt, the host must emit an
-			// identical AHP sequence regardless of the SDK's event-order race —
-			// `toolCallStart` first, then the confirmation `toolCallReady`, with
-			// NO not-needed ready in between. Before the fix, when
-			// `tool.execution_start` arrived before the confirmation fired, the
-			// host emitted a spurious not-needed ready ahead of the confirmation
-			// (briefly flipping the tool to "running"); when the confirmation
-			// arrived first it was dropped entirely and the tool hung. Assert the
-			// normalized order per tool call.
-			const readies = client.receivedNotifications(n => isActionNotification(n, 'chat/toolCallReady'))
-				.map(n => {
-					const envelope = getActionEnvelope(n);
-					const action = envelope.action as { toolCallId: string; confirmed?: string };
-					return { toolCallId: action.toolCallId, confirmed: action.confirmed, serverSeq: envelope.serverSeq };
-				});
-			const startSeqByToolCall = new Map<string, number>();
-			for (const n of toolStarts) {
-				const envelope = getActionEnvelope(n);
-				const toolCallId = (envelope.action as { toolCallId: string }).toolCallId;
-				if (!startSeqByToolCall.has(toolCallId)) {
-					startSeqByToolCall.set(toolCallId, envelope.serverSeq);
-				}
-			}
-			for (const ready of readies) {
-				if (ready.confirmed !== undefined) {
-					continue; // only confirmation-requiring readies matter here
-				}
-				const startSeq = startSeqByToolCall.get(ready.toolCallId);
-				assert.ok(startSeq !== undefined && startSeq < ready.serverSeq,
-					`toolCallStart (seq ${startSeq}) must precede the confirmation toolCallReady (seq ${ready.serverSeq}) for ${ready.toolCallId}`);
-				const notNeededBefore = readies.some(r =>
-					r.toolCallId === ready.toolCallId && r.confirmed !== undefined && r.serverSeq < ready.serverSeq);
-				assert.ok(!notNeededBefore,
-					`no not-needed toolCallReady may precede the confirmation toolCallReady for ${ready.toolCallId}`);
-			}
-
-			// While recording, let the post-tool continuation finish so its
-			// model call lands in the fixture. Replay always issues that
-			// continuation, so without capturing it here replay would hit an
-			// unrecorded model call. Bounded + best-effort: some providers'
-			// continuations for a trivial prompt can run long.
-			if (RECORD) {
-				try {
-					await client.waitForNotification(n =>
-						isActionNotification(n, 'chat/turnComplete') || isActionNotification(n, 'chat/error'),
-						30_000);
-				} catch { /* bounded drain */ }
-			}
+			// Drain the post-tool continuation to `turnComplete` so the turn ends
+			// within this test's window. This is required for the shared replay
+			// server (all providers now reuse one server across the suite):
+			// returning mid-turn leaves the SDK query in flight, and its
+			// continuation HTTP call fires *after* the fixture is swapped for the
+			// next test — landing in that test's fixture window as an unrecorded
+			// call and failing the strict cache-miss check. Draining keeps every
+			// request/response inside the test that owns it. Replay serves the
+			// continuation from the fixture instantly; while recording it also
+			// lands that model call in the fixture. Bounded + best-effort: some
+			// providers' continuations for a trivial prompt can run long while
+			// recording.
+			try {
+				await client.waitForNotification(n =>
+					isActionNotification(n, 'chat/turnComplete') || isActionNotification(n, 'chat/error'),
+					30_000);
+			} catch { /* bounded drain */ }
 		});
 
 		(config.supportsPlanMode ? test : test.skip)('planning-mode session-state writes are auto-approved in default mode', async function () {
@@ -926,15 +1002,21 @@ export function defineAgentHostE2ETests(config: IAgentHostE2EProviderConfig): vo
 			await client.call('initialize', { channel: ROOT_STATE_URI, protocolVersions: [PROTOCOL_VERSION], clientId: `real-sdk-worktree-${config.provider}` });
 			await client.call('authenticate', { channel: ROOT_STATE_URI, resource: 'https://api.github.com', token: resolveGitHubToken() });
 
-			// The host's custom terminal tool is opt-in (default off). This test
-			// asserts on the host-managed terminal's cwd / `pwd` output, so the
-			// shell tool must route through the host terminal manager. Enable it
-			// before the session materializes on the first turn dispatch.
-			client.dispatch({
-				channel: ROOT_STATE_URI,
-				clientSeq: 0,
-				action: { type: ActionType.RootConfigChanged, config: { [CopilotCliConfigKey.EnableCustomTerminalTool]: true } },
-			});
+			// The host's custom terminal tool is opt-in (default off) and only
+			// Copilot routes shell commands through it. When the provider
+			// supports it, this test additionally asserts on the host-managed
+			// terminal's cwd / `pwd` output, so enable it before the session
+			// materializes on the first turn dispatch. Codex / Claude run shell
+			// commands inside their own SDK subprocess and never surface a host
+			// terminal resource, so they verify isolation via the resolved
+			// working directory alone.
+			if (config.supportsHostTerminalTool) {
+				client.dispatch({
+					channel: ROOT_STATE_URI,
+					clientSeq: 0,
+					action: { type: ActionType.RootConfigChanged, config: { [CopilotCliConfigKey.EnableCustomTerminalTool]: true } },
+				});
+			}
 
 			const sessionUri = URI.from({ scheme: config.scheme, path: `/${generateUuid()}` }).toString();
 			await client.call('createSession', {
@@ -994,6 +1076,56 @@ export function defineAgentHostE2ETests(config: IAgentHostE2EProviderConfig): vo
 
 			const responseParts = client.receivedNotifications(n => isActionNotification(n, 'chat/responsePart'));
 			assert.ok(responseParts.length > 0, 'should have received at least one response part after session refresh');
+
+			// Verify the agent's shell subprocess actually runs in the resolved
+			// worktree by asking it to run `pwd`. Copilot routes shell commands
+			// through the host-managed terminal tool, which exposes a
+			// subscribable terminal resource we can assert `cwd` / output on.
+			// Codex / Claude run shell commands inside their own SDK subprocess
+			// and surface the output as plain text in the tool result instead,
+			// so we assert the worktree path appears in that text.
+			if (!config.supportsHostTerminalTool) {
+				// The shell command may either require a host confirmation
+				// (`toolCallReady` with `confirmed=undefined`) or be
+				// auto-approved at the SDK layer (Claude's default permission
+				// mode). A background approval loop handles the former without
+				// blocking on it, so the wait below only has to observe the
+				// tool's text output — which carries the `pwd` result.
+				const approvalLoop = startBackgroundApprovalLoop(client, {
+					approvalSeqStart: 100,
+					allow: [{ toolName: config.shellToolName }],
+				});
+				try {
+					client.clearReceived();
+					dispatchTurn(client, addedSummary.resource, 'turn-wt-terminal', 'Run the shell command `pwd` in the session current working directory. Do not specify a working-directory override.', 3);
+
+					// The `pwd` output can arrive as streaming partial content
+					// (`toolCallContentChanged`) or in the final tool result
+					// (`toolCallComplete`), depending on the provider. Accept
+					// either as long as the text carries the worktree path.
+					const pwdNotif = await client.waitForNotification(n => {
+						if (isActionNotification(n, 'chat/toolCallContentChanged')) {
+							const action = getActionEnvelope(n).action as { content: readonly ToolResultContent[] };
+							return textFromContent(action.content).includes(resolvedWorkingDirectoryPath);
+						}
+						if (isActionNotification(n, 'chat/toolCallComplete')) {
+							const action = getActionEnvelope(n).action as { result: { content?: readonly ToolResultContent[] } };
+							return textFromContent(action.result.content ?? []).includes(resolvedWorkingDirectoryPath);
+						}
+						return false;
+					}, 90_000);
+					const pwdText = isActionNotification(pwdNotif, 'chat/toolCallComplete')
+						? textFromContent((getActionEnvelope(pwdNotif).action as { result: { content?: readonly ToolResultContent[] } }).result.content ?? [])
+						: textFromContent((getActionEnvelope(pwdNotif).action as { content: readonly ToolResultContent[] }).content);
+					assert.ok(pwdText.includes(resolvedWorkingDirectoryPath),
+						`pwd output should include the resolved worktree path ${resolvedWorkingDirectoryPath}`);
+				} finally {
+					await approvalLoop.stop();
+				}
+				assert.deepStrictEqual(approvalLoop.errors, [], 'no unexpected tool calls should have been denied');
+				await client.waitForNotification(n => isActionNotification(n, 'chat/turnComplete'), 90_000);
+				return;
+			}
 
 			client.clearReceived();
 			dispatchTurn(client, addedSummary.resource, 'turn-wt-terminal', 'Run the shell command: pwd', 3);
