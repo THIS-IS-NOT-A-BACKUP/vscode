@@ -29,7 +29,7 @@ import {
 import { DeferredPromise, timeout } from '../../../../base/common/async.js';
 import { VSBuffer } from '../../../../base/common/buffer.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
-import type { DisposableStore } from '../../../../base/common/lifecycle.js';
+import { DisposableStore } from '../../../../base/common/lifecycle.js';
 import { URI } from '../../../../base/common/uri.js';
 import { isUUID } from '../../../../base/common/uuid.js';
 import { isCancellationError } from '../../../../base/common/errors.js';
@@ -2113,6 +2113,48 @@ suite('ClaudeAgent', () => {
 		});
 	});
 
+	test('materializing in a worktree reanchors customization discovery', async () => {
+		const { agent, sdk, fileService } = createTestContext(disposables);
+		await agent.authenticate(GITHUB_COPILOT_PROTECTED_RESOURCE.resource, 'tok');
+
+		const workspace = URI.file('/workspace');
+		const worktree = URI.file('/workspace.worktrees/session');
+		const created = await agent.createSession({ workingDirectory: workspace });
+		const sessionId = AgentSession.id(created.session);
+		sdk.supportedCommandsResult = [{ name: 'worktree-skill', description: 'Worktree skill', argumentHint: '' }];
+		sdk.supportedAgentsResult = [];
+		sdk.mcpServerStatusResult = [];
+		sdk.nextQueryMessages = [makeSystemInitMessage(sessionId), makeResultSuccess(sessionId)];
+
+		await agent.chats.sendMessage(defaultChatUri(created.session), 'hi', worktree, undefined, 'turn-1');
+
+		let sessionChanges = 0;
+		let agentChanges = 0;
+		const session = agent.getSessionForTesting(created.session)!;
+		const customizationChanged = Event.toPromise(session.onDidCustomizationsChange, disposables.add(new DisposableStore()));
+		disposables.add(session.onDidCustomizationsChange(() => sessionChanges++));
+		disposables.add(agent.onDidCustomizationsChange(() => agentChanges++));
+		await fileService.writeFile(
+			URI.joinPath(worktree, '.claude', 'skills', 'worktree-skill', 'SKILL.md'),
+			VSBuffer.fromString('---\nname: worktree-skill\ndescription: Worktree skill\n---\nbody'),
+		);
+		await customizationChanged;
+		const customizations = await agent.getSessionCustomizations!(created.session);
+		const skills = customizations.find(customization => customization.uri === URI.joinPath(worktree, '.claude', 'skills').toString());
+
+		assert.deepStrictEqual({
+			sessionChanges,
+			agentChanges,
+			startupCwd: sdk.capturedStartupOptions[0]?.cwd,
+			skills: skills?.type === CustomizationType.Directory ? skills.children?.map(skill => skill.name) : undefined,
+		}, {
+			sessionChanges: 1,
+			agentChanges: 1,
+			startupCwd: worktree.fsPath,
+			skills: ['worktree-skill'],
+		});
+	}).timeout(5_000);
+
 	test('materialize resolves the SDK agent name from the file frontmatter, not the filename', async () => {
 		// `_resolveAgentName` parses the selected `~/.claude/agents/<file>.md`:
 		// the SDK keys agents by their frontmatter `name`, which need not match
@@ -3166,6 +3208,50 @@ suite('ClaudeAgent', () => {
 			optionsPermissionMode: 'plan',
 			recordedModes: ['plan'],
 		});
+	});
+
+	test('onSessionConfigChanged forwards a mid-turn picker change and reverts to the fallback when the key is deleted (issue #321691)', async () => {
+		// The host calls this hook for user/picker changes only (internal server
+		// writes like ExitPlanMode never route here), so it forwards the new mode
+		// to the live Query so the next tool this turn auto-approves — without
+		// waiting for the next send(). A `replace` that deletes `permissionMode`
+		// reverts the Query to the fallback the next send() would apply.
+		const { agent, sdk } = createTestContext(disposables);
+		await agent.authenticate(GITHUB_COPILOT_PROTECTED_RESOURCE.resource, 'tok');
+
+		const created = await agent.createSession({
+			workingDirectory: URI.file('/work'),
+			config: { permissionMode: 'default' },
+		});
+		const sessionId = AgentSession.id(created.session);
+
+		// Park the turn mid-flight (materialized, query live) until released.
+		const reached = new DeferredPromise<void>();
+		const release = new DeferredPromise<void>();
+		sdk.queryAdvance = async (idx: number) => {
+			if (idx === 1) {
+				reached.complete();
+				await release.p;
+			}
+		};
+		sdk.nextQueryMessages = [makeSystemInitMessage(sessionId), makeResultSuccess(sessionId)];
+
+		const turn = agent.chats.sendMessage(defaultChatUri(created.session), 'edit a file', undefined, undefined, 't1');
+		await reached.p;
+
+		// Picker switches to Bypass Permissions...
+		agent.onSessionConfigChanged(created.session, { permissionMode: 'bypassPermissions' });
+		await tick();
+		// ...then a `replace` deletes the key, reverting to the 'default' fallback.
+		agent.onSessionConfigChanged(created.session, {});
+		await tick();
+
+		const recordedMidTurn = [...(sdk.warmQueries.at(-1)?.produced?.recordedPermissionModes ?? [])];
+
+		release.complete();
+		await turn;
+
+		assert.deepStrictEqual(recordedMidTurn, ['bypassPermissions', 'default']);
 	});
 
 	test('shutdown drains a mix of provisional and materialized sessions', async () => {
@@ -4647,6 +4733,7 @@ suite('ClaudeAgentSession (Phase 7 §3.2)', () => {
 		await session.materialize({
 			transport: { kind: 'proxy', handle: { baseUrl: 'http://127.0.0.1:0', nonce: 'n', dispose: () => { } } },
 			canUseTool: async () => ({ behavior: 'deny', message: 'unused' }),
+			onElicitation: async () => ({ action: 'cancel' }),
 			isResume: false,
 		});
 
@@ -5269,37 +5356,150 @@ suite('ClaudeAgent (Phase 7 §3.6 / §3.8 — permissionMode propagation)', () =
 	});
 });
 
-suite('ClaudeAgent (Phase 7 §3.7 — onElicitation cancel stub)', () => {
+suite('ClaudeAgent (Phase 10.6 — MCP elicitation translation)', () => {
 
 	const disposables = ensureNoDisposablesAreLeakedInTestSuite();
 
-	test('Test 18 — Options.onElicitation returns { action: cancel } and logs the decline', async () => {
-		// Plan §3.7: full MCP wiring is Phase 10. Until then, the agent
-		// installs a `cancel` stub so any incidental MCP elicitation
-		// gets a deterministic response (instead of the SDK's auto-
-		// decline path) and a log line surfaces for diagnostics.
-		const logService = new CapturingLogService();
-		const ctx = createTestContext(disposables, { logService });
+	/**
+	 * Materialize a session and return its captured `onElicitation` closure plus
+	 * the {@link ChatInputRequest} stream, so the elicitation tests can drive an
+	 * `elicit/create` round-trip directly without the SDK's `for await` loop.
+	 */
+	async function materialize(): Promise<{
+		ctx: ITestContext;
+		onElicitation: NonNullable<Options['onElicitation']>;
+		inputRequests: ChatInputRequest[];
+	}> {
+		const ctx = createTestContext(disposables);
 		await ctx.agent.authenticate(GITHUB_COPILOT_PROTECTED_RESOURCE.resource, 'tok');
 		const created = await ctx.agent.createSession({ workingDirectory: URI.file('/work') });
 		const sessionId = AgentSession.id(created.session);
 		ctx.sdk.nextQueryMessages = [makeSystemInitMessage(sessionId), makeResultSuccess(sessionId)];
-		await ctx.agent.chats.sendMessage(defaultChatUri(created.session), 'hi', undefined, undefined, 'turn-1');
 
+		const inputRequests: ChatInputRequest[] = [];
+		disposables.add(ctx.agent.onDidSessionProgress(s => {
+			if (s.kind === 'action' && s.action.type === ActionType.ChatInputRequested) {
+				inputRequests.push(s.action.request);
+			}
+		}));
+
+		await ctx.agent.chats.sendMessage(defaultChatUri(created.session), 'hi', undefined, undefined, 'turn-1');
 		const onElicitation = ctx.sdk.capturedStartupOptions[0]?.onElicitation;
 		assert.ok(onElicitation, 'onElicitation callback was wired into Options');
+		return { ctx, onElicitation, inputRequests };
+	}
+
+	test('form-mode elicitation surfaces ChatInputRequested and returns accepted content', async () => {
+		const { ctx, onElicitation, inputRequests } = await materialize();
+
+		const promise = onElicitation(
+			{ serverName: 'test-mcp', message: 'Pick a side', mode: 'form', requestedSchema: { type: 'object', properties: { side: { type: 'string' } } } },
+			{ signal: new AbortController().signal },
+		);
+		await tick();
+
+		const inputRequest = inputRequests.at(-1)!;
+		ctx.agent.respondToUserInputRequest(inputRequest.id, ChatInputResponseKind.Accept, {
+			side: { state: ChatInputAnswerState.Submitted, value: { kind: ChatInputAnswerValueKind.Text, value: 'left' } },
+		});
+
+		assert.deepStrictEqual({
+			message: inputRequest.message,
+			questions: inputRequest.questions?.map(q => ({ id: q.id, kind: q.kind } as const)),
+			result: await promise,
+		}, {
+			message: 'Pick a side',
+			questions: [{ id: 'side', kind: 'text' }],
+			result: { action: 'accept', content: { side: 'left' } },
+		});
+	});
+
+	test('declined form-mode elicitation returns a decline result', async () => {
+		const { ctx, onElicitation, inputRequests } = await materialize();
+
+		const promise = onElicitation(
+			{ serverName: 'm', message: 'q', mode: 'form', requestedSchema: { type: 'object', properties: { side: { type: 'string' } } } },
+			{ signal: new AbortController().signal },
+		);
+		await tick();
+		ctx.agent.respondToUserInputRequest(inputRequests.at(-1)!.id, ChatInputResponseKind.Decline);
+
+		assert.deepStrictEqual(await promise, { action: 'decline' });
+	});
+
+	test('aborting the SDK signal cancels a parked elicitation', async () => {
+		const { onElicitation, inputRequests } = await materialize();
+
+		const controller = new AbortController();
+		const promise = onElicitation(
+			{ serverName: 'm', message: 'q', mode: 'form', requestedSchema: { type: 'object', properties: { side: { type: 'string' } } } },
+			{ signal: controller.signal },
+		);
+		await tick();
+		assert.ok(inputRequests.at(-1), 'the elicitation parked as a ChatInputRequested action');
+		controller.abort();
+
+		assert.deepStrictEqual(await promise, { action: 'cancel' });
+	});
+
+	test('url-mode elicitation surfaces the url with no questions and accepts with no content', async () => {
+		const { ctx, onElicitation, inputRequests } = await materialize();
+
+		const promise = onElicitation(
+			{ serverName: 'm', message: 'Authorize', mode: 'url', url: 'https://example.com/auth' },
+			{ signal: new AbortController().signal },
+		);
+		await tick();
+
+		const inputRequest = inputRequests.at(-1)!;
+		ctx.agent.respondToUserInputRequest(inputRequest.id, ChatInputResponseKind.Accept);
+
+		assert.deepStrictEqual({
+			message: inputRequest.message,
+			url: inputRequest.url,
+			questions: inputRequest.questions,
+			result: await promise,
+		}, {
+			message: 'Authorize',
+			url: 'https://example.com/auth',
+			questions: undefined,
+			result: { action: 'accept' },
+		});
+	});
+
+	test('a pre-aborted signal cancels without ever parking', async () => {
+		const { onElicitation, inputRequests } = await materialize();
+
+		const controller = new AbortController();
+		controller.abort();
 		const result = await onElicitation(
-			{ serverName: 'test-mcp', message: 'Pick a side', mode: 'form' },
+			{ serverName: 'm', message: 'q', mode: 'form', requestedSchema: { type: 'object', properties: { side: { type: 'string' } } } },
+			{ signal: controller.signal },
+		);
+
+		assert.deepStrictEqual({ result, parked: inputRequests.length }, { result: { action: 'cancel' }, parked: 0 });
+	});
+
+	test('a url-mode request with no url cancels without surfacing a prompt', async () => {
+		const { onElicitation, inputRequests } = await materialize();
+
+		const result = await onElicitation(
+			{ serverName: 'm', message: 'Authorize', mode: 'url' },
 			{ signal: new AbortController().signal },
 		);
 
-		assert.deepStrictEqual({
-			result,
-			logCount: logService.infos.filter(m => m.includes('declining elicitation')).length,
-		}, {
-			result: { action: 'cancel' },
-			logCount: 1,
-		});
+		assert.deepStrictEqual({ result, parked: inputRequests.length }, { result: { action: 'cancel' }, parked: 0 });
+	});
+
+	test('a form with no representable fields cancels without surfacing a prompt', async () => {
+		const { onElicitation, inputRequests } = await materialize();
+
+		const result = await onElicitation(
+			{ serverName: 'm', message: 'q', mode: 'form', requestedSchema: { type: 'object', properties: {} } },
+			{ signal: new AbortController().signal },
+		);
+
+		assert.deepStrictEqual({ result, parked: inputRequests.length }, { result: { action: 'cancel' }, parked: 0 });
 	});
 });
 
@@ -5430,9 +5630,8 @@ suite('ClaudeAgent (Phase 9 — runtime mutation surface)', () => {
 		});
 	});
 
-	test('changeModel with `max` effort clamps to `xhigh` on the runtime path and warns', async () => {
-		const log = new CapturingLogService();
-		const { ctx, sessionUri, query, advance } = await materialize({ logService: log });
+	test('changeModel with `max` effort passes `max` through on the runtime path', async () => {
+		const { ctx, sessionUri, query, advance } = await materialize();
 
 		await ctx.agent.chats.changeModel(defaultChatUri(sessionUri), { id: 'claude-opus-4.6', config: { thinkingLevel: 'max' } });
 		const p2 = ctx.agent.chats.sendMessage(defaultChatUri(sessionUri), 'next', undefined, undefined, 'turn-2');
@@ -5440,8 +5639,7 @@ suite('ClaudeAgent (Phase 9 — runtime mutation surface)', () => {
 		advance.complete();
 		await p2;
 
-		assert.deepStrictEqual(query.recordedFlagSettings.map(s => s.effortLevel), ['xhigh']);
-		assert.ok(log.warns.some(w => w.includes('clamped to')), `expected clamp warning, got: ${log.warns.join(' | ')}`);
+		assert.deepStrictEqual(query.recordedFlagSettings.map(s => s.effortLevel), ['max']);
 	});
 
 	test('changeModel with same id and unchanged effort skips the SDK setters', async () => {
