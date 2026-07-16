@@ -90,6 +90,7 @@ import { ChatMode, getModeNameForTelemetry, IChatMode, IChatModes, IChatModeServ
 import { IChatFollowup, IChatPlanReview, IChatQuestionCarousel, IChatToolInvocation } from '../../../common/chatService/chatService.js';
 import { IChatSessionProviderOptionGroup, IChatSessionProviderOptionItem, IChatSessionsService, isAgentHostTarget, isIChatSessionFileChange2, localChatSessionType, SessionType } from '../../../common/chatSessionsService.js';
 import { ChatAgentLocation, ChatConfiguration, ChatModeKind, ChatPermissionLevel, isChatPermissionLevel } from '../../../common/constants.js';
+import { isAutoApprovePolicyRestricted, isAutoApproveValuePolicyRestricted } from '../../../common/agentHostConfigPolicy.js';
 import { IChatEditingSession, IModifiedFileEntry, ModifiedFileEntryState } from '../../../common/editing/chatEditingService.js';
 import { ILanguageModelChatMetadata, ILanguageModelChatMetadataAndIdentifier, ILanguageModelsService } from '../../../common/languageModels.js';
 import { ChatModelConfigurationStore } from './chatModelConfigurationStore.js';
@@ -137,7 +138,7 @@ import { ChatInputNotificationWidget } from './chatInputNotificationWidget.js';
 import { IChatInputPickerOptions } from './chatInputPickerActionItem.js';
 import { ChatSelectedTools } from './chatSelectedTools.js';
 import { DelegationSessionPickerActionItem } from './delegationSessionPickerActionItem.js';
-import { ModelPickerActionItem, IModelPickerDelegate } from './modelPickerActionItem.js';
+import { ModelPickerActionItem, IModelPickerDelegate } from './modelPicker/modelPickerActionItem.js';
 import { IModePickerDelegate, isModeConsideredBuiltIn, ModePickerActionItem } from './modePickerActionItem.js';
 import { IPermissionPickerDelegate, PermissionPickerActionItem } from './permissionPickerActionItem.js';
 import { SessionTypePickerActionItem } from './sessionTargetPickerActionItem.js';
@@ -419,6 +420,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	private chatToolConfirmationCarouselContainer!: HTMLElement;
 	private chatInputNotificationContainer!: HTMLElement;
 	private chatGoalBannerContainer!: HTMLElement;
+	private persistentContentContainer!: HTMLElement;
 	private inputContainer!: HTMLElement;
 	private readonly _notificationWidget = this._register(new MutableDisposable<ChatInputNotificationWidget>());
 	private readonly _goalBannerWidget = this._register(new MutableDisposable<ChatGoalBannerWidget>());
@@ -432,6 +434,10 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 
 	get inputContainerElement(): HTMLElement | undefined {
 		return this.inputContainer;
+	}
+
+	get persistentContentContainerElement(): HTMLElement {
+		return this.persistentContentContainer;
 	}
 
 	get gettingStartedTipContainerElement(): HTMLElement {
@@ -1194,7 +1200,11 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	private _showCombinedPhonePickerSheet(): void {
 		const target = this.inputActionsToolbar.getElement();
 		this.chatPhoneInputPresenter
-			.showCombinedModeAndModelSheet(target, this._createModePickerDelegate(), this._createModelPickerDelegate())
+			.showCombinedModeAndModelSheet(target, {
+				kind: 'delegates',
+				modeDelegate: this._createModePickerDelegate(),
+				modelDelegate: this._createModelPickerDelegate(),
+			})
 			.catch(err => this.logService.error('[ChatInputPart] phone picker sheet failed', err));
 	}
 
@@ -1347,7 +1357,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	}
 
 	private getPermittedPermissionLevel(level: ChatPermissionLevel): ChatPermissionLevel {
-		if (this.configurationService.inspect<boolean>(ChatConfiguration.GlobalAutoApprove).policyValue === false && level !== ChatPermissionLevel.Default) {
+		if (isAutoApproveValuePolicyRestricted(level, isAutoApprovePolicyRestricted(this.configurationService))) {
 			return ChatPermissionLevel.Default;
 		}
 		return level;
@@ -3115,6 +3125,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		let elements;
 		if (this.options.renderStyle === 'compact') {
 			elements = dom.h('.interactive-input-part', [
+				dom.h('.chat-input-persistent-content@persistentContentContainer'),
 				dom.h('.interactive-input-and-edit-session', [
 					dom.h('.chat-plan-review-widget-container@chatPlanReviewContainer'),
 					dom.h('.chat-question-carousel-widget-container@chatQuestionCarouselContainer'),
@@ -3143,6 +3154,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			]);
 		} else {
 			elements = dom.h('.interactive-input-part', [
+				dom.h('.chat-input-persistent-content@persistentContentContainer'),
 				dom.h('.chat-plan-review-widget-container@chatPlanReviewContainer'),
 				dom.h('.chat-question-carousel-widget-container@chatQuestionCarouselContainer'),
 				dom.h('.chat-tool-confirmation-carousel-container@chatToolConfirmationCarouselContainer'),
@@ -3169,6 +3181,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			]);
 		}
 		this.container = elements.root;
+		this.persistentContentContainer = elements.persistentContentContainer;
 		this.chatInputOverlay = dom.$('.chat-input-overlay');
 		container.append(this.container);
 		this.container.append(this.chatInputOverlay);

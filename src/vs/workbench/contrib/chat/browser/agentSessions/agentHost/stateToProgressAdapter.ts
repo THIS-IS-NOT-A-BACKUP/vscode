@@ -11,7 +11,7 @@ import { Schemas } from '../../../../../../base/common/network.js';
 import { posix, win32 } from '../../../../../../base/common/path.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { generateUuid } from '../../../../../../base/common/uuid.js';
-import { buildSubagentChatUri, MessageKind, ToolCallContributorKind, ToolCallStatus, TurnState, ResponsePartKind, getToolFileEdits, getToolOutputText, getToolSubagentContent, readUsageInfoMeta, type ActiveTurn, type ICompletedToolCall, type Message, type ToolCallState, type ToolResultSubagentContent, type Turn, FileEditKind, ToolResultContentType, type ToolResultContent, type UsageInfo, type UsageInfoMeta } from '../../../../../../platform/agentHost/common/state/sessionState.js';
+import { buildSubagentChatUri, MessageKind, ToolCallContributorKind, ToolCallRiskAssessmentStatus, ToolCallStatus, TurnState, ResponsePartKind, getToolFileEdits, getToolOutputText, getToolSubagentContent, readUsageInfoMeta, type ActiveTurn, type ICompletedToolCall, type Message, type ToolCallPendingConfirmationState, type ToolCallState, type ToolResultSubagentContent, type Turn, FileEditKind, ToolResultContentType, type ToolResultContent, type UsageInfo, type UsageInfoMeta } from '../../../../../../platform/agentHost/common/state/sessionState.js';
 import { getToolKind } from '../../../../../../platform/agentHost/common/state/sessionReducers.js';
 import { readToolCallMeta } from '../../../../../../platform/agentHost/common/meta/agentToolCallMeta.js';
 import { getChatErrorDetailsFromMeta, IChatErrorContext } from '../../../common/chatErrorMessages.js';
@@ -77,19 +77,9 @@ function getSubagentAgentName(tc: ToolCallState): string | undefined {
 	return v && v.length > 0 ? v : undefined;
 }
 
-/**
- * The subagent chat resource for a subagent-spawning tool call: the discovery
- * content block's resource when present, else the deterministic child chat URI
- * derived from the session + tool call id (matching the host's
- * {@link buildSubagentChatUri}, and how {@link _observeSubagentSession}
- * subscribes). Deriving it from the tool call id alone keeps the inline subagent
- * pill linkable even when the discovery content block never reaches this chat —
- * e.g. a background subagent whose `subagent_started` arrives after its spawning
- * tool call has already completed, so the running-only content update is dropped
- * by the reducer.
- */
+/** The subagent chat resource for a subagent-spawning tool call: prefer the host-stamped `_meta.subagentChatUri`, then a discovery block, then a derived fallback. */
 function getSubagentChatResource(tc: ToolCallState, subagentContent: ToolResultSubagentContent | undefined, sessionResource: URI): string {
-	return subagentContent?.resource ?? buildSubagentChatUri(sessionResource.toString(), tc.toolCallId);
+	return readToolCallMeta(tc).subagentChatUri ?? subagentContent?.resource ?? buildSubagentChatUri(sessionResource.toString(), tc.toolCallId);
 }
 
 /**
@@ -1755,17 +1745,7 @@ export function toolCallStateToInvocation(tc: ToolCallState, subAgentInvocationI
 		// Copilot SDK's `task` tool doesn't request permission, and the event
 		// mapper auto-emits `tool_ready` with `confirmed: NotNeeded` paired
 		// with `tool_start`. So no special-case for subagents is needed here.)
-		const confirmationMessages: IToolConfirmationMessages = {
-			title: isViewUnreviewedCommentsTool(tc.toolName)
-				? localize('agentFeedback.reviewTitle', "Reveal unreviewed comments?")
-				: stringOrMarkdownToString(tc.confirmationTitle, connectionAuthority) ?? tc.displayName,
-			message: isViewUnreviewedCommentsTool(tc.toolName)
-				? localize('agentFeedback.reviewMessage', "Choose which comments to reveal to the agent. Unchecked comments stay hidden.")
-				: stringOrMarkdownToString(tc.invocationMessage, connectionAuthority),
-		};
-		if (tc.options) {
-			confirmationMessages.customOptions = tc.options;
-		}
+		const confirmationMessages = toolCallConfirmationMessages(tc, connectionAuthority);
 
 		let toolSpecificData: IChatTerminalToolInvocationData | IChatToolInputInvocationData | IChatModifiedFilesConfirmationData | IChatAgentFeedbackReviewConfirmationData | undefined;
 		const pendingEdits = tc.edits?.items;
@@ -1870,6 +1850,30 @@ export function toolCallStateToInvocation(tc: ToolCallState, subAgentInvocationI
 	}
 
 	return invocation;
+}
+
+export function toolCallConfirmationMessages(tc: ToolCallPendingConfirmationState, connectionAuthority: string): IToolConfirmationMessages {
+	const riskAssessment = tc.riskAssessment;
+	let approvalReason: IToolConfirmationMessages['approvalReason'];
+	if (riskAssessment?.status === ToolCallRiskAssessmentStatus.Loading) {
+		approvalReason = { status: 'loading' };
+	} else if (riskAssessment?.status === ToolCallRiskAssessmentStatus.Complete) {
+		approvalReason = {
+			status: 'complete',
+			explanation: stringOrMarkdownToString(riskAssessment.reason, connectionAuthority),
+			safety: riskAssessment.safety,
+		};
+	}
+	return {
+		title: isViewUnreviewedCommentsTool(tc.toolName)
+			? localize('agentFeedback.reviewTitle', "Reveal unreviewed comments?")
+			: stringOrMarkdownToString(tc.confirmationTitle, connectionAuthority) ?? tc.displayName,
+		message: isViewUnreviewedCommentsTool(tc.toolName)
+			? localize('agentFeedback.reviewMessage', "Choose which comments to reveal to the agent. Unchecked comments stay hidden.")
+			: stringOrMarkdownToString(tc.invocationMessage, connectionAuthority),
+		approvalReason,
+		...(tc.options ? { customOptions: tc.options } : {}),
+	};
 }
 
 export function toolCallAuthenticationServer(tc: ToolCallState & { status: ToolCallStatus.AuthRequired }, sessionAuthority: string): IChatMcpAuthenticationRequiredServer {
