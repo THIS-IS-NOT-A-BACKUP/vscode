@@ -72,7 +72,7 @@ A single agent host session uses several distinct identifiers:
 
 `ISession.sessionType` is intentionally the agent name (not the scheme) so a logical type like `copilotcli` covers local agent host, remote agent host, and extension-host Copilot CLI sessions in the filter menu and new-session picker. Routing (`registerChatSessionContentProvider`, model registration) is keyed off the per-provider `resource.scheme` instead.
 
-`getModelsSnapshot(sessionId, restoredModelId)` returns the current models for `session.resource.scheme`. Its `isResolved` bit follows readiness of that scheme's language-model vendor, while `getModelPickerOptions` returns grouped/featured models and whether Auto is supported. Desktop and phone picker surfaces both consume these provider APIs.
+`getModelsSnapshot(sessionId, desiredModelId)` returns the current models for `session.resource.scheme` and reports that scheme as the snapshot's `modelTarget`, which keys the shared remembered-model preference. Its `desiredModelResolution` field reports whether the desired identifier is pending, available, or unavailable based on that scheme's language-model vendor readiness; it reports `notRequested` when no identifier is supplied. `getModelPickerOptions` returns grouped/featured models and whether Auto is supported. Desktop and phone picker surfaces both consume these provider APIs.
 
 ## Architecture
 
@@ -128,6 +128,15 @@ The Agents window thus depends on the classic `ChatWidget` for rendering and on
 the `IChatSessionContentProvider` for content/send, but **not** on
 `IChatSessionItemController` — that API exists only to feed the classic chat
 sidebar list.
+
+User-input requests are unresolved `InputRequest` response parts on the active
+turn, not a separate chat-level queue. `AgentHostSessionHandler` renders and
+settles the question, plan-review, or URL elicitation directly from that part as
+its `response` and `request.answers` change. Replacing an unresolved request with
+the same id recreates the UI when its structure changes; completed turns restore
+the settled interaction and answers at the part's original stream position.
+Agent implementations decline or cancel requests raised without an active turn
+because there is no response stream in which to represent them.
 
 ## New Session Flow
 
