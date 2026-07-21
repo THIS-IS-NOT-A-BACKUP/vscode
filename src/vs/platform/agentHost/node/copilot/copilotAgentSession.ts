@@ -36,6 +36,7 @@ import { stripRedundantCdPrefix } from '../../common/commandLineHelpers.js';
 import { readToolCallMeta, toToolCallMeta, type IToolCallMeta, type IToolCallUiMeta } from '../../common/meta/agentToolCallMeta.js';
 import { OtelData, type OtelAttributeValue } from '../../common/otlp/otlpLogEmitter.js';
 import { SessionConfigKey } from '../../common/sessionConfigKeys.js';
+import { resolveCopilotConfigSlashCommandOnSend } from '../../common/copilotConfigSlashCommands.js';
 import { isAgentFeedbackAnnotationsAttachment, renderAgentFeedbackAnnotationsAttachment } from '../../common/meta/agentFeedbackAttachments.js';
 import { ISessionDatabase, ISessionDataService, SESSION_ATTACHMENTS_DIRNAME } from '../../common/sessionDataService.js';
 import { MessageAttachmentKind, ToolCallContributorKind, type FileEdit, type MessageAttachment } from '../../common/state/protocol/state.js';
@@ -176,6 +177,7 @@ function getToolCommand(input: ToolUseHookInput): string | undefined {
 }
 
 function toCopilotSdkMode(mode: string | undefined): CopilotSdkMode | undefined {
+	mode = mode?.toLowerCase() === 'goal' ? 'plan' : mode;
 	switch (mode) {
 		case 'interactive':
 		case 'plan':
@@ -1287,15 +1289,17 @@ export class CopilotAgentSession extends Disposable {
 		if (!githubToken || requestUrl === undefined) {
 			return undefined;
 		}
-		let configuredUrl: string | undefined;
+		const configuredUrls = [gitHubMcpServerUrl(undefined)];
 		try {
 			const resolvedUrl = gitHubMcpServerUrl(await this._copilotApiService.resolveApiEndpoint(githubToken));
-			configuredUrl = resolvedUrl ? normalizeMcpServerUrl(resolvedUrl) : undefined;
+			if (resolvedUrl) {
+				configuredUrls.push(resolvedUrl);
+			}
 		} catch (error) {
 			this._logService.warn(`[Copilot:${this.sessionId}] Failed to resolve the GitHub MCP server URL: ${getErrorMessage(error)}`);
 			return undefined;
 		}
-		return requestUrl === configuredUrl ? githubToken : undefined;
+		return configuredUrls.some(u => u && requestUrl === normalizeMcpServerUrl(u)) ? githubToken : undefined;
 	}
 
 	private _protectedResourceFromMcpAuthRequest(request: McpAuthRequest): ProtectedResourceMetadata {
@@ -1410,9 +1414,20 @@ export class CopilotAgentSession extends Disposable {
 			this._completeActiveTurn();
 			return;
 		}
-		if (slashCommand?.command === 'plan') {
-			mode = 'plan';
-			prompt = slashCommand.rest;
+		const configAction = slashCommand ? resolveCopilotConfigSlashCommandOnSend(slashCommand.command, slashCommand.rawRest) : undefined;
+		if (configAction) {
+			// Workbench config-action command (permission/mode toggle, e.g.
+			// `/autopilot <prompt>`, `/plan`, `/yolo`). The config is applied
+			// client-side on accept via the session provider; here we re-apply the
+			// mode for this turn (belt-and-suspenders) and strip the command token
+			// so it is not dispatched to the runtime as a runtime command.
+			// `autoApprove` changes are already reflected in the session config and
+			// applied by `syncPermissionMode('turn-start')` below.
+			const sdkMode = toCopilotSdkMode(configAction.applyConfig[SessionConfigKey.Mode]);
+			if (sdkMode) {
+				mode = sdkMode;
+			}
+			prompt = configAction.strippedPrompt;
 		} else if (slashCommand?.command === 'rubber-duck') {
 			if (this._configurationService.getRootValue(copilotCliConfigSchema, CopilotCliConfigKey.RubberDuck) !== true) {
 				// Feature not enabled — pass the remaining text through as a plain
@@ -2884,11 +2899,9 @@ export class CopilotAgentSession extends Disposable {
 
 		// Handle `user.message` events with three responsibilities:
 		//
-		// 1. Skip SDK-injected (`source !== 'user'`) messages outright —
-		//    they are skill content / harness injections that must not
-		//    surface to the user and must not be associated with a turn
-		//    boundary (the SDK's truncate/fork mapping keys off the
-		//    user-visible message's event id).
+		// 1. Skip subagent and SDK-injected (`source !== 'user'`) messages
+		//    outright — neither represents a root user turn and neither may
+		//    be associated with the root turn boundary.
 		//
 		// 2. If the content matches a steering message we acknowledged
 		//    via {@link sendSteering}, promote it to its own protocol
@@ -2902,7 +2915,7 @@ export class CopilotAgentSession extends Disposable {
 		//    so doing this for synthetic injections would permanently
 		//    pin the wrong event to the turn.
 		this._register(wrapper.onUserMessage(e => {
-			if (e.data.source && e.data.source.toLowerCase() !== 'user') {
+			if (e.agentId || (e.data.source && e.data.source.toLowerCase() !== 'user')) {
 				return;
 			}
 			// First SDK event for the loop: promote the turn out of `pending`.
@@ -3938,8 +3951,8 @@ export class CopilotAgentSession extends Disposable {
 		const sessionId = this.sessionId;
 
 		this._register(wrapper.onUserMessage(e => {
-			// Skip SDK-injected messages (matches guard on this event above).
-			if (e.data.source && e.data.source.toLowerCase() !== 'user') {
+			// Skip subagent and SDK-injected messages (matches guard on this event above).
+			if (e.agentId || (e.data.source && e.data.source.toLowerCase() !== 'user')) {
 				return;
 			}
 			void (async () => {
