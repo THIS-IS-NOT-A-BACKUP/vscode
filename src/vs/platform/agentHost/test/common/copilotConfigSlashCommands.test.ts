@@ -52,13 +52,13 @@ suite('copilotConfigSlashCommands', () => {
 		});
 
 		test('autoApprove state hides the no-op bypass/default toggles across aliases', () => {
-			// Already bypassing: hide the bypass forms (bare + `on`), keep `off`.
+			// Already bypassing: hide the bypass `on` form, keep `off`.
 			const bypassing = new Set(getCopilotConfigSlashCommandItems('yolo', { autoApprove: 'autoApprove' }).map(i => i.label));
 			assert.deepStrictEqual([...bypassing].sort(), ['/yolo off']);
 
-			// Not bypassing: hide `off`, keep the bypass forms (bare + `on`).
+			// Not bypassing: hide `off`, keep `on`.
 			const notBypassing = new Set(getCopilotConfigSlashCommandItems('allow-all', { autoApprove: 'default' }).map(i => i.label));
-			assert.deepStrictEqual([...notBypassing].sort(), ['/allow-all', '/allow-all on']);
+			assert.deepStrictEqual([...notBypassing].sort(), ['/allow-all on']);
 		});
 	});
 
@@ -69,6 +69,8 @@ suite('copilotConfigSlashCommands', () => {
 			assert.deepStrictEqual(resolveCopilotConfigSlashCommandOnSend('autopilot', 'do the thing'), { applyConfig: { mode: 'autopilot' }, strippedPrompt: 'do the thing' });
 			// `plan` has no sub-args, so trailing text is forwarded as the prompt.
 			assert.deepStrictEqual(resolveCopilotConfigSlashCommandOnSend('plan', 'the feature'), { applyConfig: { mode: 'plan' }, strippedPrompt: 'the feature' });
+			assert.strictEqual(resolveCopilotConfigSlashCommandOnSend('yolo', 'onxxxcva'), undefined);
+			assert.strictEqual(resolveCopilotConfigSlashCommandOnSend('allow-all', 'offxxxcva'), undefined);
 			assert.strictEqual(resolveCopilotConfigSlashCommandOnSend('notACommand', 'x'), undefined);
 		});
 	});

@@ -79,6 +79,8 @@ send:           composer → management.sendNewChatRequest()  // model: provider
 focus a slot:   part.onDidFocusSession → view.setActive → updates active visible slot
 ```
 
+The Agents-window chat surface also registers the workbench chat pre-submit handlers. These handlers can consume provider-specific client-side commands before the normal send path, while the actual send still routes through the sessions provider model.
+
 The part (interface `services/sessions/browser/sessionsPartService.ts`; concrete `browser/parts/sessionsPart.ts`) is a **passive renderer**: it injects neither the model nor the view, and only exposes `updateVisibleSessions(visible, active)`, `focusSession`, and `onDidFocusSession`. The view owns the reconcile autorun and focus and wires `part.onDidFocusSession → view.setActive`.
 
 ### Layer 3 — Providers (`contrib/providers/`)
@@ -193,6 +195,8 @@ The session type picker persists the last selection as `{ providerId, sessionTyp
 
 On reload, providers register asynchronously and agent hosts connect lazily, so the preferred provider may not have surfaced its session types when the restored draft is created. Rather than blocking on a "ready" gate, `NewChatWidget` creates the draft immediately with the best available provider, then upgrades it in place once the preferred `(providerId, sessionTypeId)` pair becomes servable (driven by `onDidChangeSessionTypes`). The upgrade listener lives for the widget's lifetime — there is **no** timeout or `LifecyclePhase` give-up, since an agent host can connect arbitrarily late — and is cancelled if the user picks a different type or the draft is sent.
 
+Scheduled automations follow the same lazy-registration rule. Before claiming a run row, `AutomationRunner` checks whether its exact target is currently advertised; an unavailable target is deferred without advancing `nextRunAt`, and `AutomationScheduler` retries due automations when `onDidChangeSessionTypes` fires. Once a draft exists, an explicitly selected model waits on `getModelsSnapshot` / `onDidChangeModels` until it is available or conclusively unavailable, re-checking folder-specific session types for workspace-backed drafts. No startup delay or readiness timeout is used.
+
 ### Quick Chats
 
 A **quick chat** is a workspace-less session — one that is not scoped to any folder, so `ISession.workspace` resolves to `undefined`. Quick chats let the user start a conversation immediately, without first picking a repository or worktree.
@@ -227,12 +231,24 @@ Review-capable changesets expose `setReviewState(resource, reviewed)`. Agent-hos
 1. User picks a folder in the workspace picker
    → WorkspacePicker fires onDidSelectWorkspace(folderUri)
    → NewChatWidget → ISessionsService.openNewSession({ folderUri, ...options })
+   → view resolves the folder via SessionsManagementService.resolveWorkspace(folderUri,
+     options?.providerId) and, when the resolved workspace requires trust, awaits the
+     workspace-trust prompt **before** creating anything; declining returns
+     `{ session: undefined, trustDeclined: true }` and never calls createNewSession
    → view calls SessionsManagementService.createNewSession(folderUri, options?)
    → Iterates providers, picks the first one whose resolveWorkspace(folderUri)
      succeeds (filtered by options.sessionTypeId when given)
    → Calls provider.createNewSession(folderUri, sessionTypeId)
    → Returns ISession (model draft, `newSession`); the view then activates it so
-     it becomes the activeSession and the draft slot shows reactively
+     it becomes the activeSession and the draft slot shows reactively, and
+     openNewSession resolves `{ session, trustDeclined: false }`
+
+   This trust gate is the **single** checkpoint for creating a session against a
+   folder — every folder-based entry point (composer, quick pick, dropdown) goes
+   through `openNewSession`, so none can bypass it. Callers distinguish "the user
+   declined trust" from other non-creation outcomes (for example the no-provider
+   case) via the returned `trustDeclined` flag rather than treating any falsy
+   `session` the same way.
 
 2. User picks a different session type for the same folder
    → SessionTypePicker queries getSessionTypesForFolder(folderUri),
@@ -713,9 +729,13 @@ Context keys are an output/gating mechanism, **not** a source of truth. Do **not
 
 Context keys remain the correct tool for **declarative** `when` clauses on menu, command, and keybinding contributions — there is no alternative there, because those are evaluated by the platform. The rule targets _imperative_ code: a component that already has access to a service must consult the service, not a context key that shadows it.
 
-**Example:** each `NewChatInputWidget` owns a scoped `SessionModelSelectionModel` (`contrib/chat/browser/sessionModelSelectionModel.ts`). The model reads the session or remembered model identifier before calling `provider.getModelsSnapshot(...)`, whose `desiredModelResolution` field reports `notRequested`, `pending`, `available`, or `unavailable` using the same catalog resolution helper as the workbench `ChatInputPart`. A pending desired model does not apply or remember an available fallback, and send stays disabled until the model arrives or the user explicitly selects another model. With no desired model, an automatic first-available choice is provisional and is re-evaluated when the provider default arrives; only explicit selections update the remembered preference. The desktop and compact phone pickers consume the resulting models, selection, pending identifier, options, and send eligibility; opened-session phone sheets and notification actions only perform explicit selections through the same provider/storage path. Menu `when` clauses only gate on genuinely declarative conditions such as phone layout and whether the provider offers a combined config picker.
+**Example:** each `NewChatInputWidget` owns a scoped `SessionModelSelectionModel` (`contrib/chat/browser/sessionModelSelectionModel.ts`). The model reads the session or remembered model identifier before calling `provider.getModelsSnapshot(...)`, whose `desiredModelResolution` field reports `notRequested`, `pending`, `available`, or `unavailable` using the same catalog resolution helper as the workbench `ChatInputPart`. A pending desired model does not apply an available fallback, and send stays disabled until the model arrives or the user explicitly selects another model. With no desired model, an automatic first-available choice is provisional and is re-evaluated when the provider default arrives. The desktop and compact phone pickers consume the resulting models, selection, pending identifier, options, and send eligibility; opened-session phone sheets and notification actions perform explicit selections through the same provider/storage path. Menu `when` clauses only gate on genuinely declarative conditions such as phone layout and whether the provider offers a combined config picker.
 
-The workbench and Sessions adapters share catalog resolution, configured-model matching, and initial-selection precedence from `vs/workbench/contrib/chat/common/modelSelection.ts`. The Sessions adapter additionally uses that module's session/chat transition for provider-specific restore, repair, and repush lifecycle. Both adapters remember explicit choices through `vs/workbench/contrib/chat/common/chatSelectedModel.ts` under `chat.currentLanguageModel.${location}[.${modelTarget}]` in profile/user storage; providers return the optional concrete `modelTarget` with their model snapshot, while the shared local model pool uses the unsuffixed key. Previous application-scoped workbench values and `sessions.modelPicker.${providerId}.${sessionType}.selectedModelId` values migrate lazily on read. Automatic choices still flow through `ISessionsProvider.setModel` without becoming user preferences. Omitted `ISessionModelPickerOptions.showAutoModel` is normalized to `true`. Both new-session composer variants derive send eligibility from the same `hasSelectableModel` and pending-resolution state, so model-list changes cannot leave their send buttons out of sync.
+Workbench and Sessions share only the pure transition policy in `vs/workbench/contrib/chat/common/modelSelection.ts`. Each surface owns its state and effects: `ChatInputModelSelectionController` owns Workbench selection and pending intent, while `SessionModelSelectionModel` owns Sessions reducer memory and provider effects.
+
+For a fresh conversation the precedence is `chat.defaultModel` (when resolvable), then the remembered explicit identifier, then the location default or first available model. A draft or existing conversation's own model is authoritative, and an explicit in-conversation pick is preserved until the next conversation. Only explicit user picks update `chat.currentLanguageModel.${location}[.${modelTarget}]` in profile/user storage; configured, restored, default, and first-available choices update conversation/provider state without rewriting that preference. The retired `.isDefault` companion value is removed lazily on read. Previous application-scoped workbench values and `sessions.modelPicker.${providerId}.${sessionType}.selectedModelId` values migrate lazily. Omitted `ISessionModelPickerOptions.showAutoModel` is normalized to `true`.
+
+Both surfaces emit structured `[ChatModelSelection]` entries through the shared diagnostics sink. Policy events include initialization, transitions, compatibility/default decisions, conversation restores, and explicit selections; Sessions enriches them with provider-write outcomes. Storage changes are diagnostic-only and are promoted to Info when external or when they conflict with the in-memory selection, so cross-window overwrites remain visible without changing picker behavior.
 
 Model-picker-aware chat input notifications also stay input-scoped. Each `NewChatInputWidget` owns an `INewChatModelPickerService`; its model picker registers both an opener and identifier-based selection, and the notification widget delegates semantic model actions to that service. Notification `sessionTypes` are concrete language-model target identifiers: derive them from `getChatSessionType(session.resource)` or `ISessionType.chatSessionType`, never from the logical `ISession.sessionType` (for Agent Host sessions these are `agent-host-copilotcli` and `copilotcli`, respectively). The harness picker exposes that concrete target as an observable and the notification widget subscribes to it; do not pair a pull getter with manual re-render calls, because the trigger and value can drift during asynchronous session recreation. The latest registration owns both picker operations, so phone layouts cannot open one picker while selecting through another. Notification-driven selection calls the scoped model and follows the same canonical storage and provider update path as a manual pick, but emits only `chatInputNotificationAction`; it does not emit picker-close telemetry because no picker was opened.
 
