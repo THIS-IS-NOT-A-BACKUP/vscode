@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { decodeBase64 } from '../../../../../../base/common/buffer.js';
+import { Codicon } from '../../../../../../base/common/codicons.js';
 import { escapeMarkdownLinkLabel, IMarkdownString, MarkdownString } from '../../../../../../base/common/htmlContent.js';
 import { escapeIcons } from '../../../../../../base/common/iconLabels.js';
 import { marked, type Token, type Tokens, type TokensList } from '../../../../../../base/common/marked/marked.js';
@@ -17,6 +18,7 @@ import { getToolKind } from '../../../../../../platform/agentHost/common/state/s
 import { readToolCallMeta } from '../../../../../../platform/agentHost/common/meta/agentToolCallMeta.js';
 import { getChatErrorDetailsFromMeta, IChatErrorContext } from '../../../common/chatErrorMessages.js';
 import { AGENT_HOST_SCHEME, toAgentHostUri } from '../../../../../../platform/agentHost/common/agentHostUri.js';
+import { AgentHostElementAttachmentDisplayKind } from '../../../../../../platform/agentHost/common/meta/agentElementAttachments.js';
 import { getAgentFeedbackAttachmentMetadata, isAgentFeedbackAnnotationsAttachment, isAgentFeedbackAttachment } from '../../../../../../platform/agentHost/common/meta/agentFeedbackAttachments.js';
 import { getBrowserViewAttachmentMetadata, isBrowserViewAttachment } from '../../../../../../platform/agentHost/common/meta/browserViewAttachments.js';
 import { isViewUnreviewedCommentsTool, isAddCommentTool } from '../../../../../../platform/agentHost/common/meta/agentFeedbackAnnotations.js';
@@ -1044,6 +1046,10 @@ function messageAttachmentToVariableEntry(attachment: MessageAttachment, connect
 			_meta: attachment._meta,
 		};
 	}
+	const element = restoreElementVariableEntry(attachment, modelRepresentation);
+	if (element) {
+		return element;
+	}
 	if (attachment.type === MessageAttachmentKind.Simple) {
 		const sessionReferenceEntry = restoreSessionReferenceVariableEntryFromAttachment(attachment);
 		if (sessionReferenceEntry) {
@@ -1064,6 +1070,22 @@ function messageAttachmentToVariableEntry(attachment: MessageAttachment, connect
 		id: generateUuid(),
 		name: attachment.label,
 		value: modelRepresentation || attachment.label,
+		_meta: attachment._meta,
+	};
+}
+
+function restoreElementVariableEntry(attachment: MessageAttachment, modelRepresentation: string | undefined): IChatRequestVariableEntry | undefined {
+	if (attachment.displayKind !== AgentHostElementAttachmentDisplayKind || modelRepresentation === undefined) {
+		return undefined;
+	}
+	const fullName = /^Element:\s*(?<name>.+)$/m.exec(modelRepresentation)?.groups?.name;
+	return {
+		kind: 'element',
+		id: generateUuid(),
+		name: attachment.label,
+		...(fullName ? { fullName } : {}),
+		icon: Codicon.layout,
+		value: modelRepresentation,
 		_meta: attachment._meta,
 	};
 }
@@ -2246,6 +2268,8 @@ export function updateRunningToolSpecificData(existing: ChatToolInvocation, tc: 
 			agentName: subagentContent.agentName,
 			credits: existing.toolSpecificData?.kind === 'subagent' ? existing.toolSpecificData.credits : undefined,
 			modelName: existing.toolSpecificData?.kind === 'subagent' ? existing.toolSpecificData.modelName : undefined,
+			startedAt: existing.toolSpecificData?.kind === 'subagent' ? existing.toolSpecificData.startedAt : undefined,
+			duration: existing.toolSpecificData?.kind === 'subagent' ? existing.toolSpecificData.duration : undefined,
 			chatResource: subagentContent.resource,
 		};
 		// toolSpecificData is a plain property — notify state observers
@@ -2260,7 +2284,7 @@ export function updateRunningToolSpecificData(existing: ChatToolInvocation, tc: 
 		const description = getSubagentTaskDescription(tc) ?? existing.toolSpecificData.description;
 		const agentName = getSubagentAgentName(tc) ?? existing.toolSpecificData.agentName;
 		if (description !== existing.toolSpecificData.description || agentName !== existing.toolSpecificData.agentName) {
-			existing.toolSpecificData = { kind: 'subagent', isActive: existing.toolSpecificData.isActive, description, agentName, credits: existing.toolSpecificData.credits, modelName: existing.toolSpecificData.modelName, chatResource: existing.toolSpecificData.chatResource };
+			existing.toolSpecificData = { ...existing.toolSpecificData, description, agentName };
 			existing.notifyToolSpecificDataChanged();
 		}
 		return;
@@ -2359,6 +2383,8 @@ export function finalizeToolInvocation(invocation: ChatToolInvocation, tc: ToolC
 				result: resultText,
 				credits: invocation.toolSpecificData?.kind === 'subagent' ? invocation.toolSpecificData.credits : undefined,
 				modelName: invocation.toolSpecificData?.kind === 'subagent' ? invocation.toolSpecificData.modelName : undefined,
+				startedAt: invocation.toolSpecificData?.kind === 'subagent' ? invocation.toolSpecificData.startedAt : undefined,
+				duration: invocation.toolSpecificData?.kind === 'subagent' ? invocation.toolSpecificData.duration : undefined,
 				chatResource: getSubagentChatResource(tc, subagentContent, backendSession),
 			};
 		} else if (invocation.toolSpecificData?.kind === 'subagent') {
@@ -2372,6 +2398,8 @@ export function finalizeToolInvocation(invocation: ChatToolInvocation, tc: ToolC
 				result: getToolOutputText(tc),
 				credits: invocation.toolSpecificData.credits,
 				modelName: invocation.toolSpecificData.modelName,
+				startedAt: invocation.toolSpecificData.startedAt,
+				duration: invocation.toolSpecificData.duration,
 				chatResource: invocation.toolSpecificData.chatResource ?? getSubagentChatResource(tc, undefined, backendSession),
 			};
 		}

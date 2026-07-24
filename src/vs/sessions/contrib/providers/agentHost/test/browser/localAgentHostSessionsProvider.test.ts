@@ -1297,6 +1297,41 @@ suite('LocalAgentHostSessionsProvider', () => {
 		});
 	});
 
+	test('getModelsSnapshot canonicalizes a matching logical-session model identifier', () => {
+		const modelId = 'gpt-5.6-sol';
+		const logicalIdentifier = `copilotcli/${modelId}`;
+		const unrelatedIdentifier = `other/${modelId}`;
+		const targetIdentifier = `agent-host-copilotcli:${modelId}`;
+		const languageModelIds = [logicalIdentifier, unrelatedIdentifier];
+		const languageModels = new Map([
+			[logicalIdentifier, { ...createTestLanguageModel(modelId), vendor: 'copilotcli', targetChatSessionType: 'copilotcli' }],
+			[unrelatedIdentifier, { ...createTestLanguageModel(modelId), vendor: 'other', targetChatSessionType: 'other' }],
+			[targetIdentifier, { ...createTestLanguageModel(modelId), targetChatSessionType: 'agent-host-copilotcli' }],
+		]);
+		const provider = createProvider(disposables, agentHost, undefined, {
+			languageModelIds,
+			lookupLanguageModel: id => languageModels.get(id),
+		});
+		fireSessionAdded(agentHost, 'model-alias', { title: 'Model Alias Session' });
+		const session = provider.getSessions().find(session => session.title.get() === 'Model Alias Session');
+		assert.ok(session);
+
+		const pending = provider.getModelsSnapshot(session.sessionId, logicalIdentifier).desiredModelResolution;
+		const unrelated = provider.getModelsSnapshot(session.sessionId, unrelatedIdentifier).desiredModelResolution;
+		languageModelIds.push(targetIdentifier);
+		const available = provider.getModelsSnapshot(session.sessionId, logicalIdentifier).desiredModelResolution;
+
+		assert.deepStrictEqual({
+			pending,
+			unrelated,
+			available: available.kind === 'available' ? { kind: available.kind, identifier: available.model.identifier } : available,
+		}, {
+			pending: { kind: 'pending', identifier: targetIdentifier },
+			unrelated: { kind: 'unavailable', identifier: unrelatedIdentifier },
+			available: { kind: 'available', identifier: targetIdentifier },
+		});
+	});
+
 	test('setModel updates existing session model and lets draft debounce persist it', () => {
 		const provider = createProvider(disposables, agentHost);
 		fireSessionAdded(agentHost, 'set-model', { title: 'Set Model Session' });
@@ -1760,6 +1795,41 @@ suite('LocalAgentHostSessionsProvider', () => {
 			{ type: CustomizationType.Agent, id: 'agent://only', uri: 'agent://only', name: 'only' },
 		]);
 		assert.ok(fired > after, 'expected onDidChangeCustomAgents to fire again on a second update');
+	});
+
+	test('NewSession releases observed changeset subscriptions when inactive', async () => {
+		const activeSession = observableValue<IActiveSession | undefined>('test.activeSession', undefined);
+		const provider = createProvider(disposables, agentHost, undefined, { activeSession });
+		const sessionTypeId = provider.sessionTypes[0].id;
+		const session = provider.createNewSession(URI.parse('file:///home/user/proj'), sessionTypeId);
+		await timeout(0);
+
+		activeSession.set(new class extends mock<IActiveSession>() {
+			override readonly resource = session.resource;
+		}(), undefined);
+		disposables.add(autorun(reader => {
+			for (const changeset of session.changesets?.read(reader) ?? []) {
+				changeset.changes.read(reader);
+			}
+		}));
+
+		const backendUri = agentHost.createdSessionUris.at(-1)!;
+		const changesetUri = `${backendUri}/changeset/uncommitted`;
+		agentHost.setSessionState(AgentSession.id(backendUri), sessionTypeId, {
+			provider: sessionTypeId,
+			title: '',
+			status: ProtocolSessionStatus.Idle,
+			lifecycle: SessionLifecycle.Ready,
+			activeClients: [],
+			chats: [],
+			changesets: [
+				{ label: 'Uncommitted Changes', uriTemplate: changesetUri, changeKind: 'uncommitted' },
+			],
+		});
+		assert.strictEqual(agentHost.sessionSubscribeCounts.get(changesetUri), 1);
+
+		activeSession.set(undefined, undefined);
+		assert.strictEqual(agentHost.sessionUnsubscribeCounts.get(changesetUri), 1);
 	});
 
 	test('NewSession dispose clears _lastSessionStates entry and fires onDidChangeCustomAgents', async () => {
