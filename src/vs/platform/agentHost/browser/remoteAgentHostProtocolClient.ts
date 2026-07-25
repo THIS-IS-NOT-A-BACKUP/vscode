@@ -31,7 +31,7 @@ import { isJsonRpcNotification, isJsonRpcRequest, isJsonRpcResponse, ProtocolErr
 import { type IVscodeUpgradeResult } from '../common/state/protocolUpgrade.js';
 import { isClientTransport, type IProtocolTransport } from '../common/state/sessionTransport.js';
 import { AhpErrorCodes } from '../common/state/protocol/errors.js';
-import { ContentEncoding, ResourceRequestParams, type CompletionsParams, type CompletionsResult, type CreateTerminalParams, type ResolveSessionConfigResult, type SessionConfigCompletionsResult } from '../common/state/protocol/commands.js';
+import { ChatSourceKind, ContentEncoding, ResourceRequestParams, type CompletionsParams, type CompletionsResult, type CreateTerminalParams, type ResolveSessionConfigResult, type SessionConfigCompletionsResult } from '../common/state/protocol/commands.js';
 import type { InvokeChangesetOperationParams, InvokeChangesetOperationResult } from '../common/state/protocol/channels-changeset/commands.js';
 import { encodeBase64 } from '../../../base/common/buffer.js';
 import { ILoadEstimator, LoadEstimator } from '../../../base/parts/ipc/common/ipc.net.js';
@@ -271,6 +271,7 @@ export class RemoteAgentHostProtocolClient extends Disposable implements IAgentC
 	 * Uses URI-aware comparison to dedupe repeat sends and is cleared with the connection.
 	 */
 	private readonly _grantedImplicitReadUris = new ResourceSet();
+	private readonly _implicitReadGrants = this._register(new DisposableStore());
 
 	get clientId(): string {
 		return this._clientId;
@@ -966,7 +967,17 @@ export class RemoteAgentHostProtocolClient extends Disposable implements IAgentC
 		await this._sendRequest('createChat', {
 			channel: session.toString(),
 			chat: chat.toString(),
-			...(options?.fork ? { source: { chat: options.fork.source.toString(), turnId: options.fork.turnId } } : {}),
+			...(options?.fork ? {
+				source: { kind: ChatSourceKind.Fork, chat: options.fork.source.toString(), turnId: options.fork.turnId }
+			} : {}),
+			...(options?.sideChat ? {
+				source: {
+					kind: ChatSourceKind.SideChat,
+					chat: options.sideChat.source.toString(),
+					turnId: options.sideChat.turnId,
+					...(options.sideChat.selection ? { selection: options.sideChat.selection } : {}),
+				}
+			} : {}),
 		});
 	}
 
@@ -1083,8 +1094,7 @@ export class RemoteAgentHostProtocolClient extends Disposable implements IAgentC
 			return;
 		}
 		this._grantedImplicitReadUris.add(uri);
-		// The resource service also revokes these grants in connectionClosed.
-		this._resourceService.grantImplicitRead(this._address, uri);
+		this._implicitReadGrants.add(this._resourceService.grantImplicitRead(this._address, uri));
 	}
 
 	/**
@@ -1263,8 +1273,9 @@ export class RemoteAgentHostProtocolClient extends Disposable implements IAgentC
 			this._state.outbox.length = 0;
 		}
 		this._rejectPendingRequests(error);
-		this._resourceService.connectionClosed(this._address);
 		this._grantedImplicitReadUris.clear();
+		this._implicitReadGrants.clear();
+		this._resourceService.connectionClosed(this._address);
 		this._transitionTo({ kind: AgentHostClientState.Closed, error });
 		this._onDidClose.fire();
 	}

@@ -8,7 +8,7 @@ import { DeferredPromise, timeout } from '../../../../base/common/async.js';
 import { VSBuffer } from '../../../../base/common/buffer.js';
 import { CancellationError } from '../../../../base/common/errors.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
-import { Disposable } from '../../../../base/common/lifecycle.js';
+import { Disposable, toDisposable } from '../../../../base/common/lifecycle.js';
 import { observableValue } from '../../../../base/common/observable.js';
 import { URI } from '../../../../base/common/uri.js';
 import { runWithFakedTimers } from '../../../../base/test/common/timeTravelScheduler.js';
@@ -18,6 +18,7 @@ import { AgentHostClientState, RemoteAgentHostProtocolClient } from '../../brows
 import { AgentHostPermissionMode, AgentHostResourcePermissionError, IAgentHostResourceService } from '../../common/agentHostResourceService.js';
 import { ConfigurationTarget, type IConfigurationValue } from '../../../configuration/common/configuration.js';
 import { ContentEncoding, ReconnectResultType } from '../../common/state/protocol/commands.js';
+import { ChatSourceKind } from '../../common/state/protocol/channels-chat/commands.js';
 import { AhpErrorCodes } from '../../common/state/protocol/errors.js';
 import { PROTOCOL_VERSION } from '../../common/state/protocol/version/registry.js';
 import { ActionType, type ChatTurnStartedAction, type SessionActiveClientSetAction, type SessionActiveClientRemovedAction, type SessionTitleChangedAction } from '../../common/state/sessionActions.js';
@@ -146,6 +147,8 @@ suite('RemoteAgentHostProtocolClient', () => {
 		granted?: (address: string, uri: URI, mode: AgentHostPermissionMode) => boolean;
 		onRequest?: (address: string, params: { uri: string; read?: boolean; write?: boolean }) => Promise<void>;
 		onGrantImplicitRead?: (address: string, uri: URI) => void;
+		/** Test hook that observes disposal of the implicit-read grant. */
+		onRevokeImplicitRead?: (address: string, uri: URI) => void;
 		readBytes?: VSBuffer;
 	}
 
@@ -188,7 +191,10 @@ suite('RemoteAgentHostProtocolClient', () => {
 			pendingFor: () => empty,
 			allPending: empty,
 			findPending: () => undefined,
-			grantImplicitRead: (address, uri) => { opts.onGrantImplicitRead?.(address, uri); return Disposable.None; },
+			grantImplicitRead: (address, uri) => {
+				opts.onGrantImplicitRead?.(address, uri);
+				return opts.onRevokeImplicitRead ? toDisposable(() => opts.onRevokeImplicitRead?.(address, uri)) : Disposable.None;
+			},
 			connectionClosed: () => { },
 		};
 	}
@@ -407,26 +413,68 @@ suite('RemoteAgentHostProtocolClient', () => {
 		assert.strictEqual(await creation, session);
 	});
 
-	test('maps protocol-supported create chat fork', async () => {
-		const { client, transport } = createClient();
-		await connectClient(client, transport);
-		const session = URI.parse('ahp-session:/session');
-		const chat = URI.parse('ahp-chat:/chat');
-		const source = URI.parse('ahp-chat:/source');
-		const creation = client.createChat(session, chat, { fork: { source, turnId: 'turn-1' } });
+	suite('createChat', () => {
+		const sessionUri = URI.parse('ahp-session:/test');
+		const chatUri = URI.parse('ahp-session:/test/chat-1');
+		const sourceUri = URI.parse('ahp-session:/test/chat-0');
 
-		const request = transport.sentMessages.find((message): message is JsonRpcRequest =>
-			hasKey(message, { method: true }) && message.method === 'createChat');
-		assert.deepStrictEqual(request?.params, {
-			channel: session.toString(),
-			chat: chat.toString(),
-			source: { chat: source.toString(), turnId: 'turn-1' },
+		test('forwards a fork source tagged with kind "fork"', async () => {
+			const { client, transport } = createClient();
+
+			const resultPromise = client.createChat(sessionUri, chatUri, { fork: { source: sourceUri, turnId: 'turn-1' } });
+
+			assert.deepStrictEqual(transport.sentMessages[0], {
+				jsonrpc: '2.0',
+				id: 1,
+				method: 'createChat',
+				params: {
+					channel: sessionUri.toString(),
+					chat: chatUri.toString(),
+					source: { kind: ChatSourceKind.Fork, chat: sourceUri.toString(), turnId: 'turn-1' },
+				},
+			});
+
+			transport.fireMessage({ jsonrpc: '2.0', id: 1, result: null });
+			await resultPromise;
 		});
-		assert.ok(request);
-		transport.fireMessage({ jsonrpc: '2.0', id: request.id, result: null });
-		await creation;
-	});
 
+		test('forwards a side chat (`/btw`) source tagged with kind "sideChat"', async () => {
+			const { client, transport } = createClient();
+
+			const selection = { text: '  selected text  ', responsePartId: 'response-part-1' };
+			const resultPromise = client.createChat(sessionUri, chatUri, { sideChat: { source: sourceUri, turnId: 'turn-1', selection } });
+
+			assert.deepStrictEqual(transport.sentMessages[0], {
+				jsonrpc: '2.0',
+				id: 1,
+				method: 'createChat',
+				params: {
+					channel: sessionUri.toString(),
+					chat: chatUri.toString(),
+					source: { kind: ChatSourceKind.SideChat, chat: sourceUri.toString(), turnId: 'turn-1', selection },
+				},
+			});
+
+			transport.fireMessage({ jsonrpc: '2.0', id: 1, result: null });
+			await resultPromise;
+		});
+
+		test('omits source entirely when neither fork nor sideChat is requested', async () => {
+			const { client, transport } = createClient();
+
+			const resultPromise = client.createChat(sessionUri, chatUri);
+
+			assert.deepStrictEqual(transport.sentMessages[0], {
+				jsonrpc: '2.0',
+				id: 1,
+				method: 'createChat',
+				params: { channel: sessionUri.toString(), chat: chatUri.toString() },
+			});
+
+			transport.fireMessage({ jsonrpc: '2.0', id: 1, result: null });
+			await resultPromise;
+		});
+	});
 	test('preserves JSON-RPC error code and data', async () => {
 		const { client, transport } = createClient();
 		const resultPromise = client.resourceRead(URI.file('/missing'));
@@ -1286,6 +1334,33 @@ suite('RemoteAgentHostProtocolClient', () => {
 			client.dispatch(sessionUri.toString(), action);
 
 			assert.strictEqual(calls.length, 1);
+		});
+
+		test('connection close disposes implicit read grants', async () => {
+			const didGrant = new DeferredPromise<void>();
+			const revoked: string[] = [];
+			const service = createResourceServiceStub({
+				onGrantImplicitRead: () => didGrant.complete(),
+				onRevokeImplicitRead: (_address, uri) => revoked.push(uri.toString()),
+			});
+			const { client, transport } = createClient(undefined, service);
+
+			client.dispatch('copilot-chat:/test', {
+				type: ActionType.ChatPendingMessageSet,
+				kind: PendingMessageKind.Queued,
+				id: 'queued-1',
+				message: {
+					text: 'Review this attachment',
+					origin: { kind: MessageKind.User },
+					attachments: [
+						{ type: MessageAttachmentKind.Resource, uri: 'file:///attachments/queued.txt', label: 'queued.txt' },
+					],
+				},
+			});
+			await didGrant.p;
+			transport.fireClose();
+
+			assert.deepStrictEqual(revoked, ['file:///attachments/queued.txt']);
 		});
 
 		test('active client removal does not crash', () => {
