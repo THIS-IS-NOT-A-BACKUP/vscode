@@ -111,7 +111,15 @@ export interface UsageInfoMeta {
 	autoModeResolved?: IAutoModeResolvedInfo;
 	/** Copilot-specific usage breakdown, including nano-AIU totals. */
 	copilotUsage?: {
+		/** This turn's nano-AIU cost. */
 		totalNanoAiu?: number;
+		/**
+		 * The whole session's accumulated nano-AIU cost, as reported by the
+		 * backend rather than summed from the turns. Clients SHOULD prefer this
+		 * over adding up per-turn totals: it is authoritative, and it also
+		 * covers work billed outside any turn (e.g. an out-of-turn compaction).
+		 */
+		sessionTotalNanoAiu?: number;
 		[key: string]: unknown;
 	};
 	/**
@@ -210,6 +218,7 @@ export function readUsageInfoMeta(usage: UsageInfo | undefined): UsageInfoMeta {
 		const rawUsage = copilotUsage as Record<string, unknown>;
 		const usage: Mutable<NonNullable<UsageInfoMeta['copilotUsage']>> = {};
 		if (typeof rawUsage['totalNanoAiu'] === 'number') { usage.totalNanoAiu = rawUsage['totalNanoAiu']; }
+		if (typeof rawUsage['sessionTotalNanoAiu'] === 'number') { usage.sessionTotalNanoAiu = rawUsage['sessionTotalNanoAiu']; }
 		result.copilotUsage = usage;
 	}
 	const quotaSnapshots = meta['quotaSnapshots'];
@@ -248,6 +257,10 @@ export function hasReportedUsage(usage: UsageInfo | undefined): boolean {
 	const meta = readUsageInfoMeta(usage);
 	// Negative totals are treated as absent, matching how credits are read for display.
 	return (typeof meta.copilotUsage?.totalNanoAiu === 'number' && meta.copilotUsage.totalNanoAiu >= 0)
+		// A report can carry only the session total — a compaction billed while no turn
+		// was active advances it without any per-event billing payload — and that is
+		// still consumption worth showing.
+		|| (typeof meta.copilotUsage?.sessionTotalNanoAiu === 'number' && meta.copilotUsage.sessionTotalNanoAiu >= 0)
 		|| (typeof meta.cost === 'number' && meta.cost >= 0);
 }
 
@@ -1310,6 +1323,28 @@ export const AH_META_IS_ARCHIVED_DB_KEY = 'isArchived';
 
 /** Legacy metadata key for the archived flag; see {@link AH_META_IS_ARCHIVED_DB_KEY}. */
 export const AH_META_IS_DONE_DB_KEY = 'isDone';
+
+/**
+ * Session-database metadata key recording whether a session has been read. This is
+ * the only durable representation of read state; the in-memory truth is
+ * {@link SessionStatus.IsRead}. The host owns it — no agent SDK tracks read state.
+ */
+export const AH_META_IS_READ_DB_KEY = 'isRead';
+
+/** Returns `status` with `flag` set or cleared. */
+export function withSessionStatusFlag(status: SessionStatus, flag: SessionStatus, set: boolean): SessionStatus {
+	return set ? (status | flag) : (status & ~flag);
+}
+
+/** Whether the {@link SessionStatus.IsRead} flag bit is set. */
+export function isSessionStatusRead(status: SessionStatus | undefined): boolean {
+	return status !== undefined && (status & SessionStatus.IsRead) !== 0;
+}
+
+/** Whether the {@link SessionStatus.IsArchived} flag bit is set. */
+export function isSessionStatusArchived(status: SessionStatus | undefined): boolean {
+	return status !== undefined && (status & SessionStatus.IsArchived) !== 0;
+}
 
 /**
  * Reads the workspace-less marker from {@link SessionSummaryMeta}. Returns
