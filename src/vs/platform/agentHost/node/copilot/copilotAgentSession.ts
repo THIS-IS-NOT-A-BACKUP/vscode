@@ -2382,7 +2382,7 @@ export class CopilotAgentSession extends Disposable {
 		} catch (error) {
 			this._logService.warn(`[Copilot:${this.sessionId}] Failed to flush edit attribution: ${error}`);
 		}
-		await this._wrapper.session.disconnect();
+		await this._wrapper.disconnect();
 	}
 
 	async setModel(model: string, reasoningEffort?: SessionConfig['reasoningEffort'], contextTier?: SessionConfig['contextTier']): Promise<void> {
@@ -4222,6 +4222,15 @@ export class CopilotAgentSession extends Disposable {
 					confidence: e.data.confidence,
 					candidateModels: e.data.candidateModels,
 					categoryScores: e.data.categoryScores,
+					routingMethod: e.data.routingMethod,
+					availableModels: e.data.availableModels,
+					fallback: e.data.fallback,
+					fallbackReason: e.data.fallbackReason,
+					stickyOverride: e.data.stickyOverride,
+					routerLatencyMs: e.data.routerLatencyMs,
+					endToEndLatencyMs: e.data.endToEndLatencyMs,
+					chosenShortfall: e.data.chosenShortfall,
+					hasImage: e.data.hasImage,
 				});
 			}
 			autoModeResolved = { turnId, data: e.data };
