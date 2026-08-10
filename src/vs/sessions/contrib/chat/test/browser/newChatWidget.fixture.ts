@@ -36,7 +36,7 @@ import { ISessionsProvidersService } from '../../../../services/sessions/browser
 import { ISessionsRecentWorkspacesService } from '../../../../services/sessions/browser/sessionsRecentWorkspacesService.js';
 import { ISessionsService } from '../../../../services/sessions/browser/sessionsService.js';
 import { IActiveSession, ISessionsManagementService } from '../../../../services/sessions/common/sessionsManagement.js';
-import { IChat, ISessionWorkspace, ISessionType, SessionStatus, SessionTypeAuthRequirement } from '../../../../services/sessions/common/session.js';
+import { IChat, ISession, ISessionWorkspace, ISessionType, SessionStatus, SessionTypeAuthRequirement } from '../../../../services/sessions/common/session.js';
 import { ISessionsProvider } from '../../../../services/sessions/common/sessionsProvider.js';
 import { AGENT_FEEDBACK_NEW_SESSION_RESOURCE, AgentFeedbackKind, AgentFeedbackState, IAgentFeedback, IAgentFeedbackService } from '../../../agentFeedback/browser/agentFeedbackService.js';
 import { IAquariumService } from '../../../aquarium/browser/aquariumOverlay.js';
@@ -357,6 +357,10 @@ function createFixtureProvider(workspace: ISessionWorkspace, sessionTypes: reado
 		override readonly onDidChangeModels = Event.None;
 		override readonly browseActions = [];
 
+		override getSessions(): ISession[] {
+			return [];
+		}
+
 		override resolveWorkspace(folderUri: URI): ISessionWorkspace | undefined {
 			return folderUri.toString() === workspace.folders[0].root.toString() ? workspace : undefined;
 		}
@@ -427,14 +431,6 @@ function createStandardPromptOptions(): readonly INewSessionPromptOption[] {
 			placeholder: '[describe the CI failure or paste a link]',
 			icon: Codicon.runErrors,
 		},
-		{
-			id: 'standard:addressComments',
-			title: 'Address PR comments',
-			description: 'Describe the feedback or paste a PR link',
-			prompt: 'Help me address the pull request comments for [describe the review feedback or paste a pull request link] in this project. First, inspect the relevant files and explain your approach briefly. Then implement the solution and run the most relevant checks.',
-			placeholder: '[describe the review feedback or paste a pull request link]',
-			icon: Codicon.commentDiscussion,
-		},
 	];
 }
 
@@ -442,7 +438,8 @@ function createMixedPromptOptions(): readonly INewSessionPromptOption[] {
 	return [
 		{
 			id: 'githubIssue:327101',
-			title: 'Tackle issue #327101',
+			title: 'Tackle issue',
+			titleDetail: '#327101',
 			description: 'Improve the accessibility of inline chat controls',
 			prompt: 'Tackle the following issue and create a pull request for it: "Improve the accessibility of inline chat controls" (https://github.com/microsoft/vscode/issues/327101).',
 			placeholder: '',
@@ -450,7 +447,8 @@ function createMixedPromptOptions(): readonly INewSessionPromptOption[] {
 		},
 		{
 			id: 'githubIssue:326842',
-			title: 'Tackle issue #326842',
+			title: 'Tackle issue',
+			titleDetail: '#326842',
 			description: 'Preserve editor state when switching sessions',
 			prompt: 'Tackle the following issue and create a pull request for it: "Preserve editor state when switching sessions" (https://github.com/microsoft/vscode/issues/326842).',
 			placeholder: '',
@@ -458,12 +456,12 @@ function createMixedPromptOptions(): readonly INewSessionPromptOption[] {
 		},
 		{
 			id: 'githubCiFailure:329629',
-			title: 'Fix CI #329629',
+			title: 'Fix CI',
+			titleDetail: '#329629',
 			description: 'Add GitHub prompt variation to onboarding',
 			prompt: 'The following pull request has failing CI checks: "Add GitHub prompt variation to onboarding" (https://github.com/microsoft/vscode/pull/329629). Investigate the failures and resolve them.',
 			placeholder: '',
 			icon: computePullRequestIcon(GitHubPullRequestState.Open, { hasFailingChecks: true }),
 		},
-		createStandardPromptOptions()[0],
 	];
 }

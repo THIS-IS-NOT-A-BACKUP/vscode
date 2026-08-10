@@ -15,6 +15,7 @@ export const NEW_SESSION_PROMPT_TYPING_DURATION_MS = 2_500;
 export interface INewSessionPromptOption {
 	readonly id: string;
 	readonly title: string;
+	readonly titleDetail?: string;
 	readonly description: string;
 	readonly prompt: string;
 	readonly placeholder: string;
@@ -25,7 +26,18 @@ export type NewSessionPromptOptionsState =
 	| { readonly kind: 'loading' }
 	| { readonly kind: 'resolved'; readonly options: readonly INewSessionPromptOption[] };
 
+export const enum NewSessionWorkspacePreselectionSource {
+	None = 'none',
+	CheckedWorkspace = 'checkedWorkspace',
+	RecentWorkspace = 'recentWorkspace',
+	ExistingSessions = 'existingSessions',
+	ProvidedWorkspace = 'providedWorkspace',
+	User = 'user',
+	Unknown = 'unknown',
+}
+
 export interface INewSessionComposer {
+	readonly workspacePreselectionSource?: NewSessionWorkspacePreselectionSource;
 	animatePrompt(text: string, durationMs: number, placeholder: string, token: CancellationToken): Promise<boolean>;
 	showPromptOptions(state: NewSessionPromptOptionsState | undefined): boolean;
 	setPromptOptionsResolver?(resolver: (token: CancellationToken) => Promise<NewSessionPromptOptionsState>): void;
