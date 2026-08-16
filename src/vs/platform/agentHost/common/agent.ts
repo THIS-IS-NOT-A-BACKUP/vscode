@@ -691,6 +691,9 @@ export interface IAgentChats {
 	/** Dispose the addressed chat and free its backing. */
 	disposeChat(chat: URI, context: AgentChatOperationContext): Promise<void>;
 
+	/** Return whether the addressed chat can currently release its in-memory backing. */
+	canReleaseChat?(chat: URI, context: AgentChatOperationContext): Promise<boolean>;
+
 	/** Release the addressed chat's in-memory backing without deleting durable data. */
 	releaseChat(chat: URI, context: AgentChatOperationContext): Promise<void>;
 
@@ -1142,8 +1145,8 @@ export interface IAgent {
 	/** Optional lifecycle operation paired with {@link startMcpServer}. */
 	stopMcpServer?(session: URI, id: string): Promise<void>;
 
-	/** Optional `mcp://` router for providers that advertise MCP side-channel resources. */
-	handleMcpRequest?(session: URI, serverName: string, method: string, params: Record<string, unknown> | undefined): Promise<unknown>;
+	/** Optional `mcp://` router for providers that advertise chat-scoped MCP side-channel resources. */
+	handleMcpRequest?(chat: URI, serverName: string, method: string, params: Record<string, unknown> | undefined): Promise<unknown>;
 
 	/** Optional notification stream paired with {@link handleMcpRequest}. */
 	readonly onMcpNotification?: Event<IMcpNotification>;

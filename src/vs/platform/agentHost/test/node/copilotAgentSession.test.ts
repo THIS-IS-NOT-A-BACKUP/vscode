@@ -41,6 +41,7 @@ import { STREAMING_TOOL_DISPLAY_INTERVAL_MS } from '../../common/streamingToolCa
 import { CustomizationEnablementKind, CustomizationType, McpAuthRequiredReason, McpServerStatus, type Customization } from '../../common/state/protocol/channels-session/state.js';
 import { CopilotAgentSession } from '../../node/copilot/copilotAgentSession.js';
 import { buildNonPtyShellTerminalUri } from '../../node/copilot/copilotNonPtyShellTerminals.js';
+import { buildMcpChannel } from '../../node/shared/mcpCustomizationController.js';
 import { buildSandboxConfigForSdk } from '../../node/copilot/sandboxConfigForSdk.js';
 import { ActiveClientToolSet } from '../../node/activeClientState.js';
 import { type CopilotSessionLaunchPlan, type IActiveClientSnapshot, type ICopilotSessionLauncher, type ICopilotSessionRuntime } from '../../node/copilot/copilotSessionLauncher.js';
@@ -138,6 +139,10 @@ class MockCopilotSession {
 	 * Lets a test make an earlier-issued read resolve after a later one.
 	 */
 	readonly usageMetricsGates: Array<Promise<unknown>> = [];
+	backgroundTasks: Awaited<ReturnType<CopilotSession['rpc']['tasks']['list']>>['tasks'] = [];
+	backgroundTaskListCalls = 0;
+	backgroundTaskRefreshCalls = 0;
+	backgroundTaskListError: Error | undefined;
 
 	private readonly _handlers = new Map<string, Set<(event: SessionEvent) => void>>();
 	private readonly _allHandlers = new Set<SessionEventHandler>();
@@ -277,6 +282,22 @@ class MockCopilotSession {
 			invoke: async (params: { name: string; input?: string }) => {
 				this.commandInvokeCalls.push(params);
 				return this.commandInvokeResult;
+			},
+		},
+		tasks: {
+			list: async () => {
+				this.backgroundTaskListCalls++;
+				if (this.backgroundTaskListError) {
+					const error = this.backgroundTaskListError;
+					this.backgroundTaskListError = undefined;
+					throw error;
+				}
+				const tasks = this.backgroundTasks.map(task => ({ ...task }));
+				return { tasks };
+			},
+			refresh: async () => {
+				this.backgroundTaskRefreshCalls++;
+				return {};
 			},
 		},
 		mcp: {
@@ -662,7 +683,7 @@ async function createAgentSession(disposables: DisposableStore, options?: {
 
 	const parentSessionUri = AgentSession.uri('copilot', 'test-session-1');
 	const sessionUri = options?.sessionUri ?? parentSessionUri;
-	const chatChannelUri = options?.chatChannelUri ?? URI.parse(buildDefaultChatUri(parentSessionUri));
+	const chatChannelUri = options?.chatChannelUri ?? URI.parse(buildDefaultChatUri(sessionUri));
 	const mockSession = new MockCopilotSession();
 	options?.configureMockSession?.(mockSession);
 
@@ -4844,7 +4865,7 @@ suite('CopilotAgentSession', () => {
 						mcpServerName: 'docs',
 						ui: {
 							resourceUri: 'ui://docs',
-							channel: 'mcp://copilot/test-session-1/docs',
+							channel: buildMcpChannel(URI.parse(buildDefaultChatUri(AgentSession.uri('copilot', 'test-session-1'))), 'docs'),
 						},
 					},
 				});
@@ -5793,6 +5814,68 @@ suite('CopilotAgentSession', () => {
 
 			assert.strictEqual(signals.length, 1);
 			assert.ok(isAction(signals[0], ActionType.ChatTurnComplete));
+		});
+
+		test('idle event completes the active turn while a detached shell runs', async () => {
+			const { session, mockSession, signals } = await createAgentSession(disposables);
+			mockSession.backgroundTasks = [{
+				type: 'shell',
+				id: 'shell-1',
+				description: 'Monitor CI',
+				status: 'running',
+				startedAt: new Date(0).toISOString(),
+				command: 'monitor-ci',
+				attachmentMode: 'detached',
+				executionMode: 'background',
+			}];
+			session.resetTurnState('turn-background');
+			mockSession.fire('session.idle', {} as SessionEventPayload<'session.idle'>['data']);
+
+			assert.deepStrictEqual({
+				hasActiveTurn: session.hasActiveTurn,
+				completedTurns: getActions(signals).filter(action => action.type === ActionType.ChatTurnComplete).length,
+				listCalls: mockSession.backgroundTaskListCalls,
+				refreshCalls: mockSession.backgroundTaskRefreshCalls,
+			}, {
+				hasActiveTurn: false,
+				completedTurns: 1,
+				listCalls: 0,
+				refreshCalls: 0,
+			});
+		});
+
+		test('running detached shell state defers release conservatively', async () => {
+			const { session, mockSession } = await createAgentSession(disposables);
+			const runningShell = {
+				type: 'shell' as const,
+				id: 'shell-running',
+				description: 'Monitor CI',
+				status: 'running' as const,
+				startedAt: new Date(0).toISOString(),
+				command: 'monitor-ci',
+				attachmentMode: 'detached' as const,
+				executionMode: 'background' as const,
+			};
+			mockSession.backgroundTasks = [runningShell];
+			const running = await session.hasRunningDetachedShells();
+			mockSession.backgroundTasks = [{ ...runningShell, status: 'completed', completedAt: new Date().toISOString() }];
+			const completed = await session.hasRunningDetachedShells();
+			mockSession.backgroundTaskListError = new Error('transient tasks.list failure');
+			const failedRead = await session.hasRunningDetachedShells();
+
+			assert.deepStrictEqual({
+				running,
+				completed,
+				failedRead,
+				listCalls: mockSession.backgroundTaskListCalls,
+				refreshCalls: mockSession.backgroundTaskRefreshCalls,
+			}, {
+				running: true,
+				completed: false,
+				failedRead: true,
+				listCalls: 3,
+				refreshCalls: 3,
+			});
 		});
 
 		test('tool-call aggregate emits once with cancelled result across abort and idle', async () => {

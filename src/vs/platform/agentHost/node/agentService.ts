@@ -959,8 +959,7 @@ export class AgentService extends Disposable implements IAgentService {
 		if (!provider || !provider.handleMcpRequest) {
 			throw new Error(`Method not found: no provider for mcp:// channel ${channel}`);
 		}
-		const sessionUri = AgentSession.uri(route.providerId, route.sessionId);
-		return provider.handleMcpRequest(sessionUri, route.serverName, method, params);
+		return provider.handleMcpRequest(route.chatUri, route.serverName, method, params);
 	}
 
 	// ---- session management -------------------------------------------------
@@ -1241,11 +1240,13 @@ export class AgentService extends Disposable implements IAgentService {
 	private async _registerDiscoveredChats(provider: IAgent, chats: readonly IAgentDiscoveredChat[]): Promise<boolean> {
 		const existing = new Map((await this._listRegisteredSessions()).map(session => [session.session.toString(), session.external]));
 		const discoveryLimiter = new Limiter<boolean>(4);
+		let suppressed = 0;
 		const results = await Promise.all(chats.map(({ external, ...metadata }) => discoveryLimiter.queue(async () => {
 			const sessionMetadata = this._toSessionMetadata(metadata);
 			const session = sessionMetadata.session;
 			try {
 				if (isSubagentSession(session.toString()) || await this._isChatBacking(session)) {
+					suppressed++;
 					return false;
 				}
 				const identity: IRegisteredSession = { session, provider: provider.id, startTime: metadata.startTime, external, source: external ? 'discovery' : 'restore' };
@@ -1259,6 +1260,8 @@ export class AgentService extends Disposable implements IAgentService {
 					}
 					existing.set(session.toString(), external);
 					await this._announceSurfacedSession({ ...sessionMetadata, _meta: withSessionExternal(sessionMetadata._meta, external) }, provider.id);
+				} else {
+					this._logService.trace(`[AgentService] discovery: ${session.toString()} was not registered (tombstoned)`);
 				}
 				return registered;
 			} catch (err) {
@@ -1266,7 +1269,9 @@ export class AgentService extends Disposable implements IAgentService {
 				return false;
 			}
 		})));
-		return results.some(changed => changed);
+		const registered = results.filter(changed => changed).length;
+		this._logService.info(`[AgentService] discovery for provider ${provider.id}: ${chats.length} candidate(s) (${chats.filter(chat => chat.external).length} external), ${registered} registered, ${suppressed} suppressed as subagent/chat backing`);
+		return registered > 0;
 	}
 
 	private async _migrateLegacyProviderChats(provider: IAgent, force = false): Promise<void> {
@@ -1601,10 +1606,41 @@ export class AgentService extends Disposable implements IAgentService {
 			});
 		}
 		const combined = additions.length > 0 ? [...withStatus, ...additions] : withStatus;
-		const visible = combined.filter(session => this._shouldIncludeSession(session, mode));
+		const visible: IAgentSessionMetadata[] = [];
+		// Adoptable-legacy rows are withheld by migrate-legacy, not by the external mode.
+		let hiddenByExternalMode = 0;
+		for (const session of combined) {
+			if (this._shouldIncludeSession(session, mode)) {
+				visible.push(session);
+			} else if (!readSessionEhcliAdoptable(session._meta)) {
+				hiddenByExternalMode++;
+			}
+		}
+		this._logHiddenSessions(hiddenByExternalMode, combined.length, mode);
 
 		this._logService.trace(`[AgentService] listSessions returned ${visible.length} sessions (${additions.length} state-manager fallback)`);
 		return visible;
+	}
+
+	/** Last `hidden/total/mode` triple reported by {@link _logHiddenSessions}, so a steady state is logged once instead of on every refresh. */
+	private _lastHiddenSessionsLog: string | undefined;
+
+	/**
+	 * Surfaces how many sessions the external-sessions setting is holding back.
+	 * Without this, a session that a provider discovered but the current mode
+	 * filters out is indistinguishable from one that was never discovered.
+	 * `hidden` counts only rows the mode itself excluded, never the
+	 * adoptable-legacy rows gated on the separate migrate-legacy setting.
+	 */
+	private _logHiddenSessions(hidden: number, total: number, mode: AgentHostExternalSessionsMode): void {
+		const signature = `${hidden}/${total}/${mode}`;
+		if (signature === this._lastHiddenSessionsLog) {
+			return;
+		}
+		this._lastHiddenSessionsLog = signature;
+		if (hidden > 0) {
+			this._logService.info(`[AgentService] listSessions hid ${hidden} of ${total} session(s) (${AgentHostShowExternalSessionsConfigKey}: '${mode}')`);
+		}
 	}
 
 	private _getExternalSessionsMode(): AgentHostExternalSessionsMode {
@@ -2371,6 +2407,15 @@ export class AgentService extends Disposable implements IAgentService {
 	 * Idle eviction must use {@link IAgentChats.releaseChat}, not destructive
 	 * session finalization, so the session remains resumable.
 	 */
+	private async _canReleaseSession(provider: IAgent, session: URI, chats: readonly URI[]): Promise<boolean> {
+		for (const chat of chats) {
+			if (provider.chats.canReleaseChat && !await provider.chats.canReleaseChat(chat, this._chatContext(session, chat))) {
+				return false;
+			}
+		}
+		return true;
+	}
+
 	private async _releaseSession(provider: IAgent, session: URI, chats: readonly URI[]): Promise<void> {
 		await this._defaultChatBackingWrites.get(session.toString())?.catch(() => { });
 		// Still release every catalog chat if one rejects; otherwise an idle-evicted
@@ -3030,16 +3075,13 @@ export class AgentService extends Disposable implements IAgentService {
 	async subscribe(resource: URI, clientId: string): Promise<IStateSnapshot> {
 		this._logService.trace(`[AgentService] subscribe: ${resource.toString()}`);
 		const resourceStr = resource.toString();
-		// Register the subscriber up front so a concurrent unsubscribe cannot
-		// evict the session state while we are awaiting restore. On any failure
-		// path below we must roll the registration back, otherwise the leaked
-		// refcount would permanently pin (or block eviction of) the resource.
-		// {@link addSubscriber} is the single point that triggers the
-		// uncommitted-changeset refresh on the 0→1 transition (covers both
-		// the cold-snapshot path here and the handshake fast-path used by
-		// {@link ProtocolServerHandler} when state is already cached).
-		this.addSubscriber(resource, clientId);
 		try {
+			await this._releaseSessionInFlight.get(this._sessionReleaseKey(resource));
+			// Register after an in-flight release settles so a successful release
+			// can evict cached state and this subscribe reconstructs it. The
+			// handshake fast path calls addSubscriber directly and therefore pins
+			// its already-returned snapshot instead.
+			this.addSubscriber(resource, clientId);
 			// Check for terminal state
 			const terminalState = this._terminalManager.getTerminalState(resourceStr);
 			if (terminalState) {
@@ -3132,6 +3174,18 @@ export class AgentService extends Disposable implements IAgentService {
 		}
 	}
 
+	private _sessionReleaseKey(resource: URI): string {
+		const resourceString = resource.toString();
+		const changesetSession = parseChangesetUri(resourceString)?.sessionUri;
+		const chatSession = parseDefaultChatUri(resourceString);
+		let session = URI.parse(changesetSession ?? chatSession ?? resourceString);
+		let subagent;
+		while ((subagent = parseSubagentSessionUri(session))) {
+			session = subagent.parentSession;
+		}
+		return session.toString();
+	}
+
 	/** Waits for an armed subagent chat to register (or its wait to time out); returns `undefined` if not armed or never registered. */
 	private async _awaitPendingSubagentChat(subagentChatUri: string): Promise<IStateSnapshot | undefined> {
 		const pending = this._pendingSubagentChats.get(subagentChatUri);
@@ -3191,16 +3245,25 @@ export class AgentService extends Disposable implements IAgentService {
 		// and keeps the live provider SDK session, avoiding a disconnect/resume
 		// churn cycle that races concurrent session operations on the shared
 		// provider runtime. A zero grace releases on the next tick.
-		this._pendingSessionRelease.set(resource, disposableTimeout(() => {
-			this._pendingSessionRelease.deleteAndDispose(resource);
-			void this._maybeEvictIdleSession(resource).catch(err => {
-				this._logService.error(err, `[AgentService] Failed to evict idle session ${resource.toString()}`);
+		this._scheduleSessionRelease(resource);
+	}
+
+	private _cancelPendingSessionRelease(resource: URI): void {
+		this._pendingSessionRelease.deleteAndDispose(this._sessionReleaseResource(resource));
+	}
+
+	private _scheduleSessionRelease(resource: URI): void {
+		const session = this._sessionReleaseResource(resource);
+		this._pendingSessionRelease.set(session, disposableTimeout(() => {
+			this._pendingSessionRelease.deleteAndDispose(session);
+			void this._maybeEvictIdleSession(session).catch(err => {
+				this._logService.error(err, `[AgentService] Failed to evict idle session ${session.toString()}`);
 			});
 		}, SESSION_RELEASE_GRACE_MS));
 	}
 
-	private _cancelPendingSessionRelease(resource: URI): void {
-		this._pendingSessionRelease.deleteAndDispose(resource);
+	private _sessionReleaseResource(resource: URI): URI {
+		return URI.parse(this._sessionReleaseKey(resource));
 	}
 
 	/**
@@ -3291,28 +3354,11 @@ export class AgentService extends Disposable implements IAgentService {
 	 */
 	private async _maybeEvictIdleSession(resource: URI): Promise<void> {
 		const key = resource.toString();
-		if (this._resourceSubscribers.has(resource)) {
-			return;
-		}
-		// Walk up the subagent ancestry: the SDK session and its turn tree are
-		// owned by the root session, so eviction must target the root.
-		let evictionTarget = resource;
-		{
-			let parsed;
-			while ((parsed = parseSubagentSessionUri(evictionTarget))) {
-				evictionTarget = parsed.parentSession;
-			}
-		}
-		// Don't evict if the root or any of its subagent descendants still has subscribers.
-		if (this._resourceSubscribers.has(evictionTarget)) {
-			return;
-		}
-		for (const subscribedUri of this._resourceSubscribers.keys()) {
-			if (this._isSubagentDescendantOf(subscribedUri, evictionTarget)) {
-				return;
-			}
-		}
+		const evictionTarget = this._sessionReleaseResource(resource);
 		const evictionTargetKey = evictionTarget.toString();
+		if (this._hasSessionSubscribers(evictionTarget)) {
+			return;
+		}
 		// A restore/resume racing this unsubscribe means a client is about to
 		// observe the session again; releasing now would tear down state that
 		// the in-flight rehydrate is populating.
@@ -3320,52 +3366,82 @@ export class AgentService extends Disposable implements IAgentService {
 			return;
 		}
 		const targetState = this._stateManager.getSessionState(evictionTargetKey);
-		if (!targetState || targetState.activeTurn !== undefined) {
+		if (!targetState) {
+			return;
+		}
+		if (targetState.activeTurn !== undefined) {
+			this._scheduleSessionRelease(evictionTarget);
+			return;
+		}
+		if (this._releaseSessionInFlight.has(evictionTargetKey)) {
 			return;
 		}
 		const chats = this._getSessionChatsInTeardownOrder(evictionTarget);
 		await this._whenSessionDataIdle(evictionTarget);
-		if (this._resourceSubscribers.has(evictionTarget) || this._restoreSessionInFlight.has(evictionTargetKey)) {
+		if (this._hasSessionSubscribers(evictionTarget) || this._restoreSessionInFlight.has(evictionTargetKey) || this._releaseSessionInFlight.has(evictionTargetKey)) {
 			return;
-		}
-		for (const subscribedUri of this._resourceSubscribers.keys()) {
-			if (this._isSubagentDescendantOf(subscribedUri, evictionTarget)) {
-				return;
-			}
 		}
 		const settledState = this._stateManager.getSessionState(evictionTargetKey);
 		if (!settledState || settledState.activeTurn !== undefined) {
 			return;
 		}
-		this._logService.info(`[AgentService] Evicting idle session: ${evictionTargetKey} (triggered by unsubscribe of ${key})`);
-		// Also evict any sibling subagent entries cached under the parent: their
-		// authoritative state is the parent's turn tree, and dropping the parent
-		// would leave them orphaned.
-		const subagentPrefix = buildSubagentSessionUriPrefix(evictionTarget);
-		for (const cachedKey of this._stateManager.getSessionUrisWithPrefix(subagentPrefix)) {
-			this._stateManager.removeSession(cachedKey);
-		}
-		this._sideEffects.clearSessionTitleState(evictionTargetKey, settledState.chats.map(chat => chat.resource));
-		this._stateManager.removeSession(evictionTargetKey);
-		// Release the provider's in-memory SDK session in lockstep with the
-		// cached state. Non-destructive: durable data is preserved so the
-		// session resumes transparently on the next access. Fire-and-forget —
-		// the provider sequences the release internally and re-checks its own
-		// invariants (e.g. a turn that started after this call).
 		const provider = this._findProviderForSession(evictionTarget);
 		if (!provider) {
 			return;
 		}
-		const release = this._releaseSession(provider, evictionTarget, chats);
-		const trackedRelease = release.catch(err => {
-			this._logService.error(err, `[AgentService] Failed to release idle session ${evictionTargetKey}`);
-		});
+		const trackedRelease = (async () => {
+			try {
+				if (!await this._canReleaseSession(provider, evictionTarget, chats)) {
+					if (!this._hasSessionSubscribers(evictionTarget)) {
+						this._scheduleSessionRelease(evictionTarget);
+					}
+					return;
+				}
+				const currentState = this._stateManager.getSessionState(evictionTargetKey);
+				if (this._hasSessionSubscribers(evictionTarget)) {
+					return;
+				}
+				if (this._restoreSessionInFlight.has(evictionTargetKey) || currentState?.activeTurn !== undefined) {
+					this._scheduleSessionRelease(evictionTarget);
+					return;
+				}
+				if (currentState) {
+					this._evictSessionState(evictionTarget, evictionTargetKey, key, currentState.chats.map(chat => chat.resource));
+				}
+				await this._releaseSession(provider, evictionTarget, chats);
+			} catch (err) {
+				this._logService.error(err, `[AgentService] Failed to release idle session ${evictionTargetKey}`);
+				if (!this._hasSessionSubscribers(evictionTarget)) {
+					this._scheduleSessionRelease(evictionTarget);
+				}
+			}
+		})();
 		this._releaseSessionInFlight.set(evictionTargetKey, trackedRelease);
 		void trackedRelease.then(() => {
 			if (this._releaseSessionInFlight.get(evictionTargetKey) === trackedRelease) {
 				this._releaseSessionInFlight.delete(evictionTargetKey);
 			}
 		});
+	}
+
+	private _hasSessionSubscribers(session: URI): boolean {
+		const sessionKey = this._sessionReleaseKey(session);
+		for (const subscribedUri of this._resourceSubscribers.keys()) {
+			if (this._sessionReleaseKey(subscribedUri) === sessionKey) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private _evictSessionState(evictionTarget: URI, evictionTargetKey: string, triggerKey: string, chats: readonly string[]): void {
+		this._logService.info(`[AgentService] Evicting idle session: ${evictionTargetKey} (triggered by unsubscribe of ${triggerKey})`);
+		const subagentPrefix = buildSubagentSessionUriPrefix(evictionTarget);
+		for (const cachedKey of this._stateManager.getSessionUrisWithPrefix(subagentPrefix)) {
+			this._stateManager.removeSession(cachedKey);
+		}
+		this._sideEffects.clearSessionTitleState(evictionTargetKey, chats);
+		this._stateManager.removeSession(evictionTargetKey);
 	}
 
 	// Returns true when a changeset is safe to drop from the in-memory cache.
@@ -5300,19 +5376,30 @@ export class AgentService extends Disposable implements IAgentService {
 		if (!this._gitService) {
 			throw new ProtocolError(AhpErrorCodes.NotFound, `git service unavailable for: ${fields.repoRelativePath}`);
 		}
-		const workingDirectory = await this._resolveGitBlobWorkingDirectory(fields);
-		if (!workingDirectory) {
-			throw new ProtocolError(AhpErrorCodes.NotFound, `No session repository resolves git-blob path: ${fields.absolutePath || fields.repoRelativePath}`);
+		const owningSession = this._sessionReleaseResource(URI.parse(fields.sessionUri));
+		const wasRestored = !!this._stateManager.getSessionState(owningSession.toString());
+		try {
+			if (!wasRestored) {
+				await this.restoreSession(owningSession);
+			}
+			const workingDirectory = await this._resolveGitBlobWorkingDirectory(fields, owningSession);
+			if (!workingDirectory) {
+				throw new ProtocolError(AhpErrorCodes.NotFound, `No session repository resolves git-blob path: ${fields.absolutePath || fields.repoRelativePath}`);
+			}
+			const blob = await this._gitService.showBlob(workingDirectory, fields.sha, fields.repoRelativePath);
+			if (!blob) {
+				throw new ProtocolError(AhpErrorCodes.NotFound, `git blob not found: ${fields.sha}:${fields.repoRelativePath}`);
+			}
+			return {
+				data: blob.toString(),
+				encoding: ContentEncoding.Utf8,
+				contentType: 'text/plain',
+			};
+		} finally {
+			if (!wasRestored && this._stateManager.getSessionState(owningSession.toString()) && !this._hasSessionSubscribers(owningSession)) {
+				this._scheduleSessionRelease(owningSession);
+			}
 		}
-		const blob = await this._gitService.showBlob(workingDirectory, fields.sha, fields.repoRelativePath);
-		if (!blob) {
-			throw new ProtocolError(AhpErrorCodes.NotFound, `git blob not found: ${fields.sha}:${fields.repoRelativePath}`);
-		}
-		return {
-			data: blob.toString(),
-			encoding: ContentEncoding.Utf8,
-			contentType: 'text/plain',
-		};
 	}
 
 	/**
@@ -5341,12 +5428,13 @@ export class AgentService extends Disposable implements IAgentService {
 	 *   [/work/app, /work/lib]         + /outside/c.ts        → undefined (NotFound)
 	 *   [/work/app, /work/lib]         + ''  (legacy)         → /work/app
 	 */
-	private async _resolveGitBlobWorkingDirectory(fields: IGitBlobUriFields): Promise<URI | undefined> {
+	private async _resolveGitBlobWorkingDirectory(fields: IGitBlobUriFields, owningSession: URI): Promise<URI | undefined> {
 		const gitService = this._gitService;
 		if (!gitService) {
 			return undefined;
 		}
-		const workingDirectories = getEffectiveWorkingDirectories(this._stateManager, fields.sessionUri);
+		const workingDirectories = getEffectiveWorkingDirectories(this._stateManager, fields.sessionUri)
+			?? getEffectiveWorkingDirectories(this._stateManager, owningSession.toString());
 		// Backwards-compat: no resolvable absolute path means we cannot match a
 		// repository root, so fall back to today's primary-directory behavior.
 		if (!fields.absolutePath) {
