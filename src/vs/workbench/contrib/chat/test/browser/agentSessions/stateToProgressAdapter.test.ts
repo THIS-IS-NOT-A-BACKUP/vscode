@@ -21,6 +21,7 @@ import { ChatRequestOriginKind } from '../../../common/chatRequestOrigin.js';
 import { IChatToolInvocation, IChatToolInvocationSerialized, ToolConfirmKind, type IChatMarkdownContent, type IChatTerminalToolInvocationData, type IChatThinkingPart, type IChatUsage } from '../../../common/chatService/chatService.js';
 import { isToolResultInputOutputDetails, type IToolResultInputOutputDetails, ToolDataSource, ToolInvocationPresentation } from '../../../common/tools/languageModelToolsService.js';
 import { turnsToHistory as rawTurnsToHistory, activeTurnToProgress as rawActiveTurnToProgress, completedToolCallToSerialized, containsAutomaticReplyAnswer, createInputRequestCarousel, messageAttachmentsToVariableData, shouldObserveSubagentChat, toolCallStateToInvocation as rawToolCallStateToInvocation, toolCallStateToPreparedInvocation as rawToolCallStateToPreparedInvocation, toolCallStateToStreamingInvocation, finalizeToolInvocation as rawFinalizeToolInvocation, updateRunningToolSpecificData as rawUpdateRunningToolSpecificData, updateStreamingToolInvocation, usageInfoToAutoModeResolution, usageInfoToChatUsage, usageInfoToQuotas, formatTurnResponseDetails, rewriteAgentHostLinkTarget, rewriteMarkdownLinks, type TurnModelLookup } from '../../../browser/agentSessions/agentHost/stateToProgressAdapter.js';
+import { getQuotaReset } from '../../../../../services/chat/common/chatEntitlementService.js';
 
 // ---- Helper factories -------------------------------------------------------
 
@@ -364,6 +365,67 @@ suite('stateToProgressAdapter', () => {
 					kind: ChatRequestOriginKind.Delegation,
 					sourceSessionResource: URI.parse('agent-host-codex:/source-thread'),
 				},
+			});
+		});
+
+		test('created session annotates only its first request with the creating turn', () => {
+			const firstTurn = createTurn({
+				id: 'turn-1',
+				message: {
+					text: 'Hello',
+					origin: { kind: MessageKind.User },
+					_meta: toAgentMessageDelegationMeta({
+						sourceSession: 'copilot:/creator',
+						sourceChat: 'ahp-chat://default/Y29waWxvdDovY3JlYXRvcg',
+						sourceTurnId: 'creating-turn',
+					}),
+				},
+			});
+			const history = rawTurnsToHistory(
+				URI.parse('copilot:/created'),
+				[firstTurn, createTurn({ id: 'turn-2' })],
+				'agent-host-copilot',
+				'local',
+			);
+
+			assert.deepStrictEqual([
+				history[0].type === 'request' ? history[0].origin : undefined,
+				history[2].type === 'request' ? history[2].origin : undefined,
+			], [{
+				kind: ChatRequestOriginKind.Delegation,
+				sourceSessionResource: URI.parse('agent-host-session://copilot/creator?turn=creating-turn'),
+				delegationScope: 'session',
+			}, undefined]);
+		});
+
+		test('created session maps an aliased backend source to its logical provider', () => {
+			const turn = createTurn({
+				message: {
+					text: 'Hello',
+					origin: { kind: MessageKind.User },
+					_meta: toAgentMessageDelegationMeta({
+						sourceSession: 'ahp-session:/creator',
+						sourceChat: 'ahp-chat://default/YWhwLXNlc3Npb246L2NyZWF0b3I',
+					}),
+				},
+			});
+
+			const history = rawTurnsToHistory(
+				URI.parse('ahp-session:/created'),
+				[turn],
+				'copilot',
+				'remote',
+				undefined,
+				undefined,
+				undefined,
+				undefined,
+				'copilot',
+			);
+
+			assert.deepStrictEqual(history[0].type === 'request' ? history[0].origin : undefined, {
+				kind: ChatRequestOriginKind.Delegation,
+				sourceSessionResource: URI.parse('agent-host-session://copilot/creator'),
+				delegationScope: 'session',
 			});
 		});
 
@@ -3208,7 +3270,8 @@ suite('stateToProgressAdapter', () => {
 					unlimited: false,
 					entitlement: 300,
 					quotaRemaining: 225,
-					resetAt: Date.parse('2026-07-01T00:00:00.000Z'),
+					// `resetAt` is epoch seconds, not milliseconds.
+					resetAt: Date.parse('2026-07-01T00:00:00.000Z') / 1000,
 				},
 				chat: {
 					percentRemaining: 100,
@@ -3261,6 +3324,29 @@ suite('stateToProgressAdapter', () => {
 			});
 
 			assert.strictEqual(result, undefined);
+		});
+
+		test('produces a resetAt the entitlement service resolves back to the reported date', () => {
+			// `getQuotaReset` treats `resetAt` as epoch seconds, so a snapshot mapped from an ISO
+			// date must round-trip to that same instant rather than a far-future one.
+			const result = usageInfoToQuotas({
+				_meta: {
+					quotaSnapshots: {
+						premium_interactions: {
+							isUnlimitedEntitlement: false,
+							entitlementRequests: 300,
+							usedRequests: 75,
+							remainingPercentage: 75,
+							resetDate: '2026-07-01T00:00:00.000Z',
+						},
+					},
+				},
+			});
+
+			assert.deepStrictEqual(getQuotaReset(result?.premiumChat, { resetDate: result?.resetDate }), {
+				date: new Date('2026-07-01T00:00:00.000Z'),
+				hasTime: true,
+			});
 		});
 	});
 
