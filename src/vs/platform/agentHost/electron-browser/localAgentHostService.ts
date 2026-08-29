@@ -217,9 +217,7 @@ export class LocalAgentHostServiceClient extends Disposable implements IAgentHos
 				AgentHostProtocolClient,
 				LOCAL_AGENT_HOST_RESOURCE_IDENTITY,
 				() => this._createTransport(),
-				undefined,
-				this.clientId,
-				this._clientInfo,
+				{ clientId: this.clientId, clientInfo: this._clientInfo },
 			));
 			this._register(this._protocolClient.onDidChangeConnectionState(state => this._handleConnectionState(state)));
 			this._register(this._protocolClient.onDidFatalClose(() => {
@@ -365,10 +363,6 @@ export class LocalAgentHostServiceClient extends Disposable implements IAgentHos
 
 	getSubscription<T extends StateComponents>(kind: T, resource: URI, owner: string): IReference<IAgentSubscription<ComponentToState[T]>> {
 		return this._requireClient().getSubscription<ComponentToState[T]>(kind, resource, owner);
-	}
-
-	getSubscriptionByChannel<T extends StateComponents>(kind: T, channel: string, owner: string): IReference<IAgentSubscription<ComponentToState[T]>> {
-		return this._requireClient().getSubscriptionByChannel<ComponentToState[T]>(kind, channel, owner);
 	}
 
 	getSubscriptionUnmanaged<T extends StateComponents>(kind: T, resource: URI): IAgentSubscription<ComponentToState[T]> | undefined {

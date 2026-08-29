@@ -95,7 +95,7 @@ export class EditorRemoteAgentHostServiceClient extends Disposable implements IA
 		const createTransport = () => new AgentHostIpcChannelTransport(connection.getChannel(AgentHostIpcChannels.RemoteProxy), undefined, AgentHostClientConnectionKind.RemoteExtensionHost);
 		const address = `vscode-remote://${connection.remoteAuthority}`;
 		const clientInfo = environmentService.isSessionsWindow ? agentsWindowAgentHostClientInfo : editorWindowAgentHostClientInfo;
-		this._protocolClient = this._register(instantiationService.createInstance(AgentHostProtocolClient, address, createTransport, undefined, undefined, clientInfo));
+		this._protocolClient = this._register(instantiationService.createInstance(AgentHostProtocolClient, address, createTransport, { clientInfo }));
 		// Resources this client hands out (e.g. debug-log artifacts) are stamped with the
 		// address-derived authority, so register it for reads. The ambient `local` authority
 		// registered elsewhere covers a different URI namespace.
@@ -193,10 +193,6 @@ export class EditorRemoteAgentHostServiceClient extends Disposable implements IA
 
 	getSubscription<T extends StateComponents>(kind: T, resource: URI, owner: string): IReference<IAgentSubscription<ComponentToState[T]>> {
 		return this._requireClient().getSubscription<ComponentToState[T]>(kind, resource, owner);
-	}
-
-	getSubscriptionByChannel<T extends StateComponents>(kind: T, channel: string, owner: string): IReference<IAgentSubscription<ComponentToState[T]>> {
-		return this._requireClient().getSubscriptionByChannel<ComponentToState[T]>(kind, channel, owner);
 	}
 
 	getSubscriptionUnmanaged<T extends StateComponents>(kind: T, resource: URI): IAgentSubscription<ComponentToState[T]> | undefined {

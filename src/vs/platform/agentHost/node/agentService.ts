@@ -706,7 +706,6 @@ export class AgentService extends Disposable implements IAgentService {
 		updateAgentHostTelemetryLevelFromConfig(this._telemetryService, this._stateManager.rootState.config?.values);
 		this._register(this._stateManager.onDidChangeSessionConfig(({ session, previous, current }) => this._syncAgentMergeIndex(URI.parse(session), previous, current)));
 		let externalSessionsMode = this._getExternalSessionsMode();
-		this._lastMigrateLegacyEnabled = this._isMigrateLegacyEnabled();
 		let agentMergeEnabled = this._isAgentMergeEnabled();
 		this._register(this._configurationService.onDidRootConfigChange(() => {
 			const nextMode = this._getExternalSessionsMode();
@@ -733,7 +732,6 @@ export class AgentService extends Disposable implements IAgentService {
 						.catch(err => this._logService.warn('[AgentService] Failed to restore Agent-Merge-enabled sessions', err));
 				}
 			}
-			this._onMigrateLegacySettingChanged();
 		}));
 		this._register(this._gitHubEndpointService.onDidChange(() => {
 			this._stateManager.emitAuthRequired({
@@ -2406,11 +2404,14 @@ export class AgentService extends Disposable implements IAgentService {
 		now = Date.now(),
 		recentSessionKeys?: ReadonlySet<string>,
 	): boolean {
-		// While migration is off, un-adopted adoptable-legacy sessions belong to the extension-host provider — exclude so a refresh cannot re-surface an unopenable row.
-		if (readSessionEhcliAdoptable(session._meta) && !this._isMigrateLegacyEnabled()) {
+		// An un-adopted adoptable-legacy session belongs to the extension-host provider
+		// until it is opened (and thereby adopted): the agent host never surfaces it, so it
+		// keeps showing under the legacy Copilot CLI provider. Adoption clears this marker
+		// (and sets `ehcliAdopted`), so an adopted session surfaces normally below.
+		if (readSessionEhcliAdoptable(session._meta)) {
 			return false;
 		}
-		if (!readSessionExternal(session._meta) || readSessionEhcliAdoptable(session._meta)) {
+		if (!readSessionExternal(session._meta)) {
 			return true;
 		}
 		switch (mode) {
@@ -2433,14 +2434,12 @@ export class AgentService extends Disposable implements IAgentService {
 	 * external session under `mode`, letting {@link _computeSessions} drop them
 	 * on the registry's `external` flag alone.
 	 *
-	 * `None` is the only mode that rejects external sessions outright. The
-	 * adoptable-legacy exemption is the single way one could still be visible,
-	 * and while migration is off that marker forces exclusion as well — which
-	 * matters because the marker is only discoverable from the provider
-	 * metadata read this skip avoids.
+	 * `None` is the only mode that rejects external sessions outright. Adoptable-legacy
+	 * rows are always excluded now (they belong to the extension host until opened), so
+	 * they can never keep an external session visible.
 	 */
 	private _hidesAllExternalSessions(mode: AgentHostExternalSessionsMode): boolean {
-		return mode === AgentHostExternalSessionsMode.None && !this._isMigrateLegacyEnabled();
+		return mode === AgentHostExternalSessionsMode.None;
 	}
 
 	/**
@@ -2469,84 +2468,64 @@ export class AgentService extends Disposable implements IAgentService {
 	private readonly _announcedSurfacedKeys = new Set<string>();
 	private readonly _broadcastExternalSessions = new Set<string>();
 	private _sessionListReconciliation = Promise.resolve();
+	/** Coalescing state for storm-driven (mode-agnostic) reconciliations. */
+	private _reconciliationInFlight = false;
+	private _reconciliationDirty = false;
 
-	/** Tracks the migrate-legacy setting so the config listener acts only on transitions. */
-	private _lastMigrateLegacyEnabled = false;
-	/** Adoptable keys retracted in this window; re-enabling also recovers earlier ones from the catalog. */
-	private readonly _retractedAdoptableKeys = new Set<string>();
+	private _migrateLegacyEnabledSnapshot: boolean | undefined;
 
-	/** Serializes adoptable re-surfacing, kept off the external-reconciliation chain. */
-	private _adoptableResurface: Promise<void> = Promise.resolve();
+	/**
+	 * Freezes the migrate-legacy gate at host startup. The host is a shared
+	 * process that survives window reloads, so a setting toggled without a full
+	 * restart is live-propagated into its config; capturing the value once at
+	 * bootstrap (before any such live change can arrive) is what makes the
+	 * "requires a restart" contract hold. Called once from {@link agentHostBootstrap};
+	 * tests never call it and keep the lazy first-read fallback.
+	 */
+	primeMigrateLegacyGate(): void {
+		this._isMigrateLegacyEnabled();
+	}
 
 	private _isMigrateLegacyEnabled(): boolean {
-		return this._configurationService.getRootValue(platformRootSchema, AgentHostMigrateLegacyCopilotCliEnabledConfigKey) === true;
+		// Frozen at host startup (see `primeMigrateLegacyGate`): the gate never
+		// flips mid-process, so there is no live discovery re-run / retract storm
+		// to reconcile.
+		return this._migrateLegacyEnabledSnapshot ??= this._configurationService.getRootValue(platformRootSchema, AgentHostMigrateLegacyCopilotCliEnabledConfigKey) === true;
 	}
 
 	private _isAgentMergeEnabled(): boolean {
 		return this._configurationService.getRootValue(agentMergeRootConfigSchema, AgentMergeConfigKey.Enabled) === true;
 	}
 
-	/** Retracts un-opened adoptable-legacy entries when migration is turned off (deletes no data). */
-	private _onMigrateLegacySettingChanged(): void {
-		const enabled = this._isMigrateLegacyEnabled();
-		if (enabled === this._lastMigrateLegacyEnabled) {
-			return;
-		}
-		this._lastMigrateLegacyEnabled = enabled;
-		if (enabled) {
-			// Discovery skips chats already in the registry, so it cannot re-announce
-			// what disabling retracted. `_retractedAdoptableKeys` is process-local, so
-			// after a restart the catalog is the only record of them. Runs on its own
-			// chain: this scan on `_sessionListReconciliation` would stall external
-			// session reconciliation behind it.
-			this._adoptableResurface = this._adoptableResurface
-				.then(() => this._resurfaceAdoptableSessions())
-				.catch(error => this._logService.warn('[AgentService] Re-surfacing adoptable legacy sessions failed', error));
-			return;
-		}
-		for (const key of [...this._announcedSurfacedKeys]) {
-			if (this._stateManager.getSessionState(key)) {
-				continue; // already adopted / restored — keep it
-			}
-			if (!readSessionEhcliAdoptable(this._stateManager.getSurfacedSessionSummary(key)?._meta)) {
-				continue; // only retract adoptable-legacy entries, never native / external ones
-			}
-			this._announcedSurfacedKeys.delete(key);
-			this._broadcastExternalSessions.delete(key);
-			this._retractedAdoptableKeys.add(key);
-			this._stateManager.retractSurfacedSession(key);
-		}
-	}
-
-	/**
-	 * A key is forgotten only once it is confirmed surfaced, so a failed listing —
-	 * or migration being disabled again before this runs — leaves it restorable.
-	 * Covers both what this process retracted and what the catalog still reports as
-	 * adoptable, so rows retracted before a restart are recovered too.
-	 */
-	private async _resurfaceAdoptableSessions(): Promise<void> {
-		if (!this._isMigrateLegacyEnabled()) {
-			return;
-		}
-		for (const metadata of await this.listSessions()) {
-			const key = metadata.session.toString();
-			if (!this._retractedAdoptableKeys.has(key) && !readSessionEhcliAdoptable(metadata._meta)) {
-				continue;
-			}
-			const provider = AgentSession.provider(metadata.session);
-			if (provider) {
-				await this._announceSurfacedSession(metadata, provider);
-			}
-			if (this._announcedSurfacedKeys.has(key) || this._stateManager.getSessionState(key)) {
-				this._retractedAdoptableKeys.delete(key);
-			}
-		}
-	}
-
 	private _queueSessionListReconciliation(previousMode?: AgentHostExternalSessionsMode): void {
+		// A mode change carries specific previous-mode state and is rare/user-driven,
+		// so run it directly rather than collapsing it into a coalesced pass.
+		if (previousMode !== undefined) {
+			this._sessionListReconciliation = this._sessionListReconciliation
+				.then(() => this._reconcileExternalSessions(previousMode))
+				.catch(error => this._logService.warn('[AgentService] External session reconciliation failed', error));
+			return;
+		}
+		// Storm-driven reconciliations (discovery batches, adoptions, prune, summary
+		// changes) all recompute the same current-state list, so a burst can collapse
+		// to a single trailing run instead of one O(catalog) pass per trigger: while
+		// one is in flight, further requests just mark it dirty to re-run once after.
+		if (this._reconciliationInFlight) {
+			this._reconciliationDirty = true;
+			return;
+		}
+		this._reconciliationInFlight = true;
+		this._reconciliationDirty = false;
 		this._sessionListReconciliation = this._sessionListReconciliation
-			.then(() => this._reconcileExternalSessions(previousMode))
-			.catch(error => this._logService.warn('[AgentService] External session reconciliation failed', error));
+			.then(() => this._reconcileExternalSessions())
+			.catch(error => this._logService.warn('[AgentService] External session reconciliation failed', error))
+			.finally(() => {
+				this._reconciliationInFlight = false;
+				if (this._reconciliationDirty) {
+					this._reconciliationDirty = false;
+					this._queueSessionListReconciliation();
+				}
+			});
 	}
 
 	private async _reconcileExternalSessions(previousMode?: AgentHostExternalSessionsMode): Promise<void> {
@@ -2652,7 +2631,7 @@ export class AgentService extends Disposable implements IAgentService {
 				this._announcedSurfacedKeys.delete(key);
 				return;
 			}
-			// The migrate setting may have flipped off during the await above; re-check so an adoptable-legacy session is never surfaced while migration is off.
+			// The external-sessions mode may have changed during the await above; re-check so a row that is no longer visible is not surfaced.
 			if (!this._shouldIncludeSession(meta)) {
 				this._announcedSurfacedKeys.delete(key);
 				return;
@@ -3606,8 +3585,8 @@ export class AgentService extends Disposable implements IAgentService {
 		void this._gitStateService.refreshSessionGitState(sessionKey, e.workingDirectories?.[0]);
 
 		// If a client subscribed to this session's uncommitted changeset
-		// before the working directory was known, the coordinator drains
-		// the deferred refresh now that the working directory is set.
+		// before the working directory was known, recompute the current
+		// subscriptions now that the working directory is set.
 		this._changesetCoordinator.onSessionMaterialized(sessionKey);
 	}
 
@@ -5037,8 +5016,8 @@ export class AgentService extends Disposable implements IAgentService {
 		let external = registeredSession?.external ?? false;
 		this._logService.trace(`[AgentService] restore: catalog and registry resolved for ${sessionStr} (registered=${!!registeredSession}, external=${external})`);
 
-		// Adopt-on-open for a surfaced un-adopted legacy Copilot CLI session, strictly gated on the live migrate setting (a no-op for native / already-adopted sessions).
-		const migrateLegacyEnabled = this._configurationService.getRootValue(platformRootSchema, AgentHostMigrateLegacyCopilotCliEnabledConfigKey) === true;
+		// Adopt-on-open for a surfaced un-adopted legacy Copilot CLI session, strictly gated on the startup-frozen migrate setting (a no-op for native / already-adopted sessions).
+		const migrateLegacyEnabled = this._isMigrateLegacyEnabled();
 		const migrationStartTime = Date.now();
 		let adoption: IAgentChatAdoptionResult = { adopted: false, eligible: false };
 		if (!external && migrateLegacyEnabled && agent.ensureChatAdopted) {
@@ -5059,7 +5038,13 @@ export class AgentService extends Disposable implements IAgentService {
 		// unknown sessions, so without this an external chat (e.g. one the GitHub app
 		// created, hidden while `showExternalSessions` is `none`) would be
 		// materialized here and thereby claimed away from the extension host's list.
-		if (!registeredSession && migrateLegacyEnabled && agent.ensureChatAdopted && !adoption.eligible && !adoption.native) {
+		// Refuse an unregistered chat that is neither an adoptable legacy chat nor
+		// one that already has Agent Host metadata. This is independent of the
+		// migrate gate: while migration is frozen off, adoption is never attempted
+		// above, so a client that still probes the twin (e.g. the setting was toggled
+		// on without the required window reload) is cleanly declined and opens the
+		// legacy session unmigrated, rather than materializing an unowned session.
+		if (!registeredSession && agent.ensureChatAdopted && !adoption.eligible && !adoption.native) {
 			// The registry was read before the deferred catalog wait, so absence is only authoritative once that catalog is readable (#331721).
 			await awaitCatalogReadable();
 			registeredSession = await this._sessionRegistry.get(session, entry => this._migrateRegisteredSession(entry));
@@ -5089,8 +5074,20 @@ export class AgentService extends Disposable implements IAgentService {
 				);
 				registeredAfterAdoption = true;
 				this._invalidateSessionList();
+				// Surface-before-retract: adoption already wrote `session.db`, which is
+				// what makes the extension-host list drop this chat. Announce the adopted
+				// row now — before the slower `_restoreSessionState` — so the session is
+				// never absent from both lists during the handoff.
+				try {
+					const surfaced = await this._registeredSessionMetadata(agent, session, /* external */ false);
+					if (surfaced) {
+						await this._announceSurfacedSession(surfaced, agent.id);
+					}
+				} catch (err) {
+					this._logService.warn(`[AgentService] Failed to surface adopted session ${sessionStr} before restore`, err);
+				}
 			}
-			const facts = await this._restoreSessionState(agent, session, sessionStr, adopted, external, registeredSession?.source ?? 'restore', registeredSession, awaitCatalogReadable, !!registeredSession, adoption.worktree);
+			const facts = await this._restoreSessionState(agent, session, sessionStr, adopted, external, registeredSession?.source ?? 'restore', awaitCatalogReadable, !!registeredSession, adoption.worktree);
 			await this._restoreAnnotations(session);
 			if (adopted) {
 				// Discovery never surfaced this chat when migration was enabled after
@@ -5196,14 +5193,14 @@ export class AgentService extends Disposable implements IAgentService {
 	 * Returns the facts used for migration telemetry; throws if any required step
 	 * fails so the caller can report the outcome accurately.
 	 */
-	private async _restoreSessionState(agent: IAgent, session: URI, sessionStr: string, adopted: boolean, external: boolean, registrationSource: IRegisteredSession['source'], registryFallback: Pick<IRegisteredSession, 'startTime' | 'modifiedTime'> | undefined, awaitCatalogReadable: () => Promise<boolean>, sessionKnownToRegistry: boolean, adoptionWorktree: IAgentAdoptedWorktree | undefined): Promise<{ turnCount: number; hasProject: boolean; hasWorktree: boolean; workingDirectoryCount: number }> {
+	private async _restoreSessionState(agent: IAgent, session: URI, sessionStr: string, adopted: boolean, external: boolean, registrationSource: IRegisteredSession['source'], awaitCatalogReadable: () => Promise<boolean>, sessionKnownToRegistry: boolean, adoptionWorktree: IAgentAdoptedWorktree | undefined): Promise<{ turnCount: number; hasProject: boolean; hasWorktree: boolean; workingDirectoryCount: number }> {
 		this._logService.trace(`[AgentService] restore: reading provider metadata for ${sessionStr}`);
-		let meta = await this._getSessionMetadataForRestore(agent, session, external, registryFallback);
+		let meta = await this._getSessionMetadataForRestore(agent, session, external);
 		if (!meta) {
 			// Only a miss needs the catalogue: it decides whether the session is
 			// genuinely absent, and warming it may enumerate thousands of sessions.
 			const catalogReadable = await awaitCatalogReadable();
-			meta = await this._getSessionMetadataForRestore(agent, session, external, registryFallback);
+			meta = await this._getSessionMetadataForRestore(agent, session, external);
 			// The registry is backfilled by that same pass, so re-read it before
 			// concluding the session is unknown.
 			const knownToRegistry = sessionKnownToRegistry || (await this._listRegisteredSessions()).some(entry => entry.session.toString() === sessionStr);
@@ -5447,6 +5444,9 @@ export class AgentService extends Disposable implements IAgentService {
 			session: sessionStr,
 			chat: defaultChatUri.toString(),
 		}, {});
+		// This overlay stays here rather than moving into `ChatDraftContribution`: it seeds
+		// the draft's model from `IAgent`-supplied session metadata, so it is provider-shaped,
+		// and moving it would put provider metadata into `IHydrationContext` for one consumer.
 		const restoredDraft = meta.model
 			? { ...(defaultDraft ?? { text: '', origin: { kind: MessageKind.User } }), model: meta.model }
 			: defaultDraft;
@@ -6013,14 +6013,11 @@ export class AgentService extends Disposable implements IAgentService {
 		}
 	}
 
-	private async _getSessionMetadataForRestore(agent: IAgent, session: URI, external: boolean, registryFallback: Pick<IRegisteredSession, 'startTime' | 'modifiedTime'> | undefined): Promise<IAgentSessionMetadata | undefined> {
+	private async _getSessionMetadataForRestore(agent: IAgent, session: URI, external: boolean): Promise<IAgentSessionMetadata | undefined> {
 		const sessionStr = session.toString();
 		const chat = URI.parse(buildDefaultChatUri(session));
 		try {
-			const metadata = await agent.getChatMetadata(chat, this._chatContext(session, chat), await this._readDefaultChatProviderData(session), {
-				activation: 'restore',
-				...(registryFallback ? { registryFallback } : {}),
-			});
+			const metadata = await agent.getChatMetadata(chat, this._chatContext(session, chat), await this._readDefaultChatProviderData(session), { activation: 'restore' });
 			return await this._withWorktreeProject(session, metadata ? this._toSessionMetadata(metadata) : undefined);
 		} catch (err) {
 			if (err instanceof ProtocolError) {
