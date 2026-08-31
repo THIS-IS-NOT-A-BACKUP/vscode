@@ -17,6 +17,7 @@ import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/c
 import { ILogService, NullLogService } from '../../../log/common/log.js';
 import { AgentHostClientState, AgentHostProtocolClient } from '../../browser/agentHostProtocolClient.js';
 import { getAgentHostExtensionInitializeResultMeta } from '../../common/agentHostExtensionProtocol.js';
+import { agentHostAuthority, toAgentHostUri } from '../../common/agentHostUri.js';
 import { AgentHostPermissionMode, AgentHostResourceIdentity, AgentHostResourcePermissionError, IAgentHostResourceService, LOCAL_AGENT_HOST_RESOURCE_IDENTITY } from '../../common/agentHostResourceService.js';
 import { buildAnnotationsUri } from '../../common/annotationsUri.js';
 import { ConfigurationTarget, type IConfigurationValue } from '../../../configuration/common/configuration.js';
@@ -458,7 +459,7 @@ suite('AgentHostProtocolClient', () => {
 		assert.deepStrictEqual([...client['_authentication'].values()], []);
 	});
 
-	test('listSessions carries the workspace-less marker back on _meta', async () => {
+	test('listSessions carries the workspace-less marker and compatible working directories', async () => {
 		// Regression: the sessions provider resolves a session's kind (quick
 		// chat vs. workspace) from `_meta.workspaceless`, and after a window
 		// reload a listing is what materializes it.
@@ -486,7 +487,49 @@ suite('AgentHostProtocolClient', () => {
 		});
 
 		const sessions = await resultPromise;
-		assert.deepStrictEqual(sessions.map(s => readSessionWorkspaceless(s._meta)), [true]);
+		assert.deepStrictEqual(sessions.map(s => ({
+			workspaceless: readSessionWorkspaceless(s._meta),
+			workingDirectory: s.workingDirectory,
+			workingDirectories: s.workingDirectories,
+		})), [{
+			workspaceless: true,
+			workingDirectory: toAgentHostUri(URI.file('/home/user/.copilot/chats/quick-1'), agentHostAuthority('test.example:1234')),
+			workingDirectories: [toAgentHostUri(URI.file('/home/user/.copilot/chats/quick-1'), agentHostAuthority('test.example:1234'))],
+		}]);
+	});
+
+	test('listSessions derives the compatibility directory from the primary root', async () => {
+		const { client, transport } = createClient();
+		const directories = [URI.file('/workspace/primary'), URI.file('/workspace/secondary')];
+		const directorySets = [undefined, [], directories];
+		const resultPromise = client.listSessions();
+		const sent = transport.sentMessages[0] as JsonRpcRequest;
+		transport.fireMessage({
+			jsonrpc: '2.0',
+			id: sent.id,
+			result: {
+				items: directorySets.map((workingDirectories, index) => ({
+					resource: `agent-session://copilotcli/session-${index}`,
+					provider: 'copilotcli',
+					title: 'Session',
+					status: SessionStatus.Idle,
+					createdAt: new Date(1000).toISOString(),
+					modifiedAt: new Date(2000).toISOString(),
+					workingDirectories: workingDirectories?.map(directory => directory.toString()),
+				})),
+			},
+		});
+
+		const sessions = await resultPromise;
+		const wrappedDirectories = directories.map(directory => toAgentHostUri(directory, agentHostAuthority('test.example:1234')));
+		assert.deepStrictEqual(sessions.map(s => ({
+			workingDirectory: s.workingDirectory,
+			workingDirectories: s.workingDirectories,
+		})), [
+			{ workingDirectory: undefined, workingDirectories: undefined },
+			{ workingDirectory: undefined, workingDirectories: [] },
+			{ workingDirectory: wrappedDirectories[0], workingDirectories: wrappedDirectories },
+		]);
 	});
 
 	test('listSessions carries external provenance back on _meta', async () => {
@@ -1029,9 +1072,9 @@ suite('AgentHostProtocolClient', () => {
 			clientInfo: params.clientInfo,
 			_meta: params._meta,
 		}, {
-			// Every negotiable version is offered so an older host can negotiate down,
+			// Every compatible version is offered so an older host can negotiate down,
 			// newest first so a current host still picks it.
-			protocolVersions: [...SUPPORTED_PROTOCOL_VERSIONS],
+			protocolVersions: SUPPORTED_PROTOCOL_VERSIONS.filter(version => version !== '0.8.0'),
 			clientId: 'renderer-client-id',
 			clientInfo,
 			_meta: {
@@ -1042,6 +1085,7 @@ suite('AgentHostProtocolClient', () => {
 			},
 		});
 		assert.strictEqual(params.protocolVersions[0], PROTOCOL_VERSION);
+		assert.ok(!params.protocolVersions.includes('0.8.0'));
 
 		// Reply with a successful handshake so `connect()` resolves and the
 		// test can finish cleanly.
@@ -2627,7 +2671,7 @@ suite('AgentHostProtocolClient', () => {
 			const initialSubscribe = await waitForRequest(transports[0], 'subscribe');
 			transports[0].fireMessage({
 				jsonrpc: '2.0', id: initialSubscribe.id,
-				result: { snapshot: { resource: AUTOMATION_CATALOG_URI, state: { automations: [] }, fromSeq: 5 } },
+				result: { snapshot: { resource: AUTOMATION_CATALOG_URI, state: { entries: [] }, fromSeq: 5 } },
 			});
 			await flushMicrotasks();
 
@@ -2658,10 +2702,12 @@ suite('AgentHostProtocolClient', () => {
 			await flushMicrotasks();
 
 			assert.deepStrictEqual({
-				channel: (restoredSubscribe.params as { channel: string }).channel,
+				initialChannel: (initialSubscribe.params as { channel: string }).channel,
+				restoredChannel: (restoredSubscribe.params as { channel: string }).channel,
 				valueIsError: catalogRef.object.value instanceof Error,
 			}, {
-				channel: AUTOMATION_CATALOG_URI,
+				initialChannel: URI.parse(AUTOMATION_CATALOG_URI).toString(),
+				restoredChannel: URI.parse(AUTOMATION_CATALOG_URI).toString(),
 				valueIsError: true,
 			});
 
