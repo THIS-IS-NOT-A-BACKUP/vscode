@@ -67,9 +67,16 @@ const CHANGES_DIFF_EDITOR_OPTIONS: IDiffEditorOptions = {
 	lineNumbersMinChars: 3,
 };
 
+const CHANGES_LIST_BOTTOM_PADDING_PX = 24;
+const CHANGES_ENTRY_HEADER_HEIGHT_PX = 32;
+const CHANGES_ENTRY_CONTENT_BOTTOM_PADDING_PX = 8;
+
 class SessionChangesUIElementFactory implements IWorkbenchUIElementFactory {
 
 	readonly headerClickToCollapse = true;
+	readonly diffEditorItemHorizontalInsets = { left: 0, right: 0 };
+	readonly diffEditorItemHeaderHeight = CHANGES_ENTRY_HEADER_HEIGHT_PX;
+	readonly diffEditorItemContentBottomPadding = CHANGES_ENTRY_CONTENT_BOTTOM_PADDING_PX;
 
 	constructor(
 		private readonly changesObs: IObservable<readonly ISessionFileChange[]>,
@@ -261,6 +268,7 @@ export class SessionChangesEditor extends AbstractEditorWithViewState<IMultiDiff
 			paneInstantiationService.createInstance(SessionChangesUIElementFactory, this._scopedChangesObs),
 			CHANGES_DIFF_EDITOR_OPTIONS,
 		));
+		this.widget.setPaddingBottom(CHANGES_LIST_BOTTOM_PADDING_PX);
 		this._register(autorun(reader => {
 			this.widget?.setRenderSideBySide(this.diffEditorOptionsService.renderSideBySide.read(reader), { useInlineViewWhenSpaceIsLimited: true });
 		}));
@@ -301,6 +309,9 @@ export class SessionChangesEditor extends AbstractEditorWithViewState<IMultiDiff
 
 	override async setInput(input: SessionChangesEditorInput, options: IMultiDiffEditorOptions | undefined, context: IEditorOpenContext, token: CancellationToken): Promise<void> {
 		await super.setInput(input, options, context, token);
+		if (token.isCancellationRequested) {
+			return;
+		}
 		const sessionResource = this.sessionChangesService.getSessionResource(input.multiDiffSource);
 		this._inputSessionResource.set(sessionResource, undefined);
 		const viewModel = await input.getViewModel();
