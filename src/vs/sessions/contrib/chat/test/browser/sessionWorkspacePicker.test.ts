@@ -34,7 +34,8 @@ import { ISendRequestOptions, ISessionChangeEvent, ISessionsProvider } from '../
 import { AgentHostFilterConnectionStatus, IAgentHostFilterEntry } from '../../../../services/agentHostFilter/common/agentHostFilter.js';
 import { IAgentHostSessionsProvider } from '../../../../common/agentHostSessionsProvider.js';
 import { ISession, ISessionWorkspace, ISessionWorkspaceBrowseAction, SessionStatus, SESSION_WORKSPACE_GROUP_GITHUB, SESSION_WORKSPACE_GROUP_LOCAL, SESSION_WORKSPACE_GROUP_REMOTE } from '../../../../services/sessions/common/session.js';
-import { AGENT_SESSIONS_CONSOLIDATED_REMOTE_WORKSPACES_SETTING, IWorkspacePickerItem, IWorkspacePickerOptions, WorkspacePicker } from '../../browser/sessionWorkspacePicker.js';
+import { IWorkspacePickerItem, IWorkspacePickerOptions, WorkspacePicker } from '../../browser/sessionWorkspacePicker.js';
+import { UNIFIED_WORKSPACE_PICKER_SETTING } from '../../common/constants.js';
 import { WebWorkspacePicker } from '../../browser/webWorkspacePicker.js';
 import { NewSessionWorkspacePreselectionSource } from '../../browser/newSessionComposerService.js';
 import { ISessionsRecentWorkspacesService, SessionsRecentWorkspacesService } from '../../../../services/sessions/browser/sessionsRecentWorkspacesService.js';
@@ -3050,7 +3051,7 @@ function createTestablePicker(
 	instantiationService.stub(IOutputService, {});
 	instantiationService.stub(IConfigurationService, new TestConfigurationService({
 		[RemoteAgentHostsEnabledSettingId]: remoteAgentHostsEnabled,
-		[AGENT_SESSIONS_CONSOLIDATED_REMOTE_WORKSPACES_SETTING]: consolidatedRemoteWorkspaces,
+		[UNIFIED_WORKSPACE_PICKER_SETTING]: consolidatedRemoteWorkspaces,
 	}));
 	instantiationService.stub(ICommandService, commandService);
 	instantiationService.stub(IFileDialogService, {});
@@ -3161,6 +3162,99 @@ suite('WorkspacePicker - Tab discovery', () => {
 			items: ['Select Remote...', 'Repository...'],
 			showsFilter: true,
 			focusesFilter: true,
+		});
+	});
+
+	test('selects No workspace through the consolidated picker', async () => {
+		let noWorkspaceSelected = false;
+		const picker = createTestablePicker(disposables, providersService, true, {
+			getNoWorkspaceOption: () => ({
+				description: 'Start without a backing workspace',
+				isSelected: noWorkspaceSelected,
+				select: () => noWorkspaceSelected = true,
+			}),
+		}, undefined, undefined, true);
+		const container = document.createElement('div');
+		picker.renderCategoryTriggers(container, [{
+			label: 'Workspace',
+			ariaLabel: 'Choose a workspace for the new session',
+			icon: Codicon.project,
+			reflectsWorkspace: true,
+		}]);
+
+		const before = {
+			items: picker.getItems().filter(item => item.kind === ActionListItemKind.Action).map(item => ({
+				label: item.label,
+				description: item.description,
+				checked: item.item?.checked,
+			})),
+			triggerLabel: container.querySelector('.sessions-chat-dropdown-label')?.textContent,
+		};
+		await picker.select('No workspace');
+
+		assert.deepStrictEqual({
+			before,
+			after: {
+				items: picker.getItems().filter(item => item.kind === ActionListItemKind.Action).map(item => ({
+					label: item.label,
+					description: item.description,
+					checked: item.item?.checked,
+				})),
+				triggerLabel: container.querySelector('.sessions-chat-dropdown-label')?.textContent,
+				triggerAriaLabel: container.querySelector('.action-label')?.getAttribute('aria-label'),
+			},
+		}, {
+			before: {
+				items: [{
+					label: 'No workspace',
+					description: 'Start without a backing workspace',
+					checked: undefined,
+				}],
+				triggerLabel: 'Workspace',
+			},
+			after: {
+				items: [{
+					label: 'No workspace',
+					description: 'Start without a backing workspace',
+					checked: true,
+				}],
+				triggerLabel: 'No workspace',
+				triggerAriaLabel: 'Workspace: No workspace',
+			},
+		});
+	});
+
+	test('persists No workspace as the checked selection until a workspace is selected', () => {
+		const storage = disposables.add(new TestStorageService());
+		const localProvider = createMockProvider('local-1');
+		providersService.setProviders([localProvider]);
+		let noWorkspaceAvailable = true;
+		const options: IWorkspacePickerOptions = {
+			getNoWorkspaceOption: () => noWorkspaceAvailable ? ({
+				description: 'Start without a backing workspace',
+				isSelected: false,
+				select: () => { },
+			}) : undefined,
+		};
+		const firstPicker = createTestablePicker(disposables, providersService, true, options, undefined, storage, true);
+		firstPicker.selectNoWorkspace();
+		const firstPickerNoWorkspace = firstPicker.isNoWorkspaceSelected();
+		noWorkspaceAvailable = false;
+		const restoredPicker = createTestablePicker(disposables, providersService, true, options, undefined, storage, true);
+		const restoredNoWorkspace = restoredPicker.isNoWorkspaceSelected();
+
+		restoredPicker.setSelectedWorkspace(URI.file('/local/project'), { fireEvent: false });
+
+		assert.deepStrictEqual({
+			firstPickerNoWorkspace,
+			restoredNoWorkspace,
+			afterWorkspaceSelection: restoredPicker.isNoWorkspaceSelected(),
+			selectedFolder: restoredPicker.selectedFolderUri?.path,
+		}, {
+			firstPickerNoWorkspace: true,
+			restoredNoWorkspace: true,
+			afterWorkspaceSelection: false,
+			selectedFolder: '/local/project',
 		});
 	});
 
