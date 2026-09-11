@@ -91,11 +91,17 @@
 	border-radius: var(--vscode-cornerRadius-medium);
 }
 
-.action-widget .monaco-list .monaco-list-row.action:is(.focused, .focus-group-highlighted):not(.option-disabled) {
+.action-widget .monaco-list .monaco-list-row.action.focused:not(.option-disabled) {
 	background-color: var(--vscode-list-hoverBackground) !important;
 	color: var(--vscode-list-hoverForeground);
 	outline: 1px solid var(--vscode-menu-selectionBorder, transparent);
 	outline-offset: -2px;
+}
+
+/* Hover changes the focused row without moving DOM focus, including while a combobox owns it. */
+.action-widget .monaco-list.mouse-navigation .monaco-list-row.action.focused:not(.option-disabled),
+.action-widget .monaco-list:not(.keyboard-navigation):not(:focus-visible) .monaco-list-row.action.focused:not(.option-disabled) {
+	outline-color: var(--vscode-contrastActiveBorder, transparent);
 }
 
 .action-widget .monaco-list-row.group-header {
@@ -214,7 +220,7 @@
 	white-space: nowrap;
 }
 
-.action-widget .monaco-list .monaco-list-row.action:is(.focused, .focus-group-highlighted):not(.option-disabled) .detail {
+.action-widget .monaco-list .monaco-list-row.action.focused:not(.option-disabled) .detail {
 	color: inherit;
 	opacity: 1;
 }

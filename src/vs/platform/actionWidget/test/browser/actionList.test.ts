@@ -245,6 +245,67 @@ suite('ActionListWidget', () => {
 		assert.strictEqual(widget.getFocusedElement()?.item?.id, 'third');
 	});
 
+	for (const filterAsCombobox of [false, true]) {
+		test(`only keyboard navigation draws the selection border (combobox: ${filterAsCombobox})`, () => {
+			const widget = createActionListWidget(disposables, {
+				items: [action('first'), action('second')],
+				listOptions: { showFilter: filterAsCombobox, focusFilterOnOpen: filterAsCombobox, filterAsCombobox },
+			});
+			widget.domNode.classList.add('action-widget');
+			widget.domNode.style.setProperty('--vscode-menu-selectionBorder', '#0069cc');
+			widget.domNode.style.setProperty('--vscode-list-focusOutline', '#0069cc');
+			widget.domNode.style.setProperty('--vscode-contrastActiveBorder', 'transparent');
+			const rows = widget.domNode.querySelectorAll<HTMLElement>('.monaco-list-row');
+			const outline = () => mainWindow.getComputedStyle(widget.domNode.querySelector<HTMLElement>('.monaco-list-row.focused')!).outlineColor;
+
+			widget.focus();
+			widget.focusNext();
+			const states = [outline()];
+			rows[0].dispatchEvent(new MouseEvent('mousemove', { bubbles: true, movementX: 1 }));
+			states.push(outline());
+			widget.focusNext();
+			states.push(outline());
+			rows[1].dispatchEvent(new MouseEvent('mousemove', { bubbles: true, movementY: 1 }));
+			states.push(outline());
+			widget.focusPrevious();
+			states.push(outline());
+			rows[0].dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+			states.push(outline());
+			dispatchKeyDown(filterAsCombobox ? widget.filterInput! : widget.domNode.querySelector<HTMLElement>('.monaco-list')!, { key: 'Shift', keyCode: 16 });
+			states.push(outline());
+			if (filterAsCombobox) {
+				widget.focus();
+				states.push(outline());
+			}
+
+			assert.deepStrictEqual(states, [
+				'rgb(0, 105, 204)',
+				'rgba(0, 0, 0, 0)',
+				'rgb(0, 105, 204)',
+				'rgba(0, 0, 0, 0)',
+				'rgb(0, 105, 204)',
+				'rgba(0, 0, 0, 0)',
+				'rgb(0, 105, 204)',
+				...filterAsCombobox ? ['rgba(0, 0, 0, 0)'] : [],
+			]);
+		});
+	}
+
+	test('preserves high contrast outlines during pointer navigation', () => {
+		const widget = createActionListWidget(disposables, {
+			items: [action('first'), action('second')],
+			listOptions: { showFilter: false },
+		});
+		widget.domNode.classList.add('action-widget');
+		widget.domNode.style.setProperty('--vscode-menu-selectionBorder', '#f38518');
+		widget.domNode.style.setProperty('--vscode-contrastActiveBorder', '#f38518');
+		widget.focus();
+		const row = widget.domNode.querySelectorAll<HTMLElement>('.monaco-list-row')[1];
+		row.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, movementX: 1 }));
+
+		assert.strictEqual(mainWindow.getComputedStyle(row).outlineColor, 'rgb(243, 133, 24)');
+	});
+
 	test('the first click selects its row without prior pointer movement', () => {
 		const selected: string[] = [];
 		const widget = createActionListWidget(disposables, {
@@ -364,65 +425,6 @@ suite('ActionListWidget', () => {
 		};
 		return { widget, popup, panel, contents, selected, rows, hover, isCenteredOnRow };
 	}
-
-	test('focus groups move their highlights immediately on hover, including rows with previews', () => {
-		const selected: string[] = [];
-		const items: IActionListItem<ITestActionItem>[] = [
-			{ ...action('first'), item: { id: 'first', checked: true }, focusGroup: 'a' },
-			{ ...action('second'), focusGroup: 'a', hover: { content: 'Preview' } },
-			{ ...action('third'), item: { id: 'third', checked: true }, focusGroup: 'b' },
-			{ ...action('fourth'), focusGroup: 'b' },
-			{ ...action('disabled'), focusGroup: 'b', disabled: true },
-		];
-		const widget = createActionListWidget(disposables, {
-			items,
-			onSelect: item => selected.push(item.id),
-			listOptions: { showFilter: false },
-		});
-		const highlights = () => Array.from(widget.domNode.querySelectorAll('.focus-group-highlighted > .title'), title => title.textContent);
-		const states = [highlights()];
-		for (const index of [1, 3, 4]) {
-			const row = widget.domNode.querySelectorAll<HTMLElement>('.monaco-list-row')[index];
-			row.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
-			row.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, movementX: 1 }));
-			states.push(highlights());
-		}
-
-		assert.deepStrictEqual({
-			states,
-			checked: items.filter(item => item.item?.checked).map(item => item.item?.id),
-			selected,
-		}, {
-			states: [['first', 'third'], ['second', 'third'], ['second', 'fourth'], ['second', 'fourth']],
-			checked: ['first', 'third'],
-			selected: [],
-		});
-	});
-
-	test('focus group highlights survive virtualized row reuse and clear when items are replaced', () => {
-		const widget = createActionListWidget(disposables, {
-			items: [
-				{ ...action('first'), item: { id: 'first', checked: true }, focusGroup: 'a' },
-				{ ...action('second'), focusGroup: 'a' },
-				action('ungrouped'),
-			],
-			listOptions: { showFilter: false },
-		});
-		widget.layout(widget.lineHeight, 200);
-		widget.focus();
-		const highlights = () => Array.from(widget.domNode.querySelectorAll('.focus-group-highlighted > .title'), title => title.textContent);
-		const states = [highlights()];
-		widget.focusNext();
-		states.push(highlights());
-		widget.focusNext();
-		states.push(highlights());
-		widget.focusPrevious();
-		states.push(highlights());
-		widget.updateItems([{ ...action('replacement'), item: { id: 'replacement', checked: true } }]);
-		states.push(highlights());
-
-		assert.deepStrictEqual(states, [['first'], ['second'], [], ['second'], []]);
-	});
 
 	test('renders and activates a standalone toggle row', () => {
 		let checked = false;
@@ -1627,50 +1629,19 @@ suite('ActionListWidget', () => {
 		assert.strictEqual(widget.getFocusedElement()?.item?.id, 'active');
 	});
 
-	test('initial focus groups prefer their checked enabled item and leave explicit item focus unchanged', () => {
-		const cases = [
-			{ group: 'permissions', checked: true, disabled: false, itemId: undefined },
-			{ group: 'permissions', checked: false, disabled: false, itemId: undefined },
-			{ group: 'permissions', checked: true, disabled: true, itemId: undefined },
-			{ group: 'missing', checked: true, disabled: false, itemId: undefined },
-			{ group: 'permissions', checked: true, disabled: false, itemId: 'mode' },
-		];
-		const focused = cases.map(({ group, checked, disabled, itemId }) => {
-			const widget = createActionListWidget(disposables, {
-				items: [
-					{ ...action('mode'), item: { id: 'mode', checked: true }, focusGroup: 'modes' },
-					action('permissions'),
-					{ ...action('manual'), focusGroup: 'permissions' },
-					{ ...action('assisted'), item: { id: 'assisted', checked }, focusGroup: 'permissions', disabled },
-				],
-				listOptions: { showFilter: false, initialFocusGroup: group, initialFocusItemId: itemId },
-			});
-			widget.focus();
-			return widget.getFocusedElement()?.item?.id;
-		});
-
-		assert.deepStrictEqual(focused, ['assisted', 'manual', 'manual', 'mode', 'mode']);
-	});
-
-	test('initial focus groups do not reset focus after navigation or layout', () => {
+	test('skips a disabled configured and checked item when choosing initial focus', () => {
 		const widget = createActionListWidget(disposables, {
 			items: [
-				{ ...action('mode'), item: { id: 'mode', checked: true }, focusGroup: 'modes' },
-				{ ...action('manual'), focusGroup: 'permissions' },
-				{ ...action('assisted'), item: { id: 'assisted', checked: true }, focusGroup: 'permissions' },
+				action('first'),
+				{ ...action('disabled'), item: { id: 'disabled', checked: true }, disabled: true },
+				action('last'),
 			],
-			listOptions: { showFilter: false, initialFocusGroup: 'permissions' },
+			listOptions: { initialFocusItemId: 'disabled' },
 		});
-		widget.focus();
-		const initial = widget.getFocusedElement()?.item?.id;
-		widget.focusPrevious();
-		widget.layout(200, 200);
+
 		widget.focus();
 
-		assert.deepStrictEqual({ initial, afterNavigation: widget.getFocusedElement()?.item?.id }, {
-			initial: 'assisted',
-			afterNavigation: 'manual',
-		});
+		assert.strictEqual(widget.getFocusedElement()?.item?.id, 'first');
 	});
 
 	test('opening the checked hover reveals a model in a collapsed section', () => {

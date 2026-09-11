@@ -158,8 +158,6 @@ export interface IActionListItem<T> {
 	 * collapsible sections.
 	 */
 	readonly section?: string;
-	/** Keeps a visual highlight within this group, initially on its checked item, then on its hovered or focused item. */
-	readonly focusGroup?: string;
 	/**
 	 * When true, clicking this item toggles the section's collapsed state
 	 * instead of selecting it.
@@ -283,7 +281,6 @@ class ActionItemRenderer<T> implements IListRenderer<IActionListItem<T>, IAction
 		private readonly _linkHandler: ((uri: URI, item: IActionListItem<T>) => void) | undefined,
 		private readonly _hideDefaultKeybindingTooltip: boolean,
 		private readonly _registerStandaloneToggle: (item: IActionListItem<T>, toggle: Switch) => IDisposable,
-		private readonly _highlightedItemByGroup: ReadonlyMap<string, T>,
 		@IKeybindingService private readonly _keybindingService: IKeybindingService,
 		@IOpenerService private readonly _openerService: IOpenerService,
 	) { }
@@ -337,8 +334,6 @@ class ActionItemRenderer<T> implements IListRenderer<IActionListItem<T>, IAction
 	renderElement(element: IActionListItem<T>, _index: number, data: IActionMenuTemplateData): void {
 		// Clear previous element disposables
 		data.elementDisposables.clear();
-		data.container.classList.toggle('focus-group-highlighted', element.focusGroup !== undefined
-			&& element.item !== undefined && this._highlightedItemByGroup.get(element.focusGroup) === element.item);
 
 		if (element.iconClasses?.length) {
 			data.icon.className = ['icon', ...element.iconClasses].join(' ');
@@ -668,8 +663,6 @@ export interface IActionListOptions {
 
 	/** Optional action item id to focus when the list opens. */
 	readonly initialFocusItemId?: string;
-	/** Initially focuses the checked or first enabled action in this focus group. */
-	readonly initialFocusGroup?: string;
 
 	/** Show immediate, persistent previews for the focused or hovered row. */
 	readonly persistentHover?: boolean;
@@ -752,7 +745,6 @@ export class ActionListWidget<T> extends Disposable {
 
 	private readonly _list: List<IActionListItem<T>>;
 	private _initialFocusItemId: string | undefined;
-	private _initialFocusGroup: string | undefined;
 
 	protected readonly _actionLineHeight: number;
 	protected readonly _headerLineHeight = 24;
@@ -782,6 +774,7 @@ export class ActionListWidget<T> extends Disposable {
 	private _imeSessionInProgress = false;
 	private _suppressHover = false;
 	private _ignoreInitialHover = true;
+	private _keyboardNavigation: boolean | undefined;
 	private _hasLaidOut = false;
 	private readonly _filterInput: HTMLInputElement | undefined;
 	private readonly _filterContainer: HTMLElement | undefined;
@@ -789,7 +782,6 @@ export class ActionListWidget<T> extends Disposable {
 	private _headerContainer: HTMLElement | undefined;
 	private readonly _filterCts = this._register(new MutableDisposable<CancellationTokenSource>());
 	private readonly _groupTitleByIndex = new Map<number, string>();
-	private readonly _highlightedItemByGroup = new Map<string, T>();
 	private readonly _standaloneToggles = new Map<IActionListItem<T>, Switch>();
 	private _visibleMenuItems: readonly IActionListItem<T>[];
 
@@ -816,7 +808,6 @@ export class ActionListWidget<T> extends Disposable {
 		this._visibleMenuItems = items;
 		this._initialFocusItemId = this._options?.initialFocusItemId;
 		this._filterText = this._options?.showFilter ? this._options.initialFilterValue ?? '' : '';
-		this._initialFocusGroup = this._options?.initialFocusGroup;
 		this.domNode = document.createElement('div');
 		this.domNode.classList.add('actionList');
 		if (this._options?.inlineDescription) {
@@ -852,6 +843,7 @@ export class ActionListWidget<T> extends Disposable {
 			}
 			dom.EventHelper.stop(e, true);
 			this._hideSubmenu();
+			this._setKeyboardNavigation(true);
 			this._list.domFocus();
 		}));
 
@@ -912,7 +904,7 @@ export class ActionListWidget<T> extends Disposable {
 						this._standaloneToggles.delete(item);
 					}
 				});
-			}, this._highlightedItemByGroup, this._keybindingService, this._openerService),
+			}, this._keybindingService, this._openerService),
 			new HeaderRenderer(),
 			new SeparatorRenderer(),
 		], {
@@ -984,6 +976,12 @@ export class ActionListWidget<T> extends Disposable {
 
 		this._list.style(defaultListStyles);
 
+		this._register(this._list.onKeyDown(() => this._setKeyboardNavigation(true)));
+		this._register(dom.addDisposableListener(this._list.getHTMLElement(), dom.EventType.MOUSE_MOVE, (e: MouseEvent) => {
+			if (e.movementX !== 0 || e.movementY !== 0) {
+				this._setKeyboardNavigation(false);
+			}
+		}));
 		this._register(this._list.onMouseClick(e => this.onListClick(e)));
 		// Ignore the initial mouseover when a keyboard-invoked menu appears beneath a stationary pointer,
 		// so the item under the pointer does not take keyboard focus.
@@ -1003,6 +1001,7 @@ export class ActionListWidget<T> extends Disposable {
 		this._register(this._list.onMouseDown(() => {
 			initialMouseMove.clear();
 			this._ignoreInitialHover = false;
+			this._setKeyboardNavigation(false);
 		}));
 		this._register(this._list.onDidChangeFocus(() => this.onFocus()));
 		this._register(this._list.onDidChangeSelection(e => this.onListSelection(e)));
@@ -1026,6 +1025,8 @@ export class ActionListWidget<T> extends Disposable {
 				this._filterInput.value = this._filterText;
 				this._filterInput.setAttribute('aria-label', localize('actionList.filter.ariaLabel', "Filter items"));
 				filterRow.appendChild(this._filterInput);
+				this._register(dom.addDisposableListener(this._filterInput, dom.EventType.KEY_DOWN, () => this._setKeyboardNavigation(true)));
+				this._register(dom.addDisposableListener(this._filterInput, dom.EventType.MOUSE_DOWN, () => this._setKeyboardNavigation(false)));
 
 				if (this._options.filterAsCombobox) {
 					const listElement = this._list.getHTMLElement();
@@ -1421,7 +1422,6 @@ export class ActionListWidget<T> extends Disposable {
 		const listHasFocus = dom.isAncestorOfActiveElement(this._list.getHTMLElement());
 
 		this._visibleMenuItems = visible;
-		this._restoreFocusGroupHighlights();
 		this._list.splice(0, this._list.length, visible);
 
 		// Notify the parent that a re-layout is needed
@@ -1487,6 +1487,16 @@ export class ActionListWidget<T> extends Disposable {
 		return !element.disabled && element.kind === ActionListItemKind.Action;
 	}
 
+	private _setKeyboardNavigation(keyboardNavigation: boolean | undefined): void {
+		if (this._keyboardNavigation === keyboardNavigation) {
+			return;
+		}
+		this._keyboardNavigation = keyboardNavigation;
+		const listElement = this._list.getHTMLElement();
+		listElement.classList.toggle('keyboard-navigation', keyboardNavigation === true);
+		listElement.classList.toggle('mouse-navigation', keyboardNavigation === false);
+	}
+
 	private _updateFilterActiveDescendant(): void {
 		if (!this._filterInput) {
 			return;
@@ -1500,6 +1510,7 @@ export class ActionListWidget<T> extends Disposable {
 	}
 
 	focus(): void {
+		this._setKeyboardNavigation(undefined);
 		if (this._filterInput && this._options?.focusFilterOnOpen) {
 			this._filterInput.focus();
 			// Highlight the first item so Enter works immediately
@@ -1654,35 +1665,14 @@ export class ActionListWidget<T> extends Disposable {
 		try {
 			const initialFocusItemId = this._initialFocusItemId;
 			this._initialFocusItemId = undefined;
-			const initialFocusGroup = this._initialFocusGroup;
-			this._initialFocusGroup = undefined;
 			if (initialFocusItemId) {
 				for (let i = 0; i < this._list.length; i++) {
 					const element = this._list.element(i);
-					if (element.kind === ActionListItemKind.Action && (element.item as { id?: string })?.id === initialFocusItemId) {
+					if (this.focusCondition(element) && (element.item as { id?: string })?.id === initialFocusItemId) {
 						this._list.setFocus([i]);
 						this._list.reveal(i);
 						return;
 					}
-				}
-			}
-			if (initialFocusGroup) {
-				let focusIndex: number | undefined;
-				for (let i = 0; i < this._list.length; i++) {
-					const element = this._list.element(i);
-					if (element.focusGroup !== initialFocusGroup || !this.focusCondition(element)) {
-						continue;
-					}
-					focusIndex ??= i;
-					if ((element.item as { checked?: boolean })?.checked) {
-						focusIndex = i;
-						break;
-					}
-				}
-				if (focusIndex !== undefined) {
-					this._list.setFocus([focusIndex]);
-					this._list.reveal(focusIndex);
-					return;
 				}
 			}
 			const [focusedIndex] = this._list.getFocus();
@@ -1696,7 +1686,7 @@ export class ActionListWidget<T> extends Disposable {
 			// Try to focus the checked item first
 			for (let i = 0; i < this._list.length; i++) {
 				const element = this._list.element(i);
-				if (element.kind === ActionListItemKind.Action && (element.item as { checked?: boolean })?.checked) {
+				if (this.focusCondition(element) && (element.item as { checked?: boolean })?.checked) {
 					this._list.setFocus([i]);
 					this._list.reveal(i);
 					return;
@@ -1881,6 +1871,7 @@ export class ActionListWidget<T> extends Disposable {
 	}
 
 	focusPrevious() {
+		this._setKeyboardNavigation(true);
 		if (this._focusFilterResult('previous')) {
 			return;
 		}
@@ -1921,6 +1912,7 @@ export class ActionListWidget<T> extends Disposable {
 	}
 
 	focusNext() {
+		this._setKeyboardNavigation(true);
 		if (this._focusFilterResult('next')) {
 			return;
 		}
@@ -2078,41 +2070,12 @@ export class ActionListWidget<T> extends Disposable {
 
 		// Show hover on focus change (suppress during programmatic initial focus)
 		if (!this._suppressHover) {
-			this._updateFocusGroupHighlight(element);
 			if (this._options?.persistentHover) {
 				this._cancelSubmenuShow();
 				this._resetSubmenuPointer();
 				this._list.reveal(focusIndex);
 			}
 			this._showHoverForElement(element, focusIndex);
-		}
-	}
-
-	private _restoreFocusGroupHighlights(): void {
-		for (const [group, item] of this._highlightedItemByGroup) {
-			if (!this._allMenuItems.some(candidate => candidate.focusGroup === group && candidate.item === item)) {
-				this._highlightedItemByGroup.delete(group);
-			}
-		}
-		for (const element of this._allMenuItems) {
-			if (element.focusGroup !== undefined && element.item !== undefined
-				&& (element.item as { checked?: boolean })?.checked === true && !this._highlightedItemByGroup.has(element.focusGroup)) {
-				this._highlightedItemByGroup.set(element.focusGroup, element.item);
-			}
-		}
-	}
-
-	private _updateFocusGroupHighlight(element: IActionListItem<T>): void {
-		const group = element.focusGroup;
-		if (group === undefined || element.item === undefined || this._highlightedItemByGroup.get(group) === element.item) {
-			return;
-		}
-		const previous = this._highlightedItemByGroup.get(group);
-		this._highlightedItemByGroup.set(group, element.item);
-		for (const [index, candidate] of this._visibleMenuItems.entries()) {
-			if (candidate.focusGroup === group && (candidate.item === previous || candidate.item === element.item)) {
-				this._getRowElement(index)?.classList.toggle('focus-group-highlighted', candidate.item === element.item);
-			}
 		}
 	}
 
@@ -2408,6 +2371,7 @@ export class ActionListWidget<T> extends Disposable {
 				} else if (e.key === 'ArrowLeft') {
 					dom.EventHelper.stop(e, true);
 					this._hideSubmenu();
+					this._setKeyboardNavigation(true);
 					this._list.domFocus();
 				} else if (e.key === 'Enter' || e.key === ' ') {
 					dom.EventHelper.stop(e, true);
@@ -2618,10 +2582,10 @@ export class ActionListWidget<T> extends Disposable {
 	}
 
 	private async onListHover(e: IListMouseEvent<IActionListItem<T>>) {
+		this._setKeyboardNavigation(false);
 		const element = e.element;
 
 		if (element && element.item && this.focusCondition(element)) {
-			this._updateFocusGroupHighlight(element);
 			// Check if the hover target is inside a toolbar - if so, skip the splice
 			// to avoid re-rendering which would destroy the element mid-hover.
 			// But still maintain submenu state for items with submenu actions.
