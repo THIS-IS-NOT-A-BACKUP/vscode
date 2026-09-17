@@ -121,6 +121,10 @@ class TunnelConnectionFactory extends Disposable implements IRemoteAgentHostConn
 		}
 	}
 
+	getPendingConnectionInitiation(entry: IRemoteAgentHostEntry): boolean | undefined {
+		return this._stagedUserInitiated.get(getEntryAddress(entry));
+	}
+
 	createConnection(entry: IRemoteAgentHostEntry, options: IRemoteAgentHostConnectOptions): Promise<IRemoteAgentHostCreatedConnection> {
 		if (entry.connection.type !== RemoteAgentHostEntryType.Tunnel) {
 			throw new Error(`Tunnel factory cannot create a ${entry.connection.type} connection.`);
@@ -249,6 +253,7 @@ export class TunnelAgentHostService extends Disposable implements ITunnelAgentHo
 		// Bind the narrowed connection before the closure: TypeScript does not
 		// carry the discriminant narrowing into the `find` callback below.
 		const connection = entry.connection;
+		const address = getEntryAddress(entry);
 		const cachedTunnel = this._storage.getCachedTunnels().find(cached => cached.tunnelId === connection.tunnelId);
 		const tunnel: ITunnelInfo = {
 			tunnelId: connection.tunnelId,
@@ -314,9 +319,9 @@ export class TunnelAgentHostService extends Disposable implements ITunnelAgentHo
 				() => new ReconnectingRelayTransport(
 					establish,
 					this._mainService,
-					() => ahpLoggingEnabled ? this._instantiationService.createInstance(
+					activeConnectionId => ahpLoggingEnabled ? this._instantiationService.createInstance(
 						AhpJsonlLogger,
-						{ logsHome: this._environmentService.logsHome, connectionId: result.connectionId, transport: 'tunnel' },
+						{ logsHome: this._environmentService.logsHome, logId: address, connectionId: activeConnectionId, transport: 'tunnel' },
 					) : undefined,
 					this._logService,
 					LOG_PREFIX,
