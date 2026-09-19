@@ -334,7 +334,7 @@ suite('resolveByokSessionConfig', () => {
 	test('synthesizes deduped providers and per-model config from the active bridge', async () => {
 		const registry = new ByokLmBridgeRegistry();
 		const registration = registry.register('client-1', connectionOf([
-			{ vendor: 'acme', id: 'claude', name: 'Acme Claude', maxContextWindowTokens: 200000 },
+			{ vendor: 'acme', id: 'claude', name: 'Acme Claude', maxContextWindowTokens: 200000, maxPromptTokens: 32000, maxOutputTokens: 4000 },
 			{ vendor: 'acme', id: 'gpt', name: undefined, maxContextWindowTokens: undefined },
 			{ vendor: 'globex', id: 'llama', name: 'Globex Llama' },
 		]));
@@ -350,7 +350,7 @@ suite('resolveByokSessionConfig', () => {
 				{ name: 'globex', type: 'openai', wireApi: 'responses', baseUrl: 'http://127.0.0.1:1/v/globex', bearerToken: 'NONCE.sess-1' },
 			],
 			models: [
-				{ id: 'claude', provider: 'acme', name: 'Acme Claude', maxContextWindowTokens: 200000 },
+				{ id: 'claude', provider: 'acme', name: 'Acme Claude', maxContextWindowTokens: 200000, maxPromptTokens: 32000, maxOutputTokens: 4000 },
 				{ id: 'gpt', provider: 'acme' },
 				{ id: 'llama', provider: 'globex', name: 'Globex Llama' },
 			],
@@ -659,7 +659,6 @@ suite('CopilotSessionLauncher shared session config', () => {
 		const basePlan = {
 			client,
 			sessionId: 'session-1',
-			builtinSkillDirectories: ['/builtin/customize-cloud-agent', '/builtin/github-pr-media'],
 			workingDirectory: testWorkingDirectory,
 			resolvedAgentName: undefined,
 			snapshot: { tools: [], plugins: [plugin, syntheticPlugin], mcpServers: {} },
@@ -736,7 +735,7 @@ suite('CopilotSessionLauncher shared session config', () => {
 						headers: { Authorization: 'sensitive-header' },
 					},
 				},
-				createSkillDirectories: ['/builtin/customize-cloud-agent', '/builtin/github-pr-media'],
+				createSkillDirectories: [],
 				createInstructionDirectories: [URI.joinPath(pluginDir, 'rules').fsPath],
 				createDisabledMcpServers: ['azure', 'disabled-workspace-server', 'github'],
 				createHasExitPlanHandler: true,
@@ -754,7 +753,7 @@ suite('CopilotSessionLauncher shared session config', () => {
 						headers: { Authorization: 'sensitive-header' },
 					},
 				},
-				resumeSkillDirectories: ['/builtin/customize-cloud-agent', '/builtin/github-pr-media'],
+				resumeSkillDirectories: [],
 				resumeInstructionDirectories: [URI.joinPath(pluginDir, 'rules').fsPath],
 				resumeDisabledMcpServers: ['azure', 'disabled-workspace-server', 'github'],
 				resumeHasExitPlanHandler: true,

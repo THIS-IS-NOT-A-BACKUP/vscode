@@ -223,7 +223,6 @@ type CopilotSessionClient = Pick<CopilotClient, 'createSession' | 'resumeSession
 interface ICopilotSessionLaunchBase {
 	readonly client: CopilotSessionClient;
 	readonly sessionId: string;
-	readonly builtinSkillDirectories?: readonly string[];
 	/** Whether this launch is for a transient session that skips durable-only provider work. */
 	readonly isEphemeral?: boolean;
 	/**
@@ -583,6 +582,8 @@ export async function resolveByokSessionConfig(
 		provider: m.vendor,
 		...(m.name !== undefined ? { name: m.name } : {}),
 		...(m.maxContextWindowTokens !== undefined ? { maxContextWindowTokens: m.maxContextWindowTokens } : {}),
+		...(m.maxPromptTokens !== undefined ? { maxPromptTokens: m.maxPromptTokens } : {}),
+		...(m.maxOutputTokens !== undefined ? { maxOutputTokens: m.maxOutputTokens } : {}),
 	}));
 	logService.info(`[Copilot:${sessionId}] Wired ${models.length} BYOK model(s) across ${providers.length} provider(s) via loopback proxy ${handle.baseUrl}`);
 	return { providers, models };
@@ -890,10 +891,7 @@ export class CopilotSessionLauncher implements ICopilotSessionLauncher {
 		// still discover agents from `pluginDirectories`; suppressing that too would also drop
 		// skills and instructions, so it is left alone.
 		const customAgents = plan.isEphemeral ? [] : await toSdkSessionCustomAgents(plugins, plan.resolvedAgentName, this._fileService);
-		const skillDirectories = [...new Set([
-			...(plan.builtinSkillDirectories ?? []),
-			...toSdkSkillDirectories(pluginsWithoutDirs.flatMap(p => p.skills)),
-		])];
+		const skillDirectories = toSdkSkillDirectories(pluginsWithoutDirs.flatMap(p => p.skills));
 		const instructionDirectories = toSdkInstructionDirectories(plugins.flatMap(p => p.instructions));
 		const model = plan.kind === 'create' ? plan.model : plan.fallback.model;
 		// Keyed by the real, un-aliased model id; a model-less "Auto" session
