@@ -65,7 +65,7 @@ import { IAgentHostGitService, tryResolvePrimaryWorktreeRoot } from '../common/a
 import { IAgentHostSubscriptionService, resolveAgentHostSession } from '../common/agentHostSubscriptionService.js';
 import { IAgentHostChatInputService } from './agentHostChatInputService.js';
 import { AgentSideEffects, type IAgentSideEffectsOptions } from './agentSideEffects.js';
-import { AgentHostLocalTurns } from './agentHostLocalTurns.js';
+import { AgentHostLocalTurns, parsePersistedTurn } from './agentHostLocalTurns.js';
 import { AgentSessionResidency } from './agentSessionResidency.js';
 import { resolveChangesetOwnerScope } from './agentHostBranchChangesetScope.js';
 import { IAgentHostSessionOpenTelemetry, type IAgentHostSessionOpenTelemetryScope } from './agentHostSessionOpenTelemetry.js';
@@ -5311,10 +5311,8 @@ export class AgentService extends Disposable implements IAgentService {
 		const byAnchor = new Map<string, Turn[]>();
 		const head: Turn[] = [];
 		for (const record of records) {
-			let turn: Turn;
-			try {
-				turn = JSON.parse(record.payload) as Turn;
-			} catch {
+			const turn = parsePersistedTurn(record, this._logService, AgentHostLocalTurns.name);
+			if (!turn) {
 				continue;
 			}
 			if (record.anchorTurnId === undefined) {
@@ -6139,8 +6137,10 @@ export class AgentService extends Disposable implements IAgentService {
 
 	// ---- Protocol methods ---------------------------------------------------
 
-	async createTerminal(params: CreateTerminalParams): Promise<void> {
-		await this._terminalManager.createTerminal(params);
+	async createTerminal(params: CreateTerminalParams, clientType = AgentHostClientType.Unknown): Promise<void> {
+		await this._terminalManager.createTerminal(params, {
+			vscodeTerminalIdentity: clientType !== AgentHostClientType.Unknown,
+		});
 	}
 
 	async disposeTerminal(terminal: URI): Promise<void> {
