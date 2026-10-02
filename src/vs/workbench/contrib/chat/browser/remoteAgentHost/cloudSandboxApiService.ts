@@ -41,6 +41,7 @@ type CloudSandboxEnvironmentAction = 'get' | 'connect' | 'reconnect';
 /** The subset of a Mission Control task the sandbox discovery path reads. */
 interface ITaskSummary {
 	readonly id: string;
+	readonly event_type?: string;
 	readonly name?: string;
 	readonly archived_at?: string | null;
 	readonly updated_at?: string;
@@ -390,6 +391,7 @@ export class CloudSandboxApiService extends Disposable implements ICloudSandboxA
 							removedTaskIds.push(task.id);
 						}
 						const status = binding ? taskSessionStatus(full.sessions?.find(session => session.id === binding.sessionId)?.state ?? full.state ?? task.state, this._logService) : undefined;
+						const eventType = full.event_type || task.event_type;
 						cached = {
 							summary: task,
 							repositoryId: full.repository?.id ?? task.repository?.id,
@@ -397,6 +399,7 @@ export class CloudSandboxApiService extends Disposable implements ICloudSandboxA
 							session: binding ? {
 								...binding,
 								taskId: task.id,
+								...(eventType ? { eventType } : {}),
 								name: full.name ?? task.name ?? `Sandbox ${task.id}`,
 								updatedAt: full.updated_at ?? task.updated_at,
 								...(status !== undefined ? { status } : {}),
@@ -460,6 +463,12 @@ export class CloudSandboxApiService extends Disposable implements ICloudSandboxA
 		const sessions = discovered.filter((session): session is ICloudSandboxDiscoveredSession => session !== undefined);
 		const unnamed = sessions.filter(session => !session.repoName).length;
 		this._logService.info(`${LOG_PREFIX} ${since ? 'Incremental discovery' : 'Discovery'} found ${sessions.length} sandbox session(s) from ${sandboxTasks.length} sandbox task(s) out of ${scannedTaskIds.size} scanned${truncated ? ' (scan truncated)' : ''}${unresolved > 0 ? `; ${unresolved} unresolved` : ''}${unnamed > 0 ? `; ${unnamed} without a repository name (they group under "Unknown")` : ''}.`);
+		for (const session of sessions) {
+			this._logService.debug(`${LOG_PREFIX} Discovered sandbox session ${JSON.stringify({
+				taskId: session.taskId, sessionId: session.sessionId, environmentId: session.environmentId,
+				name: session.name, repoName: session.repoName, updatedAt: session.updatedAt, status: session.status,
+			})}`);
+		}
 		if (partial) {
 			return { kind: 'partial', sessions, removedTaskIds };
 		}
@@ -523,6 +532,26 @@ export class CloudSandboxApiService extends Disposable implements ICloudSandboxA
 		}
 		this._discoveredTasks.delete(taskId);
 		// Discard discovery responses that started before the deletion.
+		this._discoveryGeneration++;
+	}
+
+	async renameTask(taskId: string, title: string, token: CancellationToken): Promise<void> {
+		const context = await this._request(`${this._tasksBaseUrl()}/tasks/${encodeURIComponent(taskId)}`, 'mc.taskClient.update', 'renameTask', {
+			'Accept': 'application/json',
+			'Copilot-Integration-Id': COPILOT_INTEGRATION_ID,
+		}, token, REQUEST_TIMEOUT_MS, { name: title }, 'PATCH');
+		if (!isSuccess(context)) {
+			await this._throwForStatus('task rename', context);
+		}
+		const cached = this._discoveredTasks.get(taskId);
+		if (cached) {
+			this._discoveredTasks.set(taskId, {
+				...cached,
+				summary: { ...cached.summary, name: title },
+				session: cached.session ? { ...cached.session, name: title } : undefined,
+				needsRefresh: true,
+			});
+		}
 		this._discoveryGeneration++;
 	}
 
@@ -693,7 +722,7 @@ export class CloudSandboxApiService extends Disposable implements ICloudSandboxA
 		}
 	}
 
-	private async _request(url: string, callSite: string, action: CloudSandboxRequestAction, headers: Record<string, string>, token: CancellationToken, timeoutMs: number = REQUEST_TIMEOUT_MS, body?: unknown, method?: 'GET' | 'POST' | 'DELETE', onRequest?: ICloudSandboxConnectionRequest['onRequest']): Promise<IRequestContext> {
+	private async _request(url: string, callSite: string, action: CloudSandboxRequestAction, headers: Record<string, string>, token: CancellationToken, timeoutMs: number = REQUEST_TIMEOUT_MS, body?: unknown, method?: 'GET' | 'POST' | 'DELETE' | 'PATCH', onRequest?: ICloudSandboxConnectionRequest['onRequest']): Promise<IRequestContext> {
 		const accessToken = (await this._resolveGitHubSession())?.accessToken;
 		if (!accessToken) {
 			// No request is issued, so there is no request outcome to count.

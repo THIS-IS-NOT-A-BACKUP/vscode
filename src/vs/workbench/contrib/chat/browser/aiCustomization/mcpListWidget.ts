@@ -25,6 +25,7 @@ import { IConfigurationService } from '../../../../../platform/configuration/com
 import { CustomizationMarketplaceIcon, ICustomizationMarketplaceService } from '../../../../../platform/customizationMarketplace/common/customizationMarketplaceService.js';
 import { CustomizationMarketplaceConfiguration } from '../../../../../platform/customizationMarketplace/common/customizationMarketplaceSources.js';
 import { IThemeService } from '../../../../../platform/theme/common/themeService.js';
+import { ITelemetryService } from '../../../../../platform/telemetry/common/telemetry.js';
 import { IQueryOptions, mcpAccessConfig, McpAccessValue } from '../../../../../platform/mcp/common/mcpManagement.js';
 import { IMcpGalleryManifestService } from '../../../../../platform/mcp/common/mcpGalleryManifest.js';
 import { IMcpWorkbenchService, IWorkbenchMcpServer, McpCollectionDefinition, McpCollectionProvenance, McpConnectionState, McpServerDefinition, McpServerInstallState, IMcpService, IMcpServer, McpServerTransportType } from '../../../../contrib/mcp/common/mcpTypes.js';
@@ -48,6 +49,7 @@ import { IAgentPlugin, IAgentPluginService } from '../../common/plugins/agentPlu
 import { IDialogService } from '../../../../../platform/dialogs/common/dialogs.js';
 import { mcpServerIcon } from './aiCustomizationIcons.js';
 import { formatDisplayName, truncateToFirstLine } from './aiCustomizationListWidget.js';
+import { MiddleEllipsisPathLabel } from './aiCustomizationListWidgetUtils.js';
 import { getDefaultHoverDelegate } from '../../../../../base/browser/ui/hover/hoverDelegateFactory.js';
 import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
 import { IManagedHover } from '../../../../../base/browser/ui/hover/hover.js';
@@ -59,6 +61,7 @@ import { IAgentHostCustomizationService } from '../agentSessions/agentHost/agent
 import { CustomizationEnablementKind, McpServerStatus } from '../../../../../platform/agentHost/common/state/protocol/state.js';
 import { IOutputService } from '../../../../services/output/common/output.js';
 import { ChatConfiguration } from '../../common/constants.js';
+import { getAvailableCustomizationMarketplaceInstallTelemetryContext, runCustomizationMarketplaceInstallWithTelemetry } from '../../common/customizationMarketplaceInstallTelemetry.js';
 import { getCustomizationDisabledReason, getCustomizationEnablementDecision, getCustomizationScopeEnablement, type CustomizationDisabledReason } from '../../../../../platform/agentHost/common/customizationEnablement.js';
 import { createAgentHostEnablePluginAction, removePluginWithMarketplaceOwnership } from '../agentPluginActions.js';
 import { INotificationService } from '../../../../../platform/notification/common/notification.js';
@@ -271,6 +274,7 @@ interface IMcpServerItemTemplateData {
 	readonly compatibilityMessageDisposables: DisposableStore;
 	compatibilityLink?: HTMLAnchorElement;
 	readonly sourcePath: HTMLElement;
+	readonly sourcePathLabel: MiddleEllipsisPathLabel;
 	readonly sourcePathHover: IManagedHover;
 	readonly description: HTMLElement;
 	readonly descriptionHover: IManagedHover;
@@ -338,10 +342,11 @@ export class McpServerItemRenderer extends Disposable implements IListRenderer<I
 		const name = DOM.append(nameRow, $('.mcp-server-name'));
 
 		const secondaryLine = DOM.append(details, $('.mcp-server-secondary-line'));
-		const sourcePath = DOM.append(secondaryLine, $('a.mcp-server-source-path'));
-		const sourcePathHover = templateDisposables.add(this.hoverService.setupManagedHover(getDefaultHoverDelegate('element'), sourcePath, ''));
 		const compatibilityMessage = DOM.append(secondaryLine, $('.mcp-server-compatibility-message'));
 		const compatibilityMessageDisposables = templateDisposables.add(new DisposableStore());
+		const sourcePath = DOM.append(secondaryLine, $('a.mcp-server-source-path'));
+		const sourcePathLabel = templateDisposables.add(new MiddleEllipsisPathLabel(sourcePath));
+		const sourcePathHover = templateDisposables.add(this.hoverService.setupManagedHover(getDefaultHoverDelegate('element'), sourcePath, ''));
 		const description = DOM.append(details, $('.mcp-server-description'));
 		const descriptionHover = templateDisposables.add(this.hoverService.setupManagedHover(getDefaultHoverDelegate('element'), description, ''));
 		const issue = DOM.append(details, $('.mcp-server-issue'));
@@ -358,6 +363,7 @@ export class McpServerItemRenderer extends Disposable implements IListRenderer<I
 			compatibilityMessage,
 			compatibilityMessageDisposables,
 			sourcePath,
+			sourcePathLabel,
 			sourcePathHover,
 			description,
 			descriptionHover,
@@ -403,8 +409,9 @@ export class McpServerItemRenderer extends Disposable implements IListRenderer<I
 		templateData.elementDisposables.clear();
 		this.renderIcon(element, templateData);
 		const source = getMcpEntrySource(element, this.labelService, this.agentPluginService, this.extensionsWorkbenchService, this._openPlugin);
-		if (source?.open) {
-			templateData.sourcePath.textContent = source.label;
+		if (source) {
+			templateData.secondaryLine.classList.add('has-source');
+			templateData.sourcePathLabel.set(source.label);
 			templateData.sourcePath.style.display = '';
 			templateData.sourcePathHover.update(source.hover);
 			templateData.sourcePath.classList.toggle('source-link', source.open !== undefined);
@@ -427,7 +434,8 @@ export class McpServerItemRenderer extends Disposable implements IListRenderer<I
 				templateData.sourcePath.removeAttribute('aria-label');
 			}
 		} else {
-			templateData.sourcePath.textContent = '';
+			templateData.secondaryLine.classList.remove('has-source');
+			templateData.sourcePathLabel.set('');
 			templateData.sourcePath.style.display = 'none';
 			templateData.sourcePathHover.update('');
 			templateData.sourcePath.classList.remove('source-link');
@@ -435,7 +443,7 @@ export class McpServerItemRenderer extends Disposable implements IListRenderer<I
 			templateData.sourcePath.removeAttribute('aria-label');
 		}
 		templateData.sourcePath.tabIndex = source?.open && rowKey === this._focusedRowKey ? 0 : -1;
-		this.renderDescription(templateData, element);
+		this.renderDescription(templateData, element, !!source);
 
 		if (element.type === 'builtin-item') {
 			templateData.container.classList.add('builtin');
@@ -640,8 +648,8 @@ export class McpServerItemRenderer extends Disposable implements IListRenderer<I
 		}
 	}
 
-	private renderDescription(template: IMcpServerItemTemplateData, element: IMcpInstalledEntry): void {
-		const description = element.type === 'session-server-item'
+	private renderDescription(template: IMcpServerItemTemplateData, element: IMcpInstalledEntry, hasSource: boolean): void {
+		const description = hasSource || element.type === 'session-server-item'
 			? ''
 			: element.type === 'builtin-item'
 				? element.description
@@ -655,7 +663,7 @@ export class McpServerItemRenderer extends Disposable implements IListRenderer<I
 		templateData.elementDisposables.clear();
 		templateData.sourcePathHover.hide();
 		templateData.sourcePathHover.update('');
-		templateData.sourcePath.textContent = '';
+		templateData.sourcePathLabel.set('');
 		templateData.descriptionHover.hide();
 		templateData.descriptionHover.update('');
 		templateData.issueHover.hide();
@@ -1153,7 +1161,7 @@ function getMcpEntrySource(element: IMcpInstalledEntry, labelService: ILabelServ
 function getMcpEntryLabelWithSource(element: IMcpInstalledEntry, labelService: ILabelService, agentPluginService: IAgentPluginService, extensionsWorkbenchService?: IExtensionsWorkbenchService): string {
 	const label = getMcpEntryLabel(element);
 	const source = getMcpEntrySource(element, labelService, agentPluginService, extensionsWorkbenchService);
-	return source?.ariaLabel
+	return source
 		? localize('mcpServerAriaLabelWithSource', "{0}, configured in {1}", label, source.label)
 		: label;
 }
@@ -1756,6 +1764,7 @@ export class McpListWidget extends Disposable {
 		@ILabelService private readonly labelService: ILabelService,
 		@IExtensionsWorkbenchService private readonly extensionsWorkbenchService: IExtensionsWorkbenchService,
 		@ILogService private readonly logService: ILogService,
+		@ITelemetryService private readonly telemetryService: ITelemetryService,
 	) {
 		super();
 		this.agentHostCustomizationsChanged = observableSignalFromEvent(this, this.agentHostCustomizationService.onDidChangeCustomizations);
@@ -2925,7 +2934,11 @@ export class McpListWidget extends Disposable {
 		button.label = localize('installing', "Installing...");
 		button.enabled = false;
 		try {
-			await this.mcpWorkbenchService.install(server);
+			await runCustomizationMarketplaceInstallWithTelemetry(
+				this.telemetryService,
+				getAvailableCustomizationMarketplaceInstallTelemetryContext('mcpServer'),
+				async () => { await this.mcpWorkbenchService.install(server); },
+			);
 			status(localize('mcpServerInstalledStatus', "{0} installed.", server.label));
 			await this.refresh();
 		} catch (error) {
